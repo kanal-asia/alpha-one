@@ -1,0 +1,616 @@
+import { create } from 'zustand'
+import {
+  type Chat,
+  type ChatMessage,
+  type ConnectionStatus,
+  type ExecutionLogEntry,
+  type ModeInfo,
+  type ModelInfo,
+  type OpenCodeSession,
+  type OpenCodeSessionState,
+  type OpenCodeSettings,
+  type WorkspaceInfo,
+} from '../types'
+import { openCodeService } from '../services/opencode-service'
+import { markModelUsed } from '../model-preferences'
+import { resolveRuntimeModel } from '@/features/runtime/contract'
+
+const DEFAULT_SETTINGS: OpenCodeSettings = {
+  executablePath: 'opencode',
+  workspacePath: 'C:\\dev\\alpha-workspace',
+  autoConnect: false,
+  autoReconnect: false,
+  streamingSpeed: 1,
+  defaultModel: '',
+  defaultMode: 'chat',
+  temperature: 0.7,
+  maxTokens: 4096,
+  autoSave: true,
+  streaming: true,
+  developerMode: false,
+}
+
+const CHATS_KEY = 'alpha-workspace:opencode-chats'
+const SETTINGS_KEY = 'alpha-workspace:opencode-settings'
+
+function loadChats(): Chat[] {
+  try {
+    const raw = localStorage.getItem(CHATS_KEY)
+    return raw ? (JSON.parse(raw) as Chat[]) : []
+  } catch {
+    return []
+  }
+}
+
+function saveChats(chats: Chat[]) {
+  try {
+    localStorage.setItem(CHATS_KEY, JSON.stringify(chats.slice(0, 50)))
+  } catch {
+    /* ignore */
+  }
+}
+
+function loadSettings(): Partial<OpenCodeSettings> {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY)
+    return raw ? (JSON.parse(raw) as Partial<OpenCodeSettings>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function newId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+}
+
+export interface OpenCodeSnapshot {
+  id: string
+  workspacePath: string
+  state: OpenCodeSessionState
+  startedAt?: string
+  endedAt?: string
+}
+
+interface OpenCodeStore {
+  settings: OpenCodeSettings
+  connection: ConnectionStatus
+  installed: boolean | null
+  session: OpenCodeSession | null
+  isStreaming: boolean
+  logs: ExecutionLogEntry[]
+  runtimeEvents: string[]
+  workspaces: WorkspaceInfo[]
+  history: OpenCodeSnapshot[]
+  models: ModelInfo[]
+  modes: ModeInfo[]
+  modelsLoaded: boolean
+
+  chats: Chat[]
+  activeChatId: string | null
+
+  abortController: AbortController | null
+
+  updateSettings: (patch: Partial<OpenCodeSettings>) => void
+  detect: () => Promise<void>
+  loadWorkspaces: () => Promise<void>
+  selectWorkspace: (path: string) => void
+  loadModels: () => Promise<void>
+  launch: () => Promise<void>
+  stop: () => Promise<void>
+  restart: () => Promise<void>
+
+  // Conversation
+  newChat: () => void
+  selectChat: (id: string) => void
+  renameChat: (id: string, title: string) => void
+  deleteChat: (id: string) => void
+  sendMessage: (prompt: string) => Promise<void>
+  stopGeneration: () => void
+  retryLast: () => Promise<void>
+  editAndResend: (messageId: string, text: string) => Promise<void>
+  continueGeneration: () => Promise<void>
+
+  clearConversation: () => void
+  clearLogs: () => void
+  pushLog: (level: ExecutionLogEntry['level'], message: string) => void
+  pushRuntimeEvent: (message: string) => void
+}
+
+function logEntry(
+  level: ExecutionLogEntry['level'],
+  message: string
+): ExecutionLogEntry {
+  return {
+    id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    level,
+    message,
+    createdAt: new Date().toISOString(),
+  }
+}
+
+function makeChat(firstPrompt?: string): Chat {
+  const now = new Date().toISOString()
+  return {
+    id: newId('chat'),
+    title: firstPrompt ? firstPrompt.slice(0, 40) : 'New Chat',
+    messages: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
+  settings: { ...DEFAULT_SETTINGS, ...loadSettings() },
+  connection: 'disconnected',
+  installed: null,
+  session: null,
+  isStreaming: false,
+  logs: [],
+  runtimeEvents: [],
+  workspaces: [],
+  history: [],
+  models: [],
+  modes: [],
+  modelsLoaded: false,
+
+  chats: loadChats(),
+  activeChatId: null,
+
+  abortController: null,
+
+  updateSettings: (patch) => {
+    set((state) => {
+      const settings = { ...state.settings, ...patch }
+      try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+      } catch {
+        /* ignore */
+      }
+      return { settings }
+    })
+  },
+
+  pushLog: (level, message) =>
+    set((state) => ({ logs: [logEntry(level, message), ...state.logs].slice(0, 200) })),
+
+  pushRuntimeEvent: (message) =>
+    set((state) => ({
+      runtimeEvents: [message, ...state.runtimeEvents].slice(0, 200),
+    })),
+
+  detect: async () => {
+    set({ connection: 'connecting' })
+    const installed = await openCodeService.detectInstallation(
+      get().settings.executablePath
+    )
+    set({ installed, connection: installed ? 'connected' : 'disconnected' })
+    get().pushLog(
+      installed ? 'info' : 'error',
+      installed
+        ? `OpenCode detected at "${get().settings.executablePath}".`
+        : `OpenCode not found at "${get().settings.executablePath}".`
+    )
+  },
+
+  loadWorkspaces: async () => {
+    const workspaces = await openCodeService.listWorkspaces()
+    set({ workspaces })
+  },
+
+  selectWorkspace: (path) => {
+    set((state) => ({ settings: { ...state.settings, workspacePath: path } }))
+    get().pushLog('info', `Workspace selected: ${path}`)
+  },
+
+  loadModels: async () => {
+    const [models, modes] = await Promise.all([
+      openCodeService.listModels(),
+      openCodeService.listModes(),
+    ])
+    const current = get().settings.defaultModel
+    const stillExists = models.some((m) => m.id === current)
+    let nextDefault = current
+    if (!stillExists) {
+      const firstFree = [...models]
+        .sort((a, b) => Number(b.free) - Number(a.free) || a.displayName.localeCompare(b.displayName))
+        .find((m) => m.free)
+      nextDefault = firstFree?.id ?? models[0]?.id ?? ''
+    }
+    if (nextDefault !== current) {
+      get().updateSettings({ defaultModel: nextDefault })
+    }
+    if (nextDefault) markModelUsed(nextDefault)
+    set({ models, modes, modelsLoaded: true })
+  },
+
+  launch: async () => {
+    if (get().session?.state === 'running') return
+    set({ connection: 'connecting' })
+    get().pushLog('info', 'Starting OpenCode session...')
+    const session = await openCodeService.launchSession(get().settings)
+    set({ session, connection: 'connected' })
+    get().pushLog('completed', 'Session ready. Real session ID will be assigned on first prompt.')
+  },
+
+  stop: async () => {
+    const { session } = get()
+    if (!session) return
+    get().abortController?.abort()
+    await openCodeService.stopSession(session.id)
+    const snapshot: OpenCodeSnapshot = {
+      id: session.id,
+      workspacePath: session.workspacePath,
+      state: 'stopped',
+      startedAt: session.startedAt,
+      endedAt: new Date().toISOString(),
+    }
+    set((state) => ({
+      session: { ...session, state: 'stopped', endedAt: snapshot.endedAt },
+      connection: 'disconnected',
+      history: [snapshot, ...state.history],
+    }))
+    get().pushLog('info', 'Session stopped.')
+  },
+
+  restart: async () => {
+    const { session } = get()
+    if (!session) return
+    get().pushLog('info', 'Restarting OpenCode session...')
+    const next = await openCodeService.restartSession(session.id, get().settings)
+    set({ session: next, connection: 'connected' })
+    get().pushLog('completed', `Session restarted (${next.id}).`)
+  },
+
+  newChat: () => {
+    const chat = makeChat()
+    set((state) => ({
+      chats: [chat, ...state.chats],
+      activeChatId: chat.id,
+      isStreaming: false,
+    }))
+    get().pushRuntimeEvent(`New chat created: ${chat.id}`)
+  },
+
+  selectChat: (id) => set({ activeChatId: id, isStreaming: false }),
+
+  renameChat: (id, title) => {
+    set((state) => ({
+      chats: state.chats.map((c) =>
+        c.id === id ? { ...c, title: title || c.title, updatedAt: new Date().toISOString() } : c
+      ),
+    }))
+    saveChats(get().chats)
+  },
+
+  deleteChat: (id) => {
+    const chatToDelete = get().chats.find((c) => c.id === id)
+    if (chatToDelete?.sessionId) {
+      get().pushLog('info', `[SESSION] DELETE chatId=${id} sessionId=${chatToDelete.sessionId}`)
+    }
+    set((state) => {
+      const chats = state.chats.filter((c) => c.id !== id)
+      const activeChatId =
+        state.activeChatId === id ? (chats[0]?.id ?? null) : state.activeChatId
+      return { chats, activeChatId }
+    })
+    saveChats(get().chats)
+  },
+
+  sendMessage: async (prompt) => {
+    if (!prompt.trim() || get().isStreaming) return
+    let { activeChatId, chats } = get()
+    if (!activeChatId) {
+      const chat = makeChat(prompt)
+      chat.messages.push({
+        id: newId('msg'),
+        role: 'user',
+        content: prompt,
+        createdAt: new Date().toISOString(),
+      })
+      chats = [chat, ...chats]
+      activeChatId = chat.id
+      set({ chats, activeChatId })
+    } else {
+      const updated = chats.map((c) =>
+        c.id === activeChatId
+          ? {
+              ...c,
+              title: c.messages.length === 0 ? prompt.slice(0, 40) : c.title,
+              messages: [
+                ...c.messages,
+                {
+                  id: newId('msg'),
+                  role: 'user' as const,
+                  content: prompt,
+                  createdAt: new Date().toISOString(),
+                },
+              ],
+              updatedAt: new Date().toISOString(),
+            }
+          : c
+      )
+      set({ chats: updated })
+    }
+
+    const assistantId = newId('msg')
+    const assistantMsg: ChatMessage = {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      createdAt: new Date().toISOString(),
+      status: 'streaming',
+      model: get().settings.defaultModel,
+      mode: get().settings.defaultMode,
+    }
+    set((state) => ({
+      chats: state.chats.map((c) =>
+        c.id === activeChatId ? { ...c, messages: [...c.messages, assistantMsg] } : c
+      ),
+      isStreaming: true,
+    }))
+
+    await ensureRunning(get)
+    const controller = new AbortController()
+    set({ abortController: controller })
+    const startedAt = Date.now()
+
+    // TASK-AI-033: Use the real CLI session ID stored on the chat, not the
+    // global session object. The global session.id is a client-generated fake.
+    // The chat.sessionId is the real ID extracted from CLI output events.
+    const activeChat = get().chats.find((c) => c.id === activeChatId)
+    const realSessionId = activeChat?.sessionId ?? ''
+
+    // Runtime Contract (TASK-AI-031): resolve the canonical RuntimeModel and
+    // pass it to the transport. The transport extracts `.id` — nothing else.
+    const selectedModel = resolveRuntimeModel(get().models, get().settings.defaultModel)
+    get().pushLog(
+      'info',
+      `[runtime-trace] selected model: ${JSON.stringify({
+        id: selectedModel.id,
+        provider: selectedModel.provider,
+        slug: selectedModel.slug,
+        displayName: selectedModel.displayName,
+        free: selectedModel.free,
+      })}`
+    )
+    get().pushLog(
+      'info',
+      `[runtime-trace] payload: ${JSON.stringify({ model: selectedModel.id, message: prompt })}`
+    )
+
+    const appendToken = (token: string) => {
+      set((state) => ({
+        chats: state.chats.map((c) =>
+          c.id === activeChatId
+            ? {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === assistantId ? { ...m, content: m.content + token } : m
+                ),
+              }
+            : c
+        ),
+      }))
+    }
+
+    // TASK-AI-033: Session recovery helper.
+    // If "Session not found" error is detected, retry once without session ID.
+    let sessionRetryAttempted = false
+
+    if (realSessionId) {
+      get().pushLog('info', `[SESSION] REUSE chatId=${activeChatId} sessionId=${realSessionId}`)
+    } else {
+      get().pushLog('info', `[SESSION] CREATE chatId=${activeChatId} sessionId=(new)`)
+    }
+
+    const executePrompt = async (sessionIdForPrompt: string) => {
+      await openCodeService.sendPrompt(
+        sessionIdForPrompt,
+        prompt,
+        (chunk) => {
+          if (chunk.type === 'token' && chunk.content) appendToken(chunk.content)
+          else if (chunk.type === 'session' && chunk.sessionId) {
+            // TASK-AI-033: Store the real CLI session ID on the chat.
+            // This is the session ID the CLI created, not a client-generated one.
+            get().pushLog('info', `[SESSION] CREATE chatId=${activeChatId} sessionId=${chunk.sessionId}`)
+            set((state) => ({
+              chats: state.chats.map((c) =>
+                c.id === activeChatId ? { ...c, sessionId: chunk.sessionId } : c
+              ),
+            }))
+          } else if (chunk.type === 'done') {
+            get().pushLog('completed', `[runtime-trace] done: model=${selectedModel.id}`)
+            set((state) => ({
+              chats: state.chats.map((c) =>
+                c.id === activeChatId
+                  ? {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === assistantId
+                          ? {
+                              ...m,
+                              status: 'done',
+                              durationMs: Date.now() - startedAt,
+                              tokens: estimateTokens(m.content),
+                            }
+                          : m
+                      ),
+                      updatedAt: new Date().toISOString(),
+                    }
+                  : c
+              ),
+              isStreaming: false,
+            }))
+            get().pushRuntimeEvent('Assistant response completed.')
+          } else if (chunk.type === 'warning') {
+            // TASK-AI-032: Warnings are diagnostics, not errors.
+            // A late exit after successful completion is logged but does NOT
+            // overwrite the message status. The response is already complete.
+            get().pushLog('info', `[runtime-warning] ${chunk.error ?? 'Unknown warning'}`)
+          } else if (chunk.type === 'error') {
+            // TASK-AI-033: Session recovery — detect "Session not found" and retry once.
+            if (chunk.error === 'Session not found' && !sessionRetryAttempted) {
+              sessionRetryAttempted = true
+              get().pushLog('info', `[SESSION] INVALIDATE chatId=${activeChatId} sessionId=${sessionIdForPrompt} reason="Session not found"`)
+              get().pushLog('info', `[SESSION] RETRY oldSession=${sessionIdForPrompt} newSession=(new)`)
+              // Invalidate session on chat
+              set((state) => ({
+                chats: state.chats.map((c) =>
+                  c.id === activeChatId ? { ...c, sessionId: undefined } : c
+                ),
+              }))
+              // Reset streaming state and retry with empty session ID
+              set({ isStreaming: false })
+              executePrompt('').catch(() => { /* recursive call, errors handled inside */ })
+              return
+            }
+
+            get().pushLog('error', `[runtime-trace] error: model=${selectedModel.id} ${chunk.error ?? ''}`)
+            // TASK-AI-032: Guard against late exit overwriting a completed response.
+            // Once a message has status 'done', it must not be converted to 'error'.
+            set((state) => ({
+              chats: state.chats.map((c) =>
+                c.id === activeChatId
+                  ? {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === assistantId
+                          ? {
+                              ...m,
+                              // Only set error status if not already completed
+                              status: m.status === 'done' ? 'done' : 'error',
+                              content: m.status === 'done' ? m.content : (m.content || chunk.error || 'Error'),
+                            }
+                          : m
+                      ),
+                    }
+                  : c
+              ),
+              isStreaming: false,
+            }))
+          }
+        },
+        controller.signal,
+        selectedModel
+      )
+    }
+
+    try {
+      await executePrompt(realSessionId)
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        set((state) => ({
+          chats: state.chats.map((c) =>
+            c.id === activeChatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) =>
+                    m.id === assistantId
+                      ? { ...m, status: 'error', content: String((err as Error).message) }
+                      : m
+                  ),
+                }
+              : c
+          ),
+          isStreaming: false,
+        }))
+      }
+    } finally {
+      set({ abortController: null })
+      saveChats(get().chats)
+    }
+  },
+
+  stopGeneration: () => {
+    get().abortController?.abort()
+    set({ isStreaming: false })
+    set((state) => ({
+      chats: state.chats.map((c) =>
+        c.id === state.activeChatId
+          ? {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.status === 'streaming' ? { ...m, status: 'cancelled' } : m
+              ),
+            }
+          : c
+      ),
+    }))
+    get().pushLog('info', 'Generation stopped.')
+  },
+
+  retryLast: async () => {
+    const chat = get().chats.find((c) => c.id === get().activeChatId)
+    if (!chat) return
+    const lastUser = [...chat.messages].reverse().find((m) => m.role === 'user')
+    if (lastUser) await get().editAndResend(lastUser.id, lastUser.content)
+  },
+
+  editAndResend: async (messageId, text) => {
+    const { activeChatId } = get()
+    if (!activeChatId) return
+    // Remove this message and everything after it, then append the edited user
+    // message and regenerate.
+    set((state) => ({
+      chats: state.chats.map((c) => {
+        if (c.id !== activeChatId) return c
+        const idx = c.messages.findIndex((m) => m.id === messageId)
+        if (idx === -1) return c
+        const kept = c.messages.slice(0, idx)
+        return {
+          ...c,
+          messages: [
+            ...kept,
+            {
+              id: newId('msg'),
+              role: 'user' as const,
+              content: text,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          updatedAt: new Date().toISOString(),
+        }
+      }),
+    }))
+    await get().sendMessage(text)
+  },
+
+  continueGeneration: async () => {
+    const chat = get().chats.find((c) => c.id === get().activeChatId)
+    if (!chat) return
+    await get().sendMessage('Please continue.')
+  },
+
+  clearConversation: () => {
+    set((state) => ({
+      chats: state.chats.map((c) =>
+        c.id === state.activeChatId ? { ...c, messages: [] } : c
+      ),
+    }))
+    saveChats(get().chats)
+  },
+
+  clearLogs: () => set({ logs: [], runtimeEvents: [] }),
+}))
+
+async function ensureRunning(get: () => OpenCodeStore) {
+  if (get().session?.state === 'running') return
+  await get().launch()
+}
+
+function estimateTokens(text: string): number {
+  if (!text) return 0
+  return Math.ceil(text.trim().split(/\s+/).length * 1.3)
+}
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,336 @@
+import {
+  type ModeInfo,
+  type ModelInfo,
+  type OpenCodeSession,
+  type OpenCodeSettings,
+  type StreamChunk,
+  type WorkspaceInfo,
+  type ProviderSummary,
+} from '../types'
+import type { RuntimeModel } from '@/features/runtime/contract'
+
+/**
+ * Transport abstraction for talking to an OpenCode backend.
+ *
+ * The UI never communicates directly with OpenCode. It goes through this
+ * interface so the underlying mechanism (CLI, HTTP, or IPC) can be swapped
+ * without touching components. The HTTPTransport communicates with the
+ * OpenCode API server (Express + child_process).
+ */
+export interface OpenCodeTransport {
+  healthCheck(): Promise<boolean>
+  detectInstallation(executablePath: string): Promise<boolean>
+  launchSession(settings: OpenCodeSettings): Promise<OpenCodeSession>
+  stopSession(sessionId: string): Promise<void>
+  restartSession(sessionId: string, settings: OpenCodeSettings): Promise<OpenCodeSession>
+  listWorkspaces(): Promise<WorkspaceInfo[]>
+  listModels(): Promise<ModelInfo[]>
+  listModes(): Promise<ModeInfo[]>
+  sendPrompt(
+    sessionId: string,
+    prompt: string,
+    onChunk: (chunk: StreamChunk) => void,
+    signal?: AbortSignal,
+    model?: RuntimeModel
+  ): Promise<void>
+  listProviders(): Promise<ProviderSummary[]>
+}
+
+const API_BASE = '/api/opencode'
+
+function parseSSEBlock(block: string): { event: string; data: unknown } | null {
+  let event = 'message'
+  let dataLine = ''
+
+  for (const raw of block.split('\n')) {
+    const line = raw.trim()
+    if (line.startsWith('event:')) {
+      event = line.slice(6).trim()
+    } else if (line.startsWith('data:')) {
+      dataLine = line.slice(5).trim()
+    }
+  }
+
+  if (!dataLine) return null
+  try {
+    const data = JSON.parse(dataLine)
+    return { event, data }
+  } catch {
+    return null
+  }
+}
+
+export class HTTPTransport implements OpenCodeTransport {
+  private baseUrl: string
+
+  constructor(baseUrl = '') {
+    this.baseUrl = baseUrl
+  }
+
+  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const res = await fetch(`${this.baseUrl}${API_BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json', ...options.headers },
+      ...options,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.error ?? `HTTP ${res.status}`)
+    }
+    return res.json()
+  }
+
+  async healthCheck(): Promise<boolean> {
+    const res = await this.request<{ cliReachable: boolean }>('/health')
+    return res.cliReachable === true
+  }
+
+  async detectInstallation(_executablePath: string): Promise<boolean> {
+    const res = await this.request<{ cliReachable: boolean }>('/health')
+    return res.cliReachable === true
+  }
+
+  async launchSession(settings: OpenCodeSettings): Promise<OpenCodeSession> {
+    // TASK-AI-033: Session is managed by the CLI, not by the client.
+    // We just verify health here. The real session ID is extracted from
+    // CLI output events when the first prompt is sent.
+    const healthy = await this.healthCheck()
+    if (!healthy) throw new Error('OpenCode CLI not available')
+    return {
+      id: '',  // No fake session ID — real ID comes from CLI output
+      workspacePath: settings.workspacePath,
+      state: 'running',
+      startedAt: new Date().toISOString(),
+    }
+  }
+
+  async stopSession(_sessionId: string): Promise<void> {
+    // No-op for HTTP transport; server manages process lifecycle per request
+  }
+
+  async restartSession(_sessionId: string, settings: OpenCodeSettings): Promise<OpenCodeSession> {
+    return this.launchSession(settings)
+  }
+
+  async listWorkspaces(): Promise<WorkspaceInfo[]> {
+    // Workspaces are managed client-side; return empty for now
+    return []
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    const res = await this.request<{ models: RuntimeModel[] }>('/models')
+    return res.models.map((m) => ({
+      ...m,
+      availability:
+        m.availability === 'available'
+          ? 'available'
+          : m.availability === 'unavailable'
+            ? 'unavailable'
+            : 'limited',
+      latency:
+        m.latency === 'low'
+          ? 'low'
+          : m.latency === 'high'
+            ? 'high'
+            : 'medium',
+    }))
+  }
+
+  async listModes(): Promise<ModeInfo[]> {
+    await this.request<{ models: RuntimeModel[] }>('/models')
+    // Modes are not in models response; return defaults
+    return [
+      { id: 'chat', name: 'Chat', description: 'Conversational coding assistance.' },
+      { id: 'agent', name: 'Agent', description: 'Autonomous multi-step task execution.' },
+      { id: 'plan', name: 'Plan', description: 'Propose a plan before making changes.' },
+      { id: 'debug', name: 'Debug', description: 'Focused on diagnosing failures.' },
+    ]
+  }
+
+  async listProviders(): Promise<ProviderSummary[]> {
+    const res = await this.request<{ providers: ProviderSummary[] }>('/providers')
+    return res.providers
+  }
+
+  /* eslint-disable no-console -- TEMPORARY debug logging for TASK instrumentation */
+  async sendPrompt(
+    sessionId: string,
+    prompt: string,
+    onChunk: (chunk: StreamChunk) => void,
+    signal?: AbortSignal,
+    model?: RuntimeModel
+  ): Promise<void> {
+    const modelId = model?.id ?? ''
+    // TASK-AI-033: Only pass session ID to server if it looks like a real CLI session ID.
+    // Client-generated IDs (session-*) should NOT be sent to the CLI.
+    const realSessionId = sessionId && !sessionId.startsWith('session-') ? sessionId : ''
+    const res = await fetch(`${this.baseUrl}${API_BASE}/chat/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: modelId, message: prompt, sessionId: realSessionId || undefined, attachments: [] }),
+      signal,
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      onChunk({ type: 'error', error: err.error ?? `HTTP ${res.status}` })
+      return
+    }
+
+    const reader = res.body?.getReader()
+    if (!reader) {
+      onChunk({ type: 'error', error: 'No response body' })
+      return
+    }
+
+    let buffer = ''
+    let chunkCount = 0
+    let tokenEvents = 0
+    let textTokens = 0
+    let totalText = ''
+    const decoder = new TextDecoder()
+
+    // TASK-AI-032: Runtime success contract.
+    // A successful execution is defined by: received text AND received step_finish.
+    // Exit code alone is not sufficient to determine success or failure.
+    let stepFinishReceived = false
+    let responseCompleted = false
+
+    console.log('[OC-TRANSPORT] STREAM START', { modelId })
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const chunk = decoder.decode(value)
+      buffer += chunk
+      chunkCount++
+
+      const blocks = buffer.split('\n\n')
+      buffer = blocks.pop() ?? ''
+
+      for (const block of blocks) {
+        if (!block.trim()) continue
+        const parsed = parseSSEBlock(block)
+        if (!parsed) {
+          console.log('[OC-TRANSPORT] SSE PARSE FAILED', { block: block.slice(0, 200) })
+          continue
+        }
+
+        tokenEvents++
+
+        switch (parsed.event) {
+          case 'token': {
+            const evt = parsed.data as Record<string, unknown>
+            const part = evt.part as Record<string, unknown> | undefined
+            const evtType = String(evt.type ?? '')
+            const partText = typeof part?.text === 'string' ? part.text : ''
+            const topText = typeof evt.text === 'string' ? evt.text : ''
+            const text = topText || partText
+
+            console.log('[OC-TRANSPORT] TOKEN', {
+              eventType: evtType,
+              hasTopText: !!topText,
+              hasPartText: !!partText,
+              extractedText: text.slice(0, 80),
+              textLength: text.length,
+            })
+
+            if (text) {
+              textTokens++
+              totalText += text
+              onChunk({ type: 'token', content: text })
+            }
+            break
+          }
+          case 'step_finish':
+            stepFinishReceived = true
+            if (totalText.length > 0) {
+              responseCompleted = true
+            }
+            console.log('[OC-TRANSPORT] STEP_FINISH', {
+              tokenEvents,
+              textTokens,
+              totalTextLength: totalText.length,
+              responseCompleted,
+            })
+            onChunk({ type: 'done' })
+            break
+          case 'error': {
+            const { message } = parsed.data as { message: string }
+            console.log('[OC-TRANSPORT] ERROR EVENT', { message, responseCompleted })
+            // TASK-AI-032: Only emit error if response has NOT already completed.
+            if (!responseCompleted) {
+              onChunk({ type: 'error', error: message })
+            } else {
+              console.log('[OC-TRANSPORT] ERROR SUPPRESSED (response already completed)', { message })
+            }
+            break
+          }
+          case 'exit': {
+            const { code } = parsed.data as { code: number }
+            console.log('[OC-TRANSPORT] EXIT EVENT', {
+              code,
+              tokenEvents,
+              textTokens,
+              totalTextLength: totalText.length,
+              stepFinishReceived,
+              responseCompleted,
+            })
+            // TASK-AI-032: New decision model.
+            // SUCCESS: responseCompleted = true → ignore non-zero exit code.
+            // FAILURE: responseCompleted = false AND code !== 0 → emit error.
+            // DIAGNOSTIC: responseCompleted = true AND code !== 0 → emit warning (not error).
+            if (responseCompleted) {
+              if (code !== 0) {
+                // Late exit after successful completion — diagnostic warning only.
+                onChunk({
+                  type: 'warning',
+                  error: `Process exited with code ${code} after successful completion.`,
+                })
+              }
+              // Response is complete. Exit event is informational only.
+            } else if (code !== 0) {
+              // Response incomplete and process failed — emit error.
+              onChunk({ type: 'error', error: `OpenCode exited with code ${code}` })
+            }
+            break
+          }
+          case 'session': {
+            const { sessionId: realSessionId } = parsed.data as { sessionId: string }
+            console.log('[OC-TRANSPORT] SESSION EVENT', { realSessionId })
+            onChunk({ type: 'session', sessionId: realSessionId })
+            break
+          }
+          case 'stderr': {
+            const { data } = parsed.data as { data: string }
+            console.log('[OC-TRANSPORT] STDERR', { data: data.slice(0, 200) })
+            // TASK-AI-033: Detect "Session not found" errors from CLI stderr.
+            // This indicates the session ID is invalid. The store will handle retry.
+            if (data.includes('Session not found')) {
+              onChunk({ type: 'error', error: 'Session not found' })
+            }
+            break
+          }
+          case 'cancelled':
+            console.log('[OC-TRANSPORT] CANCELLED')
+            if (!responseCompleted) {
+              onChunk({ type: 'error', error: 'Request cancelled' })
+            }
+            break
+          default:
+            console.log('[OC-TRANSPORT] UNKNOWN EVENT', { event: parsed.event })
+        }
+      }
+    }
+
+    console.log('[OC-TRANSPORT] STREAM END', {
+      chunkCount,
+      tokenEvents,
+      textTokens,
+      totalTextLength: totalText.length,
+      stepFinishReceived,
+      responseCompleted,
+    })
+  }
+  /* eslint-enable no-console */
+}

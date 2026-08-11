@@ -6,7 +6,9 @@
  */
 import { Router, type Request, type Response } from 'express'
 import type { WorkspaceService } from '../workspace/service'
-import { buildPresentation, type PresentationInput } from '../../business/presentation/pptx'
+import { buildPresentation } from '../../business/presentation/pptx'
+import { generatePresentationContent, AiPresentationError } from '../../business/presentation/ai-engine'
+import type { PresentationInput } from '../../business/presentation/schema'
 
 export function createWorkspaceRouter(service: WorkspaceService): Router {
   const router = Router()
@@ -139,13 +141,22 @@ export function createWorkspaceRouter(service: WorkspaceService): Router {
         slideCount: Number(slideCount) || 8,
         content: String(content || ''),
       }
-      const bytes = await buildPresentation(input)
+
+      // Generate presentation content using AI
+      const presentationContent = await generatePresentationContent(input)
+
+      // Generate PPTX from AI-generated content
+      const bytes = await buildPresentation(presentationContent)
       const filename = `${title.replace(/[^a-zA-Z0-9]/g, '_')}.pptx`
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
       res.send(Buffer.from(bytes))
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to generate presentation.' })
+      if (err instanceof AiPresentationError) {
+        res.status(400).json({ error: err.message, code: err.code })
+      } else {
+        res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to generate presentation.' })
+      }
     }
   })
 

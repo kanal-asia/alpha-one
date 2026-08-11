@@ -1,71 +1,71 @@
-import { Outlet } from '@tanstack/react-router'
-import { Monitor, Bell, Palette, Wrench, UserCog } from 'lucide-react'
-import { Separator } from '@/components/ui/separator'
-import { ConfigDrawer } from '@/components/config-drawer'
-import { Header } from '@/components/layout/header'
+import { ShieldCheck, Sparkles, Wrench } from 'lucide-react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
 import { Main } from '@/components/layout/main'
-import { ProfileDropdown } from '@/components/profile-dropdown'
-import { Search } from '@/components/search'
-import { ThemeSwitch } from '@/components/theme-switch'
-import { SidebarNav } from './components/sidebar-nav'
-
-const sidebarNavItems = [
-  {
-    title: 'Profile',
-    href: '/settings',
-    icon: <UserCog size={18} />,
-  },
-  {
-    title: 'Account',
-    href: '/settings/account',
-    icon: <Wrench size={18} />,
-  },
-  {
-    title: 'Appearance',
-    href: '/settings/appearance',
-    icon: <Palette size={18} />,
-  },
-  {
-    title: 'Notifications',
-    href: '/settings/notifications',
-    icon: <Bell size={18} />,
-  },
-  {
-    title: 'Display',
-    href: '/settings/display',
-    icon: <Monitor size={18} />,
-  },
-]
+import { PageHeader } from '@/components/page-header'
+import { Switch } from '@/components/ui/switch'
+import { useDeveloperMode } from '@/context/developer-mode-provider'
+import { GoogleConnectionCard } from '@/features/google'
 
 export function Settings() {
+  const { developerMode, setDeveloperMode } = useDeveloperMode()
+
   return (
     <>
-      {/* ===== Top Heading ===== */}
-      <Header>
-        <Search className='me-auto' />
-        <ThemeSwitch />
-        <ConfigDrawer />
-        <ProfileDropdown />
-      </Header>
-
-      <Main fixed>
-        <div className='space-y-0.5'>
-          <h1 className='text-2xl font-bold tracking-tight md:text-3xl'>
-            Settings
-          </h1>
-          <p className='text-muted-foreground'>
-            Manage your account settings and set e-mail preferences.
+      <PageHeader />
+      <Main>
+        <div className='mb-4'>
+          <h1 className='text-2xl font-bold tracking-tight'>Settings</h1>
+          <p className='text-sm text-muted-foreground'>
+            Configure your workspace, preferences and access levels.
           </p>
         </div>
-        <Separator className='my-4 lg:my-6' />
-        <div className='flex flex-1 flex-col space-y-2 overflow-hidden md:space-y-2 lg:flex-row lg:space-y-0 lg:space-x-12'>
-          <aside className='top-0 lg:sticky lg:w-1/5'>
-            <SidebarNav items={sidebarNavItems} />
-          </aside>
-          <div className='flex w-full overflow-y-hidden p-1'>
-            <Outlet />
-          </div>
-        </div>
+
+        <GoogleConnectionCard />
+
+        <Card className='mt-4'>
+          <CardHeader>
+            <CardTitle className='flex items-center gap-2'>
+              <Wrench className='size-4' />
+              Developer Mode
+            </CardTitle>
+            <CardDescription>
+              Reveal the underlying platform components — services, engines, registries,
+              health and diagnostics. For developers and administrators only.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className='flex items-center justify-between gap-4'>
+            <div className='space-y-1'>
+              <Label htmlFor='developer-mode'>Enable Developer Mode</Label>
+              <p className='text-sm text-muted-foreground'>
+                When enabled, the sidebar shows the Platform section with the engineering
+                tools. When disabled, only business tools remain visible.
+              </p>
+            </div>
+            <Switch
+              id='developer-mode'
+              checked={developerMode}
+              onCheckedChange={setDeveloperMode}
+              aria-label='Toggle developer mode'
+            />
+          </CardContent>
+        </Card>
+
+        <Card className='mt-4'>
+          <CardHeader>
+            <CardTitle className='flex items-center gap-2'>
+              <ShieldCheck className='size-4' />
+              Workspace
+            </CardTitle>
+            <CardDescription>
+              General workspace preferences and integrations.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className='flex items-center gap-2 text-sm text-muted-foreground'>
+            <Sparkles className='size-4' />
+            Alpha Workspace runs locally. Your data and results stay on this device.
+          </CardContent>
+        </Card>
       </Main>
     </>
   )

@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react'
+import { type ReactNode, useState, useCallback } from 'react'
 import { Link, useLocation } from '@tanstack/react-router'
 import { ChevronRight } from 'lucide-react'
 import {
@@ -33,9 +33,48 @@ import {
   type NavGroup as NavGroupProps,
 } from './types'
 
+const COLLAPSED_STATE_KEY = 'alpha-workspace:sidebar-collapsed'
+
+function loadCollapsedState(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_STATE_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveCollapsedState(state: Record<string, boolean>) {
+  try {
+    localStorage.setItem(COLLAPSED_STATE_KEY, JSON.stringify(state))
+  } catch {
+    /* ignore */
+  }
+}
+
 export function NavGroup({ title, items }: NavGroupProps) {
   const { state, isMobile } = useSidebar()
   const href = useLocation({ select: (location) => location.href })
+
+  const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>(
+    loadCollapsedState
+  )
+
+  const setCollapsed = useCallback(
+    (groupTitle: string, collapsed: boolean) => {
+      setCollapsedMap((prev) => {
+        const next = { ...prev, [groupTitle]: collapsed }
+        saveCollapsedState(next)
+        return next
+      })
+    },
+    []
+  )
+
+  // Compute default open: if we have saved state use it, otherwise default to
+  // true (expanded) unless the group contains the active link.
+  const isCollapsed = collapsedMap[title] ?? false
+
   return (
     <SidebarGroup>
       <SidebarGroupLabel>{title}</SidebarGroupLabel>
@@ -51,7 +90,15 @@ export function NavGroup({ title, items }: NavGroupProps) {
               <SidebarMenuCollapsedDropdown key={key} item={item} href={href} />
             )
 
-          return <SidebarMenuCollapsible key={key} item={item} href={href} />
+          return (
+            <SidebarMenuCollapsible
+              key={key}
+              item={item}
+              href={href}
+              initialOpen={!isCollapsed || checkIsActive(href, item, true)}
+              onToggle={(collapsed) => setCollapsed(title, collapsed)}
+            />
+          )
         })}
       </SidebarMenu>
     </SidebarGroup>
@@ -84,15 +131,23 @@ function SidebarMenuLink({ item, href }: { item: NavLink; href: string }) {
 function SidebarMenuCollapsible({
   item,
   href,
+  initialOpen,
+  onToggle,
 }: {
   item: NavCollapsible
   href: string
+  initialOpen: boolean
+  onToggle: (collapsed: boolean) => void
 }) {
   const { setOpenMobile } = useSidebar()
+
   return (
     <Collapsible
       asChild
-      defaultOpen={checkIsActive(href, item, true)}
+      defaultOpen={initialOpen}
+      onOpenChange={(nextOpen) => {
+        onToggle(!nextOpen)
+      }}
       className='group/collapsible'
     >
       <SidebarMenuItem>

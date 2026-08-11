@@ -1,205 +1,168 @@
 import {
-  Construction,
+  Activity,
+  Archive,
+  Boxes,
+  Calendar,
+  Clock,
+  Cpu,
+  FileSpreadsheet,
+  FileText,
+  Folder,
+  FolderOpen,
+  GitBranch,
   LayoutDashboard,
-  Monitor,
-  Bug,
-  ListTodo,
-  FileX,
-  HelpCircle,
-  Lock,
-  Bell,
-  Package,
-  Palette,
-  ServerOff,
+  Mail,
+  Presentation,
+  Server,
   Settings,
+  Sparkles,
+  Terminal,
   Wrench,
-  UserCog,
-  UserX,
-  Users,
-  MessagesSquare,
-  ShieldCheck,
-  AudioWaveform,
-  Command,
-  GalleryVerticalEnd,
 } from 'lucide-react'
-import { ClerkLogo } from '@/assets/clerk-logo'
 import { type SidebarData } from '../types'
+import { WorkspaceLogo } from './workspace-logo'
 
 export const sidebarData: SidebarData = {
   user: {
-    name: 'satnaing',
-    email: 'satnaingdev@gmail.com',
-    avatar: '/avatars/shadcn.jpg',
+    name: 'Workspace User',
+    email: 'local@workspace',
+    avatar: '',
   },
   teams: [
     {
-      name: 'Shadcn Admin',
-      logo: Command,
-      plan: 'Vite + ShadcnUI',
-    },
-    {
-      name: 'Acme Inc',
-      logo: GalleryVerticalEnd,
-      plan: 'Enterprise',
-    },
-    {
-      name: 'Acme Corp.',
-      logo: AudioWaveform,
-      plan: 'Startup',
+      name: 'Alpha Workspace',
+      logo: WorkspaceLogo,
+      plan: 'Local Workspace',
     },
   ],
   navGroups: [
     {
-      title: 'General',
+      title: 'Main',
       items: [
         {
-          title: 'Dashboard',
+          title: 'Home',
           url: '/',
           icon: LayoutDashboard,
         },
+      ],
+    },
+    {
+      title: 'Google Workspace',
+      items: [
         {
-          title: 'Tasks',
-          url: '/tasks',
-          icon: ListTodo,
+          title: 'Drive',
+          url: '/google/drive',
+          icon: FolderOpen,
         },
         {
-          title: 'Apps',
-          url: '/apps',
-          icon: Package,
+          title: 'Docs',
+          url: '/google/docs',
+          icon: FileText,
         },
         {
-          title: 'Chats',
-          url: '/chats',
-          badge: '3',
-          icon: MessagesSquare,
+          title: 'Sheets',
+          url: '/google/sheets',
+          icon: FileSpreadsheet,
         },
         {
-          title: 'Users',
-          url: '/users',
-          icon: Users,
+          title: 'Slides',
+          url: '/google/slides',
+          icon: Presentation,
         },
         {
-          title: 'Secured by Clerk',
-          icon: ClerkLogo,
-          items: [
-            {
-              title: 'Sign In',
-              url: '/clerk/sign-in',
-            },
-            {
-              title: 'Sign Up',
-              url: '/clerk/sign-up',
-            },
-            {
-              title: 'User Management',
-              url: '/clerk/user-management',
-            },
-          ],
+          title: 'Calendar',
+          url: '/google/calendar',
+          icon: Calendar,
+        },
+        {
+          title: 'Gmail',
+          url: '/google/gmail',
+          icon: Mail,
         },
       ],
     },
     {
-      title: 'Pages',
+      title: 'Workspace',
       items: [
         {
-          title: 'Auth',
-          icon: ShieldCheck,
-          items: [
-            {
-              title: 'Sign In',
-              url: '/sign-in',
-            },
-            {
-              title: 'Sign In (2 Col)',
-              url: '/sign-in-2',
-            },
-            {
-              title: 'Sign Up',
-              url: '/sign-up',
-            },
-            {
-              title: 'Forgot Password',
-              url: '/forgot-password',
-            },
-            {
-              title: 'OTP',
-              url: '/otp',
-            },
-          ],
+          title: 'Files',
+          url: '/workspace/artifacts',
+          icon: Folder,
         },
         {
-          title: 'Errors',
-          icon: Bug,
-          items: [
-            {
-              title: 'Unauthorized',
-              url: '/errors/unauthorized',
-              icon: Lock,
-            },
-            {
-              title: 'Forbidden',
-              url: '/errors/forbidden',
-              icon: UserX,
-            },
-            {
-              title: 'Not Found',
-              url: '/errors/not-found',
-              icon: FileX,
-            },
-            {
-              title: 'Internal Server Error',
-              url: '/errors/internal-server-error',
-              icon: ServerOff,
-            },
-            {
-              title: 'Maintenance Error',
-              url: '/errors/maintenance-error',
-              icon: Construction,
-            },
-          ],
+          title: 'Activity',
+          url: '/workspace/history',
+          icon: Clock,
         },
-      ],
-    },
-    {
-      title: 'Other',
-      items: [
         {
           title: 'Settings',
+          url: '/settings',
           icon: Settings,
-          items: [
-            {
-              title: 'Profile',
-              url: '/settings',
-              icon: UserCog,
-            },
-            {
-              title: 'Account',
-              url: '/settings/account',
-              icon: Wrench,
-            },
-            {
-              title: 'Appearance',
-              url: '/settings/appearance',
-              icon: Palette,
-            },
-            {
-              title: 'Notifications',
-              url: '/settings/notifications',
-              icon: Bell,
-            },
-            {
-              title: 'Display',
-              url: '/settings/display',
-              icon: Monitor,
-            },
-          ],
+        },
+      ],
+    },
+    {
+      title: 'Platform',
+      developerOnly: true,
+      items: [
+        {
+          title: 'SDK Registry',
+          url: '/workspace/sdks',
+          icon: Boxes,
         },
         {
-          title: 'Help Center',
-          url: '/help-center',
-          icon: HelpCircle,
+          title: 'Workflow Registry',
+          url: '/workspace/workflows',
+          icon: GitBranch,
+        },
+        {
+          title: 'Operation Registry',
+          url: '/workspace/operations',
+          icon: Cpu,
+        },
+        {
+          title: 'Artifact Registry',
+          url: '/workspace/artifacts',
+          icon: Archive,
+        },
+        {
+          title: 'Runtime',
+          url: '/workspace/runtime',
+          icon: Server,
+        },
+        {
+          title: 'Kernel',
+          url: '/workspace',
+          icon: Activity,
+        },
+        {
+          title: 'Health',
+          url: '/workspace/health',
+          icon: Activity,
+        },
+        {
+          title: 'Diagnostics',
+          url: '/workspace/history',
+          icon: Terminal,
+        },
+        {
+          title: 'Developer Tools',
+          url: '/tools',
+          icon: Wrench,
         },
       ],
     },
   ],
+  /** Bottom-anchored AI Assistant entry — rendered separately from collapsible groups. */
+  aiAssistant: {
+    title: 'AI Assistant',
+    url: '/workspace/assistant',
+    icon: Sparkles,
+  },
+}
+
+/** Nav groups visible for a given mode. Hides the engineer-facing Platform group unless Developer Mode is on. */
+export function navGroupsForMode(developerMode: boolean) {
+  if (developerMode) return sidebarData.navGroups
+  return sidebarData.navGroups.filter((group) => !group.developerOnly)
 }

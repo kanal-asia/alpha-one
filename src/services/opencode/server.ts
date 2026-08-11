@@ -187,6 +187,9 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
   let tokenCount = 0;
   let textExtracted = "";
   let extractedSessionId: string | null = null;
+  const processStart = Date.now();
+  let firstTextAt: number | null = null;
+  let stepFinishAt: number | null = null;
   const timeout = setTimeout(() => {
     if (settled) return;
     settled = true;
@@ -229,7 +232,10 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
       }
 
       tokenCount++;
-      if (extracted) textExtracted += extracted;
+      if (extracted) {
+        textExtracted += extracted;
+        if (firstTextAt === null) firstTextAt = Date.now();
+      }
 
       if (process.env.NODE_ENV !== "test") {
         console.log("[API] PARSED EVENT", {
@@ -240,13 +246,25 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
           extractedText: extracted.slice(0, 100),
           tokenCount,
           textExtractedLength: textExtracted.length,
+          latencyMs: Date.now() - processStart,
         });
       }
 
-      sendEvent("token", evt);
-
+      // TASK-AI-034: Prevent duplicate step_finish events.
+      // step_finish is its own canonical SSE event — do not also wrap it as a
+      // "token" event. The frontend only uses the "step_finish" event.
       if (evtType === "step-finish" || evtType === "step_finish") {
+        stepFinishAt = Date.now();
         sendEvent("step_finish", evt);
+        if (process.env.NODE_ENV !== "test") {
+          console.log("[API] STEP_FINISH", {
+            pid: child?.pid,
+            latencyMs: stepFinishAt - processStart,
+            firstTextLatencyMs: firstTextAt ? stepFinishAt - firstTextAt : null,
+          });
+        }
+      } else {
+        sendEvent("token", evt);
       }
     }
   });
@@ -254,6 +272,10 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
   child.stderr?.on("data", (chunk: Buffer) => {
     const text = chunk.toString();
     if (process.env.NODE_ENV !== "test") console.log("[API] STDERR", { pid: child?.pid, data: text.slice(0, 500) });
+    // TASK-AI-034: Suppress the known non-actionable NO_COLOR / FORCE_COLOR warning.
+    // This is a diagnostic warning from chalk/colorette, not an AI response error.
+    // The env vars are intentionally set to control TUI behavior.
+    if (/NO_COLOR.*FORCE_COLOR|FORCE_COLOR.*NO_COLOR/.test(text)) return;
     sendEvent("stderr", { data: text });
   });
 
@@ -308,6 +330,9 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
         textExtractedPreview: textExtracted.slice(0, 200),
         exitEventReceived,
         extractedSessionId,
+        totalLatencyMs: Date.now() - processStart,
+        firstTextLatencyMs: firstTextAt ? firstTextAt - processStart : null,
+        stepFinishLatencyMs: stepFinishAt ? stepFinishAt - processStart : null,
         decision: finalCode === 0 && textExtracted.length > 0
           ? "SUCCESS"
           : finalCode === 0 && textExtracted.length === 0

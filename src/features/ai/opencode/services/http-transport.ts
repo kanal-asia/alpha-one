@@ -195,9 +195,28 @@ export class HTTPTransport implements OpenCodeTransport {
     let stepFinishReceived = false
     let responseCompleted = false
 
-    console.log('[OC-TRANSPORT] STREAM START', { modelId })
+    const requestStart = Date.now()
+    let firstTextAt: number | null = null
+    let stepFinishAt: number | null = null
+    console.log('[OC-TRANSPORT] STREAM START', { modelId, requestStart })
 
     while (true) {
+      // TASK-AI-034: Exit the read loop immediately when the response is complete.
+      // step_finish signals the AI response lifecycle is done. The remaining
+      // stream (exit event, stdio close) is process cleanup, not response data.
+      // Waiting for stream close adds 15-16s latency on Windows.
+      if (responseCompleted) {
+        console.log('[OC-TRANSPORT] RESPONSE COMPLETE — exiting read loop', {
+          chunkCount,
+          tokenEvents,
+          textTokens,
+          totalTextLength: totalText.length,
+          totalLatencyMs: Date.now() - requestStart,
+          stepFinishToExitMs: Date.now() - (stepFinishAt ?? Date.now()),
+        })
+        break
+      }
+
       const { done, value } = await reader.read()
       if (done) break
 
@@ -238,12 +257,14 @@ export class HTTPTransport implements OpenCodeTransport {
             if (text) {
               textTokens++
               totalText += text
+              if (firstTextAt === null) firstTextAt = Date.now()
               onChunk({ type: 'token', content: text })
             }
             break
           }
           case 'step_finish':
             stepFinishReceived = true
+            stepFinishAt = Date.now()
             if (totalText.length > 0) {
               responseCompleted = true
             }
@@ -252,6 +273,8 @@ export class HTTPTransport implements OpenCodeTransport {
               textTokens,
               totalTextLength: totalText.length,
               responseCompleted,
+              latencyMs: stepFinishAt - requestStart,
+              firstTextLatencyMs: firstTextAt ? stepFinishAt - firstTextAt : null,
             })
             onChunk({ type: 'done' })
             break
@@ -330,6 +353,9 @@ export class HTTPTransport implements OpenCodeTransport {
       totalTextLength: totalText.length,
       stepFinishReceived,
       responseCompleted,
+      totalLatencyMs: Date.now() - requestStart,
+      firstTextLatencyMs: firstTextAt ? firstTextAt - requestStart : null,
+      stepFinishLatencyMs: stepFinishAt ? stepFinishAt - requestStart : null,
     })
   }
   /* eslint-enable no-console */

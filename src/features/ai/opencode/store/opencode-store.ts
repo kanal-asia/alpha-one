@@ -419,7 +419,8 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
               ),
             }))
           } else if (chunk.type === 'done') {
-            get().pushLog('completed', `[runtime-trace] done: model=${selectedModel.id}`)
+            const doneLatencyMs = Date.now() - startedAt
+            get().pushLog('completed', `[runtime-trace] done: model=${selectedModel.id} latency=${doneLatencyMs}ms`)
             set((state) => ({
               chats: state.chats.map((c) =>
                 c.id === activeChatId

@@ -1,8 +1,12 @@
 import { create } from 'zustand'
 import {
   type Chat,
+  type ChatContext,
   type ChatMessage,
+  type ChatUsage,
+  type CompactResult,
   type ConnectionStatus,
+  type ContextStatus,
   type ExecutionLogEntry,
   type ModeInfo,
   type ModelInfo,
@@ -10,6 +14,8 @@ import {
   type OpenCodeSessionState,
   type OpenCodeSettings,
   type ProviderSummary,
+  type TokenMetrics,
+  type UsageStats,
   type WorkspaceInfo,
 } from '../types'
 import { openCodeService } from '../services/opencode-service'
@@ -28,7 +34,7 @@ const DEFAULT_SETTINGS: OpenCodeSettings = {
   autoReconnect: false,
   streamingSpeed: 1,
   defaultModel: '',
-  defaultMode: 'chat',
+  defaultMode: 'build',
   temperature: 0.7,
   maxTokens: 4096,
   autoSave: true,
@@ -65,6 +71,41 @@ function loadSettings(): Partial<OpenCodeSettings> {
   }
 }
 
+/**
+ * Hydrate persisted settings over defaults and migrate stale execution modes.
+ * Pre-007 builds persisted `defaultMode: 'chat'`; only the canonical OpenCode
+ * agents Build / Plan are valid execution modes now.
+ */
+function hydrateSettings(): OpenCodeSettings {
+  const raw = { ...DEFAULT_SETTINGS, ...loadSettings() }
+  if (raw.defaultMode !== 'build' && raw.defaultMode !== 'plan') {
+    raw.defaultMode = 'build'
+  }
+  return raw
+}
+
+/** Derived context usage (DERIVED) from native step tokens vs the model's
+ * context window. Returns null when the basis is missing — never 0%. */
+function computeContext(used: number, limit: number): ChatContext | null {
+  if (!(used > 0) || !(limit > 0)) return null
+  const percent = Math.min(100, (used / limit) * 100)
+  const status: ContextStatus =
+    percent > 90 ? 'critical' : percent > 80 ? 'high' : percent > 60 ? 'attention' : 'normal'
+  return { used, limit, percent: Math.round(percent * 10) / 10, status }
+}
+
+function accumulateUsage(prev: ChatUsage | undefined, t: TokenMetrics, cost?: number): ChatUsage {
+  return {
+    inputTokens: (prev?.inputTokens ?? 0) + t.input,
+    outputTokens: (prev?.outputTokens ?? 0) + t.output,
+    totalTokens: (prev?.totalTokens ?? 0) + t.total,
+    reasoningTokens: (prev?.reasoningTokens ?? 0) + t.reasoning,
+    cacheReadTokens: (prev?.cacheReadTokens ?? 0) + t.cacheRead,
+    cacheWriteTokens: (prev?.cacheWriteTokens ?? 0) + t.cacheWrite,
+    cost: (prev?.cost ?? 0) + (cost ?? 0),
+  }
+}
+
 function newId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 }
@@ -94,6 +135,10 @@ interface OpenCodeStore {
   providers: ProviderSummary[]
   providersLoaded: boolean
 
+  usageSummary: UsageStats | null
+  compacting: boolean
+  compactResult: CompactResult | null
+
   chats: Chat[]
   activeChatId: string | null
 
@@ -105,6 +150,9 @@ interface OpenCodeStore {
   selectWorkspace: (path: string) => void
   loadModels: () => Promise<void>
   loadProviders: () => Promise<void>
+  loadUsageSummary: (days?: number) => Promise<void>
+  compactActiveSession: () => Promise<void>
+  syncConfigMode: () => Promise<void>
   launch: () => Promise<void>
   stop: () => Promise<void>
   restart: () => Promise<void>
@@ -164,7 +212,7 @@ function makeChat(firstPrompt?: string): Chat {
 }
 
 export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
-  settings: { ...DEFAULT_SETTINGS, ...loadSettings() },
+  settings: hydrateSettings(),
   connection: 'disconnected',
   installed: null,
   session: null,
@@ -178,6 +226,9 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
   modelsLoaded: false,
   providers: [],
   providersLoaded: false,
+  usageSummary: null,
+  compacting: false,
+  compactResult: null,
 
   chats: loadChats(),
   activeChatId: null,
@@ -185,8 +236,12 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
   abortController: null,
 
   updateSettings: (patch) => {
+    const next = { ...patch }
+    if ('defaultMode' in next && next.defaultMode !== 'build' && next.defaultMode !== 'plan') {
+      next.defaultMode = 'build'
+    }
     set((state) => {
-      const settings = { ...state.settings, ...patch }
+      const settings = { ...state.settings, ...next }
       try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
       } catch {
@@ -247,6 +302,18 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     }
     if (nextDefault) markModelUsed(nextDefault)
     set({ models, modes, modelsLoaded: true })
+    void get().syncConfigMode()
+  },
+
+  syncConfigMode: async () => {
+    try {
+      const agent = await openCodeService.fetchConfigDefaultAgent()
+      if (agent && agent !== get().settings.defaultMode) {
+        get().updateSettings({ defaultMode: agent })
+      }
+    } catch {
+      /* config read is best-effort */
+    }
   },
 
   loadProviders: async () => {
@@ -256,6 +323,23 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     } catch {
       set({ providers: [], providersLoaded: true })
     }
+  },
+
+  loadUsageSummary: async (days) => {
+    const stats = await openCodeService.fetchStats(days)
+    set({ usageSummary: stats })
+  },
+
+  compactActiveSession: async () => {
+    const chat = get().chats.find((c) => c.id === get().activeChatId)
+    if (!chat?.sessionId || get().compacting) return
+    set({ compacting: true, compactResult: null })
+    const result = await openCodeService.compactSession(chat.sessionId)
+    set({ compacting: false, compactResult: result })
+    get().pushLog(
+      result.supported ? 'info' : 'error',
+      `[compaction] ${result.message ?? (result.ok ? 'Compacted.' : 'Compaction failed.')}`
+    )
   },
 
   launch: async () => {
@@ -465,27 +549,41 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
           } else if (chunk.type === 'done') {
             const doneLatencyMs = Date.now() - startedAt
             get().pushLog('completed', `[runtime-trace] done: model=${selectedModel.id} latency=${doneLatencyMs}ms`)
-            set((state) => ({
-              chats: state.chats.map((c) =>
-                c.id === activeChatId
-                  ? {
-                      ...c,
-                      messages: c.messages.map((m) =>
-                        m.id === assistantId
-                          ? {
-                              ...m,
-                              status: 'done',
-                              durationMs: Date.now() - startedAt,
-                              tokens: estimateTokens(m.content),
-                            }
-                          : m
-                      ),
-                      updatedAt: new Date().toISOString(),
-                    }
-                  : c
-              ),
-              isStreaming: false,
-            }))
+            const nativeTokens = chunk.tokens
+            set((state) => {
+              const chat = state.chats.find((c) => c.id === activeChatId)
+              const usage = nativeTokens
+                ? accumulateUsage(chat?.usage, nativeTokens, chunk.cost)
+                : chat?.usage
+              const context = nativeTokens
+                ? computeContext(nativeTokens.total, selectedModel.contextWindow)
+                : (chat?.context ?? null)
+              return {
+                chats: state.chats.map((c) =>
+                  c.id === activeChatId
+                    ? {
+                        ...c,
+                        messages: c.messages.map((m) =>
+                          m.id === assistantId
+                            ? {
+                                ...m,
+                                status: 'done',
+                                durationMs: Date.now() - startedAt,
+                                tokens: nativeTokens?.total ?? estimateTokens(m.content),
+                                usage: nativeTokens,
+                                cost: chunk.cost,
+                              }
+                            : m
+                        ),
+                        usage,
+                        context,
+                        updatedAt: new Date().toISOString(),
+                      }
+                    : c
+                ),
+                isStreaming: false,
+              }
+            })
             get().pushRuntimeEvent('Assistant response completed.')
           } else if (chunk.type === 'warning') {
             // TASK-AI-032: Warnings are diagnostics, not errors.
@@ -547,7 +645,8 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
         },
         controller.signal,
         selectedModel,
-        references
+        references,
+        get().settings.defaultMode
       )
     }
 

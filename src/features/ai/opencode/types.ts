@@ -30,12 +30,25 @@ export type StreamEventType =
   | 'warning'
   | 'session'
 
+/** Scalar token metrics reported natively by OpenCode (`step_finish.tokens`). */
+export interface TokenMetrics {
+  total: number
+  input: number
+  output: number
+  reasoning: number
+  cacheRead: number
+  cacheWrite: number
+}
+
 export interface StreamChunk {
   type: StreamEventType
   content?: string
   error?: string
   sessionId?: string
   referenceErrors?: ReferenceResolutionError[]
+  /** Native usage captured from `step_finish` (PROVEN, not estimated). */
+  tokens?: TokenMetrics
+  cost?: number
 }
 
 export interface OpenCodeSession {
@@ -124,6 +137,33 @@ export interface ChatMessage {
   references?: ReferenceAttachment[]
   /** Structured resolution errors surfaced by the backend. */
   referenceErrors?: ReferenceResolutionError[]
+  /** Native scalar usage reported by the runtime for this message. */
+  usage?: TokenMetrics
+  cost?: number
+}
+
+export type ContextStatus = 'normal' | 'attention' | 'high' | 'critical'
+
+/**
+ * Derived context usage (DERIVED, never presented as a native value): current
+ * step tokens vs the model's context window. `null` means the basis is missing
+ * (no tokens or unknown context window) — never converted into 0%.
+ */
+export interface ChatContext {
+  used: number
+  limit: number
+  percent: number
+  status: ContextStatus
+}
+
+export interface ChatUsage {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  reasoningTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  cost: number
 }
 
 export interface ChatProjectContext {
@@ -141,6 +181,31 @@ export interface Chat {
   project?: ChatProjectContext
   createdAt: string
   updatedAt: string
+  /** Aggregated native usage across this conversation (scalar state only). */
+  usage?: ChatUsage
+  /** Derived context usage vs the active model's context window. */
+  context?: ChatContext | null
+}
+
+/** Mirrors the backend `opencode stats` parser (native totals). */
+export interface UsageStats {
+  sessions: number | null
+  messages: number | null
+  days: number | null
+  totalCost: number | null
+  avgCostPerDay: number | null
+  avgTokensPerSession: number | null
+  medianTokensPerSession: number | null
+  inputTokens: number | null
+  outputTokens: number | null
+  cacheReadTokens: number | null
+  cacheWriteTokens: number | null
+}
+
+export interface CompactResult {
+  supported: boolean
+  ok?: boolean
+  message?: string
 }
 
 export type { ConnectionStatus }

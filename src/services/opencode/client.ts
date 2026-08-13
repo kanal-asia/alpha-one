@@ -568,10 +568,12 @@ export async function runChat(opts: {
   message: string;
   sessionId?: string | null;
   files?: string[];
+  agent?: "build" | "plan";
 }): Promise<ChatResult> {
   const modelId = assertCanonicalModelId(opts.model.id);
   const args = ["run", opts.message, "--model", modelId, "--format", "json"];
   if (opts.sessionId) args.push("--session", opts.sessionId);
+  if (opts.agent) args.push("--agent", opts.agent);
   for (const f of opts.files ?? []) args.push("--file", f);
 
   const resolved = resolveOpenCode();
@@ -642,6 +644,164 @@ export async function runChat(opts: {
       resolve(parseChatOutput(stdout));
     });
   });
+}
+
+/**
+ * Execution modes map 1:1 to OpenCode's canonical primary agents (audited via
+ * `opencode agent list`: build, plan, compaction, summary, title). Alpha One
+ * only exposes the two interactive execution modes — it never invents modes.
+ */
+export interface ExecutionMode {
+  id: "build" | "plan";
+  name: string;
+  description: string;
+}
+
+export const EXECUTION_MODES: ExecutionMode[] = [
+  {
+    id: "build",
+    name: "Build",
+    description: "Primary agent for development and tool execution.",
+  },
+  {
+    id: "plan",
+    name: "Plan",
+    description: "Analysis and planning agent that limits direct changes.",
+  },
+];
+
+export function isExecutionMode(id: unknown): id is "build" | "plan" {
+  return id === "build" || id === "plan";
+}
+
+export interface UsageStats {
+  sessions: number | null;
+  messages: number | null;
+  days: number | null;
+  totalCost: number | null;
+  avgCostPerDay: number | null;
+  avgTokensPerSession: number | null;
+  medianTokensPerSession: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+}
+
+const STATS_LABEL_MAP: Array<[RegExp, keyof UsageStats, "money" | "count"]> = [
+  [/^Sessions\b/i, "sessions", "count"],
+  [/^Messages\b/i, "messages", "count"],
+  [/^Days\b/i, "days", "count"],
+  [/^Total Cost/i, "totalCost", "money"],
+  [/^Avg Cost\/Day/i, "avgCostPerDay", "money"],
+  [/^Avg Tokens\/Session/i, "avgTokensPerSession", "count"],
+  [/^Median Tokens\/Session/i, "medianTokensPerSession", "count"],
+  [/^Cache Read/i, "cacheReadTokens", "count"],
+  [/^Cache Write/i, "cacheWriteTokens", "count"],
+  [/^Input\b/i, "inputTokens", "count"],
+  [/^Output\b/i, "outputTokens", "count"],
+];
+
+function stripAnsi(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+function stripBoxChars(s: string): string {
+  return s.replace(/[┌┐└┘├┤┬┴┼─│╭╮╰╯]/g, "");
+}
+
+function parseStatsValue(raw: string, kind: "money" | "count"): number | null {
+  if (kind === "money") {
+    const n = parseFloat(raw.replace(/[^\d.-]/g, ""));
+    return Number.isFinite(n) ? n : null;
+  }
+  const mult = /[Kk]$/.test(raw)
+    ? 1e3
+    : /[Mm]$/.test(raw)
+      ? 1e6
+      : /[Bb]$/.test(raw)
+        ? 1e9
+        : 1;
+  const num = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+  if (!Number.isFinite(num)) return null;
+  return Math.round(num * mult);
+}
+
+/**
+ * Tolerant parser for `opencode stats` ASCII table output. The CLI exposes no
+ * `--json` flag (audited v1.18.x), so we strip ANSI/box-drawing decoration and
+ * extract `Label value` pairs. Any unrecognized line is ignored.
+ */
+export function parseStatsTable(stdout: string): UsageStats | null {
+  const result: UsageStats = {
+    sessions: null,
+    messages: null,
+    days: null,
+    totalCost: null,
+    avgCostPerDay: null,
+    avgTokensPerSession: null,
+    medianTokensPerSession: null,
+    inputTokens: null,
+    outputTokens: null,
+    cacheReadTokens: null,
+    cacheWriteTokens: null,
+  };
+  let matched = 0;
+
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = stripBoxChars(stripAnsi(rawLine)).trim();
+    if (!line) continue;
+    const m = /^([A-Za-z][A-Za-z /]+?)\s+([\d$.,KMkm-]+)\s*$/.exec(line);
+    if (!m) continue;
+    const label = m[1].trim();
+    for (const [re, key, kind] of STATS_LABEL_MAP) {
+      if (result[key] != null) continue;
+      if (re.test(label)) {
+        result[key] = parseStatsValue(m[2].trim(), kind);
+        matched++;
+        break;
+      }
+    }
+  }
+
+  return matched > 0 ? result : null;
+}
+
+export async function fetchStats(days?: number): Promise<UsageStats | null> {
+  const args = ["stats"];
+  if (days && days > 0) args.push("--days", String(Math.min(365, Math.floor(days))));
+  const out = await runOpenCode(args, 30_000);
+  if (!out) return null;
+  return parseStatsTable(out);
+}
+
+export interface CompactResult {
+  supported: boolean;
+  ok?: boolean;
+  message?: string;
+}
+
+/**
+ * Best-effort native manual compaction. The installed CLI does not expose a
+ * `session compact` subcommand (audited v1.18.x: `opencode session` offers only
+ * list/delete), so the CLI surface is probed first and the result is reported
+ * honestly. Automatic compaction (`compaction.auto` defaults true) remains
+ * active natively and is never mutated here.
+ */
+export async function compactSession(sessionId: string): Promise<CompactResult> {
+  const help = await runOpenCode(["session", "--help"], 15_000);
+  const supportsCompact = /compact/i.test(help ?? "");
+  if (!supportsCompact) {
+    return {
+      supported: false,
+      ok: false,
+      message:
+        "Manual compaction is not exposed by the installed OpenCode CLI. Automatic compaction remains active natively.",
+    };
+  }
+  const out = await runOpenCode(["session", "compact", sessionId], 60_000);
+  return { supported: true, ok: out != null, message: out?.trim() || undefined };
 }
 
 function parseChatOutput(stdout: string): ChatResult {

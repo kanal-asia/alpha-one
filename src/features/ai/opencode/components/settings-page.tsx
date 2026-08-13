@@ -24,6 +24,8 @@ import {
 import { toast } from 'sonner'
 import { OpenCodeConfigCard } from './opencode-config-card'
 
+const API_BASE = '/api/opencode'
+
 export function OpenCodeSettingsPage() {
   const {
     settings,
@@ -40,6 +42,22 @@ export function OpenCodeSettingsPage() {
   const defaultProvider = models.find(
     (m) => m.id === settings.defaultModel
   )?.provider
+
+  const persistDefaultAgent = async (mode: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patch: { default_agent: mode } }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        toast.error((err as { error?: string }).error ?? `HTTP ${res.status}`)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update OpenCode config.')
+    }
+  }
 
   return (
     <AILayout>
@@ -174,9 +192,21 @@ export function OpenCodeSettingsPage() {
             </div>
             <div className='space-y-1'>
               <Label htmlFor='mode'>Default Execution Mode</Label>
+              <p className='text-xs text-muted-foreground'>
+                Persisted to{' '}
+                <code className='rounded bg-muted px-1 font-mono text-[11px]'>
+                  opencode.json
+                </code>{' '}
+                (<code className='rounded bg-muted px-1 font-mono text-[11px]'>
+                  default_agent
+                </code>) so reloads keep the selected mode. Defaults to Build.
+              </p>
               <Select
                 value={settings.defaultMode}
-                onValueChange={(v) => updateSettings({ defaultMode: v })}
+                onValueChange={(v) => {
+                  updateSettings({ defaultMode: v })
+                  void persistDefaultAgent(v)
+                }}
               >
                 <SelectTrigger id='mode'>
                   <SelectValue placeholder='Mode' />
@@ -267,6 +297,11 @@ export function OpenCodeSettingsPage() {
                 />
               </div>
             </div>
+            <p className='rounded-md bg-muted/60 px-2 py-1.5 text-[11px] text-muted-foreground'>
+              Temperature and Max Tokens are UI preferences (presentation-only).
+              The chat request does not send them to the OpenCode runtime, which
+              enforces its own model defaults.
+            </p>
           </CardContent>
         </Card>
 

@@ -132,7 +132,7 @@ export function readOpenCodeConfig(cwd: string): OpenCodeConfigResult {
 }
 
 /** Keys Alpha Workspace is allowed to write into the real OpenCode config. */
-export const SAFE_CONFIG_PATCH_KEYS = ["model"] as const;
+export const SAFE_CONFIG_PATCH_KEYS = ["model", "default_agent"] as const;
 
 function isSafePatchKey(key: string): key is (typeof SAFE_CONFIG_PATCH_KEYS)[number] {
   return (SAFE_CONFIG_PATCH_KEYS as readonly string[]).includes(key);

@@ -8,9 +8,17 @@ import { ChatComposer } from '@/features/ai/opencode/components/chat-composer'
 import { DeveloperPanel } from '@/features/ai/opencode/components/developer-panel'
 import { StatusIndicator } from '@/features/ai/opencode/components/status-indicator'
 import { ModelSelector } from '@/features/ai/opencode/components/model-selector'
+import { UsageIndicator } from '@/features/ai/opencode/components/usage-indicator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { PageHeader } from '@/components/page-header'
 import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Sheet,
   SheetContent,
@@ -23,6 +31,7 @@ export function AssistantChatPage() {
   const {
     settings,
     models,
+    modes,
     chats,
     activeChatId,
     isStreaming,
@@ -95,6 +104,24 @@ export function AssistantChatPage() {
               }}
               onRefresh={() => void loadModels()}
             />
+
+            <Select
+              value={settings.defaultMode}
+              onValueChange={(v) => updateSettings({ defaultMode: v })}
+            >
+              <SelectTrigger className='h-8 w-[120px]' aria-label='Execution mode'>
+                <SelectValue placeholder='Mode' />
+              </SelectTrigger>
+              <SelectContent>
+                {modes.map((mode) => (
+                  <SelectItem key={mode.id} value={mode.id}>
+                    {mode.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <UsageIndicator />
 
             <div className='ms-auto flex items-center gap-2'>
               <StatusIndicator

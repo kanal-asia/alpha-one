@@ -1,10 +1,12 @@
 import {
+  type CompactResult,
   type ExecutionLogEntry,
   type ModeInfo,
   type ModelInfo,
   type OpenCodeAuthResult,
   type OpenCodeSettings,
   type StreamChunk,
+  type UsageStats,
   type ProviderSummary,
 } from '../types'
 import { HTTPTransport, type OpenCodeTransport } from './http-transport'
@@ -80,9 +82,22 @@ export class OpenCodeService {
     onChunk: (chunk: StreamChunk) => void,
     signal?: AbortSignal,
     model?: RuntimeModel,
-    references?: ReferenceAttachment[]
+    references?: ReferenceAttachment[],
+    agent?: string
   ) {
-    return this.transport.sendPrompt(sessionId, prompt, onChunk, signal, model, references)
+    return this.transport.sendPrompt(sessionId, prompt, onChunk, signal, model, references, agent)
+  }
+
+  async fetchStats(days?: number): Promise<UsageStats | null> {
+    return this.transport.fetchStats(days)
+  }
+
+  async compactSession(sessionId: string): Promise<CompactResult> {
+    return this.transport.compactSession(sessionId)
+  }
+
+  async fetchConfigDefaultAgent(): Promise<string | null> {
+    return this.transport.fetchConfigDefaultAgent()
   }
 
   getLogs() {

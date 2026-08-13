@@ -6,6 +6,10 @@ import {
   detectProviderStatus,
   fetchProviders,
   runChat,
+  EXECUTION_MODES,
+  isExecutionMode,
+  fetchStats,
+  compactSession,
 } from "./client";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
@@ -49,6 +53,7 @@ interface ChatRequestBody {
   sessionId?: string | null;
   files?: string[];
   references?: unknown[];
+  agent?: string;
 }
 
 /**
@@ -135,6 +140,7 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
       model: model.id,
       message,
       sessionId: body.sessionId ?? null,
+      agent: isExecutionMode(body.agent) ? body.agent : null,
       references: (Array.isArray(body.references) ? body.references : [])
         .filter(isReferenceAttachment)
         .map((r) => ({
@@ -156,6 +162,7 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
   }
 
   const args = ["run", message, "--model", model.id, "--format", "json"];
+  if (isExecutionMode(body.agent)) args.push("--agent", body.agent);
   if (body.sessionId) args.push("--session", body.sessionId);
   for (const f of files) args.push("--file", f);
   trace("cli", model.id, "OpenCode CLI args", { cliArgs: args });
@@ -404,7 +411,13 @@ app.post("/api/opencode/chat", async (req: Request, res: Response) => {
   if (files === null) return;
 
   try {
-    const result = await runChat({ model, message, sessionId: body.sessionId, files });
+    const result = await runChat({
+      model,
+      message,
+      sessionId: body.sessionId,
+      files,
+      agent: isExecutionMode(body.agent) ? body.agent : undefined,
+    });
     trace("result", model.id, "chat completed", { ok: true });
     return res.json(result);
   } catch (err) {
@@ -502,6 +515,33 @@ app.patch("/api/opencode/config", (req: Request, res: Response) => {
       error: err instanceof Error ? err.message : "Failed to update OpenCode config",
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Execution modes — canonical OpenCode primary agents (Build / Plan).
+// ---------------------------------------------------------------------------
+app.get("/api/opencode/modes", (_req: Request, res: Response) => {
+  return res.json({ modes: EXECUTION_MODES });
+});
+
+// ---------------------------------------------------------------------------
+// Native usage statistics — parses `opencode stats` (no --json available).
+// ---------------------------------------------------------------------------
+app.get("/api/opencode/stats", async (req: Request, res: Response) => {
+  const rawDays = Number(req.query.days);
+  const days = Number.isFinite(rawDays) && rawDays > 0 ? rawDays : undefined;
+  const stats = await fetchStats(days);
+  return res.json({ stats, days: days ?? null });
+});
+
+// ---------------------------------------------------------------------------
+// Native manual compaction — probes the installed CLI surface honestly.
+// ---------------------------------------------------------------------------
+app.post("/api/opencode/session/:id/compact", async (req: Request, res: Response) => {
+  const id = req.params.id.trim();
+  if (!id) return res.status(400).json({ error: "session id is required" });
+  const result = await compactSession(id);
+  return res.json(result);
 });
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import { FolderOpen, Plus, Settings2 } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import { useOpenCodeStore } from '../store/opencode-store'
 import { ModelSelector } from './model-selector'
+import { UsageIndicator } from './usage-indicator'
 import { markModelUsed } from '../model-preferences'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -31,8 +32,6 @@ export function OpenCodeToolbar() {
     modelsLoaded,
     newChat,
   } = useOpenCodeStore()
-
-  const activeModel = models.find((m) => m.id === settings.defaultModel)
 
   return (
     <div className='flex flex-wrap items-center gap-2 border-b px-4 py-2'>
@@ -91,7 +90,7 @@ export function OpenCodeToolbar() {
         value={settings.defaultMode}
         onValueChange={(v) => updateSettings({ defaultMode: v })}
       >
-        <SelectTrigger className='h-8 w-[120px]'>
+        <SelectTrigger className='h-8 w-[120px]' aria-label='Execution mode'>
           <SelectValue placeholder='Mode' />
         </SelectTrigger>
         <SelectContent>
@@ -103,11 +102,7 @@ export function OpenCodeToolbar() {
         </SelectContent>
       </Select>
 
-      {activeModel && (
-        <span className='hidden text-xs text-muted-foreground lg:inline'>
-          {activeModel.contextWindow.toLocaleString()} ctx · {activeModel.latency} latency
-        </span>
-      )}
+      <UsageIndicator />
 
       <div className='ms-auto flex items-center gap-2'>
         <Button size='sm' className='gap-1.5' onClick={newChat}>

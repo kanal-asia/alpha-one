@@ -1,10 +1,13 @@
 import {
+  type CompactResult,
   type ModeInfo,
   type ModelInfo,
   type OpenCodeAuthResult,
   type OpenCodeSession,
   type OpenCodeSettings,
   type StreamChunk,
+  type TokenMetrics,
+  type UsageStats,
   type WorkspaceInfo,
   type ProviderSummary,
 } from '../types'
@@ -37,11 +40,15 @@ export interface OpenCodeTransport {
     onChunk: (chunk: StreamChunk) => void,
     signal?: AbortSignal,
     model?: RuntimeModel,
-    references?: ReferenceAttachment[]
+    references?: ReferenceAttachment[],
+    agent?: string
   ): Promise<void>
   listProviders(): Promise<ProviderSummary[]>
   connectProvider(providerId: string): Promise<OpenCodeAuthResult>
   disconnectProvider(providerId: string): Promise<OpenCodeAuthResult>
+  fetchStats(days?: number): Promise<UsageStats | null>
+  compactSession(sessionId: string): Promise<CompactResult>
+  fetchConfigDefaultAgent(): Promise<string | null>
 }
 
 const API_BASE = '/api/opencode'
@@ -66,6 +73,35 @@ function parseSSEBlock(block: string): { event: string; data: unknown } | null {
   } catch {
     return null
   }
+}
+
+function tokensFromEvent(evt: Record<string, unknown>): TokenMetrics | undefined {
+  const part = evt.part as Record<string, unknown> | undefined
+  const tok = (evt.tokens ?? part?.tokens) as
+    | {
+        total?: unknown
+        input?: unknown
+        output?: unknown
+        reasoning?: unknown
+        cache?: { read?: unknown; write?: unknown }
+      }
+    | undefined
+  if (!tok) return undefined
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+  return {
+    total: num(tok.total),
+    input: num(tok.input),
+    output: num(tok.output),
+    reasoning: num(tok.reasoning),
+    cacheRead: num(tok.cache?.read),
+    cacheWrite: num(tok.cache?.write),
+  }
+}
+
+function costFromEvent(evt: Record<string, unknown>): number | undefined {
+  const part = evt.part as Record<string, unknown> | undefined
+  const cost = typeof evt.cost === 'number' ? evt.cost : typeof part?.cost === 'number' ? part.cost : undefined
+  return typeof cost === 'number' && Number.isFinite(cost) ? cost : undefined
 }
 
 export class HTTPTransport implements OpenCodeTransport {
@@ -144,14 +180,8 @@ export class HTTPTransport implements OpenCodeTransport {
   }
 
   async listModes(): Promise<ModeInfo[]> {
-    await this.request<{ models: RuntimeModel[] }>('/models')
-    // Modes are not in models response; return defaults
-    return [
-      { id: 'chat', name: 'Chat', description: 'Conversational coding assistance.' },
-      { id: 'agent', name: 'Agent', description: 'Autonomous multi-step task execution.' },
-      { id: 'plan', name: 'Plan', description: 'Propose a plan before making changes.' },
-      { id: 'debug', name: 'Debug', description: 'Focused on diagnosing failures.' },
-    ]
+    const res = await this.request<{ modes: ModeInfo[] }>('/modes')
+    return res.modes
   }
 
   async listProviders(): Promise<ProviderSummary[]> {
@@ -185,6 +215,26 @@ export class HTTPTransport implements OpenCodeTransport {
     return res.json()
   }
 
+  async fetchStats(days?: number): Promise<UsageStats | null> {
+    const qs = days && days > 0 ? `?days=${Math.min(365, Math.floor(days))}` : ''
+    const res = await this.request<{ stats: UsageStats | null }>(`/stats${qs}`)
+    return res.stats
+  }
+
+  async compactSession(sessionId: string): Promise<CompactResult> {
+    const res = await this.request<CompactResult>(
+      `/session/${encodeURIComponent(sessionId)}/compact`,
+      { method: 'POST' }
+    )
+    return res
+  }
+
+  async fetchConfigDefaultAgent(): Promise<string | null> {
+    const res = await this.request<{ config?: Record<string, unknown> }>('/config')
+    const v = res.config?.default_agent
+    return typeof v === 'string' && (v === 'build' || v === 'plan') ? v : null
+  }
+
   /* eslint-disable no-console -- TEMPORARY debug logging for TASK instrumentation */
   async sendPrompt(
     sessionId: string,
@@ -192,7 +242,8 @@ export class HTTPTransport implements OpenCodeTransport {
     onChunk: (chunk: StreamChunk) => void,
     signal?: AbortSignal,
     model?: RuntimeModel,
-    references?: ReferenceAttachment[]
+    references?: ReferenceAttachment[],
+    agent?: string
   ): Promise<void> {
     const modelId = model?.id ?? ''
     // TASK-AI-033: Only pass session ID to server if it looks like a real CLI session ID.
@@ -211,7 +262,13 @@ export class HTTPTransport implements OpenCodeTransport {
     const res = await fetch(`${this.baseUrl}${API_BASE}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: modelId, message: prompt, sessionId: realSessionId || undefined, references: refs }),
+      body: JSON.stringify({
+        model: modelId,
+        message: prompt,
+        sessionId: realSessionId || undefined,
+        references: refs,
+        agent: agent ?? undefined,
+      }),
       signal,
     })
 
@@ -328,7 +385,13 @@ export class HTTPTransport implements OpenCodeTransport {
               latencyMs: stepFinishAt - requestStart,
               firstTextLatencyMs: firstTextAt ? stepFinishAt - firstTextAt : null,
             })
-            onChunk({ type: 'done' })
+            // TASK-ALPHAONE-007: surface native usage (tokens/cost) reported by
+            // the runtime instead of dropping it at the transport boundary.
+            onChunk({
+              type: 'done',
+              tokens: tokensFromEvent(parsed.data as Record<string, unknown>),
+              cost: costFromEvent(parsed.data as Record<string, unknown>),
+            })
             break
           case 'error': {
             const { message } = parsed.data as { message: string }

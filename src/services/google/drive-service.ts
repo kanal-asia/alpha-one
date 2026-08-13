@@ -66,14 +66,18 @@ async function driveFetch<T>(
   })
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({})) as { error?: { message?: string; code?: number } }
+    const error = await response.json().catch(() => ({})) as { error?: { message?: string; code?: number; status?: string; details?: Array<{ reason?: string }> } }
     const message = error.error?.message ?? `Google Drive API error: ${response.status}`
     const code = error.error?.code ?? response.status
+    const reason = error.error?.details?.[0]?.reason ?? ''
 
     if (code === 401) {
       throw new Error('Google authorization expired or revoked. Please reconnect your Google account.')
     }
     if (code === 403) {
+      if (reason === 'accessNotConfigured' || message.includes('has not been used') || message.includes('is disabled')) {
+        throw new Error('Google Drive API is not enabled in your Google Cloud project. Please enable it at https://console.developers.google.com/apis/api/drive.googleapis.com')
+      }
       throw new Error('Permission denied. You do not have access to this resource.')
     }
     if (code === 404) {

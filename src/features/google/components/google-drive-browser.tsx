@@ -456,6 +456,11 @@ export function GoogleDriveBrowser({
                 <div className='flex items-center justify-center py-12'>
                   <Loader2 className='size-6 animate-spin text-muted-foreground' />
                 </div>
+              ) : error ? (
+                <div className='flex flex-col items-center justify-center gap-2 py-12 text-center text-sm text-muted-foreground'>
+                  <AlertCircle className='size-8 text-destructive' />
+                  <p className='text-destructive'>{error}</p>
+                </div>
               ) : files.length === 0 ? (
                 <div className='flex flex-col items-center justify-center gap-2 py-12 text-center text-sm text-muted-foreground'>
                   <FolderOpen className='size-8' />

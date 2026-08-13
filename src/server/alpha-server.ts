@@ -4,6 +4,7 @@
  * Boots the OpenCode API (AI/chat/providers) and mounts the Workspace API
  * (the vertical slice: tasks, workflows, artifacts, history) on the same app.
  */
+import 'dotenv/config'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app, runtimeManager } from '../services/opencode/server'

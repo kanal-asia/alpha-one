@@ -80,23 +80,30 @@ export function createGoogleOAuthRouter(): Router {
       const state = req.query.state as string
       const error = req.query.error as string
 
+      const clientUrl = getClientUrl()
+
       // Handle user denial
       if (error === 'access_denied') {
         return res.redirect(
-          `${getClientUrl()}/settings?google_error=access_denied`
+          `${clientUrl}/settings?google_error=access_denied`
         )
       }
 
       if (!code || !state) {
         return res.redirect(
-          `${getClientUrl()}/settings?google_error=missing_params`
+          `${clientUrl}/settings?google_error=missing_params`
         )
       }
 
       const userId = getUserId(req)
-      await handleOAuthCallback(code, state, userId)
+      const connection = await handleOAuthCallback(code, state, userId)
 
-      return res.redirect(`${getClientUrl()}/settings?google_connected=true`)
+      // Determine redirect destination from saved OAuth state
+      const returnTo = connection._returnTo ?? '/settings'
+      const separator = returnTo.includes('?') ? '&' : '?'
+      return res.redirect(
+        `${clientUrl}${returnTo}${separator}google_connected=true`
+      )
     } catch (err) {
       const message = encodeURIComponent(
         err instanceof Error ? err.message : 'OAuth callback failed.'
@@ -120,7 +127,8 @@ export function createGoogleOAuthRouter(): Router {
       }
 
       const userId = getUserId(req)
-      const { url } = await generateAuthUrl(userId)
+      const returnTo = req.body?.returnTo as string | undefined
+      const { url } = await generateAuthUrl(userId, returnTo)
 
       return res.json({ url })
     } catch (err) {

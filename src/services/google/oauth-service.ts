@@ -40,6 +40,7 @@ export interface GoogleConnection {
 export interface OAuthState {
   state: string
   codeVerifier: string
+  returnTo?: string
   createdAt: string
 }
 
@@ -139,7 +140,10 @@ async function saveConnections(
  * Generate the Google OAuth authorization URL.
  * Returns the URL and the state parameter for CSRF protection.
  */
-export async function generateAuthUrl(_userId: string): Promise<{
+export async function generateAuthUrl(
+  _userId: string,
+  returnTo?: string
+): Promise<{
   url: string
   state: string
 }> {
@@ -150,6 +154,7 @@ export async function generateAuthUrl(_userId: string): Promise<{
   await saveOAuthState({
     state,
     codeVerifier,
+    returnTo,
     createdAt: new Date().toISOString(),
   })
 
@@ -180,7 +185,7 @@ export async function handleOAuthCallback(
   code: string,
   state: string,
   userId: string
-): Promise<GoogleConnection> {
+): Promise<GoogleConnection & { _returnTo?: string }> {
   const config = getConfig()
 
   // Validate state (CSRF protection)
@@ -240,7 +245,7 @@ export async function handleOAuthCallback(
   connections[userId] = connection
   await saveConnections(connections)
 
-  return connection
+  return { ...connection, _returnTo: savedState.returnTo }
 }
 
 /**

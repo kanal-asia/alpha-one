@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import {
   Cloud,
   ChevronRight,
@@ -16,12 +16,13 @@ import {
   Image,
   Film,
   Music,
+  ExternalLink,
 } from 'lucide-react'
 import { Main } from '@/components/layout/main'
 import { PageHeader } from '@/components/page-header'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 
@@ -138,15 +139,56 @@ export function GoogleDriveBrowser({
 
   const [selectedFolder, setSelectedFolder] = useState<{ id: string; name: string } | null>(null)
 
-  // Check connection status
+  const [connecting, setConnecting] = useState(false)
+
+  const handleConnect = async () => {
+    setConnecting(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/google/oauth/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ returnTo: '/google/drive' }),
+      })
+      const data = await res.json()
+      if (data.url) {
+        window.location.href = data.url
+      } else if (data.error) {
+        setError(data.error)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to connect Google Workspace. Please try again.')
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  // Check connection status (also handles post-OAuth redirect and initial folder load)
   useEffect(() => {
     let cancelled = false
+
+    // Handle post-OAuth redirect params
+    const params = new URLSearchParams(window.location.search)
+    const connectedParam = params.get('google_connected') === 'true'
+    const errorParam = params.get('google_error')
+    if (connectedParam || errorParam) {
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+
     async function checkStatus() {
       try {
         const data = await apiFetch<DriveStatus>('/api/google/drive/status')
         if (!cancelled) {
           setStatus(data)
           setLoading(false)
+          // Auto-load root folder when connected
+          if (data.connected) {
+            const filesData = await apiFetch<DriveListResponse>('/api/google/drive/list')
+            if (!cancelled) {
+              setFiles(filesData.files)
+              setNextPageToken(filesData.nextPageToken)
+            }
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -197,17 +239,6 @@ export function GoogleDriveBrowser({
       // Breadcrumb is optional, don't show error
     }
   }, [])
-
-  // Track if we've loaded initial folder
-  const initialLoadRef = useRef(false)
-
-  // Load root folder on mount
-  useEffect(() => {
-    if (status?.connected && !initialLoadRef.current) {
-      initialLoadRef.current = true
-      void loadFolder()
-    }
-  }, [status?.connected, loadFolder])
 
   // Navigate to folder
   const navigateToFolder = (folderId: string) => {
@@ -285,19 +316,30 @@ export function GoogleDriveBrowser({
                   Google Drive
                 </h1>
                 <p className='text-sm text-muted-foreground'>
-                  Browse and manage your Google Drive files from the workspace.
+                  Connect your Google account to access your Drive files and folders.
                 </p>
               </div>
             </div>
 
             <Card>
-              <CardHeader>
-                <CardTitle className='text-base'>Not Connected</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className='flex items-center gap-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground'>
-                  <AlertCircle className='size-4' />
-                  {status?.error ?? 'Connect your Google account in Settings to access Drive.'}
+              <CardContent className='py-8'>
+                <div className='flex flex-col items-center gap-4 text-center'>
+                  <Cloud className='size-10 text-muted-foreground' />
+                  <div className='space-y-1'>
+                    <p className='text-sm text-muted-foreground'>
+                      Connect your Google account to access your Drive files and folders.
+                    </p>
+                  </div>
+                  {error && (
+                    <div className='flex items-center gap-2 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive'>
+                      <AlertCircle className='size-4' />
+                      {error}
+                    </div>
+                  )}
+                  <Button onClick={handleConnect} disabled={connecting}>
+                    <ExternalLink className='size-4' />
+                    {connecting ? 'Connecting...' : 'Connect Google'}
+                  </Button>
                 </div>
               </CardContent>
             </Card>

@@ -132,6 +132,7 @@ function mapDriveFiles(files: Array<{
 /**
  * Generic list helper. Runs a Drive files.list query with the given q/orderBy
  * and returns mapped DriveFile results.
+ * Uses includeItemsFromAllDrives to ensure shared content is accessible.
  */
 async function driveList(
   userId: string,
@@ -143,6 +144,8 @@ async function driveList(
     orderBy: opts?.orderBy ?? 'name',
     pageSize: opts?.pageSize ?? '100',
     q,
+    includeItemsFromAllDrives: 'true',
+    supportsAllDrives: 'true',
   }
   if (opts?.pageToken) params.pageToken = opts.pageToken
 
@@ -293,6 +296,8 @@ export async function getFolderBreadcrumb(
 
 /**
  * Search Google Drive for files and folders.
+ * Searches all accessible content including shared resources by using
+ * includeItemsFromAllDrives and supportsAllDrives.
  */
 export async function searchDrive(
   userId: string,
@@ -300,10 +305,11 @@ export async function searchDrive(
   pageToken?: string
 ): Promise<DriveListResponse> {
   const params: Record<string, string> = {
-    fields: 'nextPageToken,files(id,name,mimeType,modifiedTime,size,iconLink,webViewLink,parents)',
+    fields: LIST_FIELDS,
     pageSize: '50',
-    orderBy: 'name',
     q: `name contains '${query.replace(/'/g, "\\'")}' and trashed = false`,
+    includeItemsFromAllDrives: 'true',
+    supportsAllDrives: 'true',
   }
 
   if (pageToken) {
@@ -311,34 +317,15 @@ export async function searchDrive(
   }
 
   const response = await driveFetch<{ files: Array<{
-    id: string
-    name: string
-    mimeType: string
-    modifiedTime: string
-    size?: string
-    iconLink?: string
-    webViewLink?: string
-    thumbnailLink?: string
-    hasThumbnail?: boolean
+    id: string; name: string; mimeType: string; modifiedTime: string
+    size?: string; iconLink?: string; webViewLink?: string
+    thumbnailLink?: string; hasThumbnail?: boolean
     videoMediaMetadata?: { width?: number; height?: number; durationMillis?: string }
     parents?: string[]
   }>; nextPageToken?: string }>(userId, '/files', params)
 
   return {
-    files: response.files.map((file) => ({
-      id: file.id,
-      name: file.name,
-      mimeType: file.mimeType,
-      isFolder: file.mimeType === FOLDER_MIME,
-      modifiedTime: file.modifiedTime,
-      size: file.size,
-      iconLink: file.iconLink,
-      webViewLink: file.webViewLink,
-      thumbnailLink: file.thumbnailLink,
-      hasThumbnail: file.hasThumbnail,
-      videoMediaMetadata: file.videoMediaMetadata,
-      parents: file.parents,
-    })),
+    files: mapDriveFiles(response.files),
     nextPageToken: response.nextPageToken,
   }
 }

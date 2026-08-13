@@ -22,6 +22,8 @@ import {
   Users,
   HardDrive,
   Play,
+  LayoutGrid,
+  List,
 } from 'lucide-react'
 import { Main } from '@/components/layout/main'
 import { PageHeader } from '@/components/page-header'
@@ -70,6 +72,7 @@ interface DriveStatus {
 }
 
 type NavTab = 'my-drive' | 'shared' | 'starred' | 'recent'
+type ViewMode = 'list' | 'grid'
 
 interface GoogleDriveBrowserProps {
   mode?: 'browse' | 'pick-folder'
@@ -172,6 +175,8 @@ export function GoogleDriveBrowser({
   const [selectedFolder, setSelectedFolder] = useState<{ id: string; name: string } | null>(null)
 
   const [connecting, setConnecting] = useState(false)
+
+  const [viewMode, setViewMode] = useState<ViewMode>('list')
 
   const handleConnect = async () => {
     setConnecting(true)
@@ -435,12 +440,32 @@ export function GoogleDriveBrowser({
                 {status.email ? `Browsing as ${status.email}` : 'Browse your Google Drive files.'}
               </p>
             </div>
-            {mode === 'pick-folder' && selectedFolder && (
-              <Button onClick={handleSelectFolder}>
-                <Check className='size-4' />
-                Select "{selectedFolder.name}"
-              </Button>
-            )}
+            <div className='flex items-center gap-2'>
+              <div className='flex items-center gap-1 rounded-lg border p-1'>
+                <Button
+                  variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+                  size='sm'
+                  className='h-8 w-8 p-0'
+                  onClick={() => setViewMode('list')}
+                >
+                  <List className='size-4' />
+                </Button>
+                <Button
+                  variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
+                  size='sm'
+                  className='h-8 w-8 p-0'
+                  onClick={() => setViewMode('grid')}
+                >
+                  <LayoutGrid className='size-4' />
+                </Button>
+              </div>
+              {mode === 'pick-folder' && selectedFolder && (
+                <Button onClick={handleSelectFolder}>
+                  <Check className='size-4' />
+                  Select "{selectedFolder.name}"
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Navigation tabs */}
@@ -557,6 +582,72 @@ export function GoogleDriveBrowser({
                   <FolderOpen className='size-8' />
                   {isSearching ? 'No results found.' : 'This folder is empty.'}
                 </div>
+              ) : viewMode === 'grid' ? (
+                <ScrollArea className='h-[calc(100vh-28rem)]'>
+                  <div className='grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'>
+                    {files.map((file) => {
+                      const Icon = getFileIcon(file.mimeType)
+                      const isSelected = selectedFolder?.id === file.id
+                      const showThumbnail = !file.isFolder && file.hasThumbnail && (isImageMime(file.mimeType) || isVideoMime(file.mimeType))
+                      const canOpen = !file.isFolder && !!file.webViewLink
+                      return (
+                        <div
+                          key={file.id}
+                          className={cn(
+                            'group flex flex-col items-center rounded-lg border p-3 transition-colors hover:bg-muted/50',
+                            file.isFolder && 'cursor-pointer',
+                            canOpen && 'cursor-pointer',
+                            isSelected && 'bg-primary/10'
+                          )}
+                          onClick={() => {
+                            if (file.isFolder) {
+                              handleFolderClick(file)
+                            } else if (canOpen) {
+                              openFileInNewTab(file.webViewLink)
+                            }
+                          }}
+                        >
+                          {showThumbnail ? (
+                            <div className='relative mb-2 aspect-square w-full overflow-hidden rounded border'>
+                              <img
+                                src={`/api/google/drive/thumbnail/${file.id}`}
+                                alt={file.name}
+                                className='size-full object-cover'
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement
+                                  target.style.display = 'none'
+                                  const fallback = target.nextElementSibling as HTMLElement
+                                  if (fallback) fallback.style.display = 'flex'
+                                }}
+                              />
+                              <div className='absolute inset-0 hidden items-center justify-center bg-muted'>
+                                <Icon className='size-8 text-muted-foreground' />
+                              </div>
+                              {isVideoMime(file.mimeType) && (
+                                <div className='absolute inset-0 flex items-center justify-center bg-black/30'>
+                                  <Play className='size-6 text-white fill-white' />
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className='mb-2 flex aspect-square w-full items-center justify-center rounded border bg-muted/30'>
+                              <Icon
+                                className={cn(
+                                  'size-8',
+                                  file.isFolder ? 'text-blue-500' : 'text-muted-foreground'
+                                )}
+                              />
+                            </div>
+                          )}
+                          <p className='w-full truncate text-center text-xs font-medium'>{file.name}</p>
+                          <p className='w-full truncate text-center text-[10px] text-muted-foreground'>
+                            {formatDate(file.modifiedTime)}
+                          </p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </ScrollArea>
               ) : (
                 <ScrollArea className='h-[calc(100vh-28rem)]'>
                   <div className='divide-y'>

@@ -2,7 +2,7 @@
 
 ## Objective
 
-Rework the existing Google Drive Explorer based on runtime evidence: fix thumbnail rendering, fix shared content search, and add grid/preview view mode.
+Rework the existing Google Drive Explorer based on runtime evidence: fix thumbnail rendering, fix shared content search, add grid/preview view mode, and fix frontend search routing.
 
 ---
 
@@ -13,46 +13,37 @@ Rework the existing Google Drive Explorer based on runtime evidence: fix thumbna
 ### Root Causes
 
 **DEFECT-001 — Thumbnail Not Rendered**
-- Root cause: Backend proxy endpoint `GET /api/google/drive/thumbnail/:fileId` was working correctly (tested directly). The Google Drive API does return `hasThumbnail=true` and `thumbnailLink` for image/video files. The thumbnail proxy successfully fetches and serves thumbnail images. The frontend rendering code was structurally correct. The runtime issue was a stale server process — the server needed restart to pick up the thumbnail endpoint added in TASK-GWORKSPACE-003. After server restart, thumbnails render correctly.
+- Root cause: Stale server process. The backend thumbnail proxy endpoint was working correctly but the server had not been restarted to pick up the new endpoint from TASK-GWORKSPACE-003. After restart, thumbnails serve correctly (96KB PNG for `Bundling 10pcs.png`).
 - Classification: PROVEN stale server process
 
 **DEFECT-002 — Search Does Not Cover Shared Content**
-- Root cause: The `searchDrive()` function used a simple query `name contains '...' and trashed = false` without `includeItemsFromAllDrives` or `supportsAllDrives` parameters. This restricted search to the user's My Drive only, excluding shared resources. Additionally, the initial fix attempt used `corpora='allDrives'` and `orderBy='relevance'`, both of which caused "Invalid Value" errors from the Google Drive API (`corpora='allDrives'` is not a valid value, `orderBy='relevance'` is not a supported value).
-- Classification: PROVEN missing API parameters
+- Root cause (backend): `searchDrive()` used `corpora='allDrives'` (invalid value) and `orderBy='relevance'` (unsupported value), both causing "Invalid Value" errors from Google Drive API. Additionally, `includeItemsFromAllDrives` and `supportsAllDrives` were missing.
+- Fix: Removed invalid params, added `includeItemsFromAllDrives: 'true'` and `supportsAllDrives: 'true'`.
+- Classification: PROVEN invalid API parameters
+
+**DEFECT-003 — Frontend Search Calls Wrong Endpoint**
+- Root cause: `handleSearch()` called `loadFolder(undefined, undefined, searchQuery)` which hits `/api/google/drive/list?search=...`. The `/list` endpoint uses `listDriveFolder()` which scopes to `'root' in parents` (My Drive root only), excluding shared content. The correct endpoint is `/api/google/drive/search?q=...`.
+- Fix: Added dedicated `loadSearchResults()` function calling `/api/google/drive/search?q=...`. Updated `handleSearch()` and "Load more" pagination to use it.
+- Classification: PROVEN frontend-backend endpoint mismatch
 
 ### Files Changed
 
 | File | Change |
 |------|--------|
-| `src/services/google/drive-service.ts` | Fixed search: removed invalid `corpora` and `orderBy` params, added `includeItemsFromAllDrives` and `supportsAllDrives` to `searchDrive()` and `driveList()` |
-| `src/features/google/components/google-drive-browser.tsx` | Added grid/preview view mode with LayoutGrid/List toggle icons |
-
-### Implementation
-
-**Search fix (`drive-service.ts`)**
-- Removed `corpora: 'allDrives'` (invalid value for API)
-- Removed `orderBy: 'relevance'` (not a supported Drive API value)
-- Added `includeItemsFromAllDrives: 'true'` and `supportsAllDrives: 'true'` to both `searchDrive()` and `driveList()`
-- Search now returns shared resources like `Kanal.asia Web Workflow Blueprint` and `Blueprint Workflow`
-
-**Grid/Preview view (`google-drive-browser.tsx`)**
-- Added `LayoutGrid` and `List` icon imports
-- Added `ViewMode` type (`'list' | 'grid'`)
-- Added `viewMode` state with toggle buttons in header
-- Grid view: responsive grid (2-5 columns), shows thumbnail or file-type icon in aspect-square containers, filename and date below
-- List view: unchanged compact row layout with thumbnails
-- View mode switch preserves current location, search state, and auth state
+| `src/services/google/drive-service.ts` | Fixed search: removed invalid `corpora`/`orderBy`, added `includeItemsFromAllDrives`/`supportsAllDrives` to `searchDrive()` and `driveList()` |
+| `src/features/google/components/google-drive-browser.tsx` | Added grid/preview view mode; added `loadSearchResults()` calling `/api/google/drive/search`; fixed `handleSearch()` and "Load more" to use search endpoint |
 
 ### Runtime Evidence
 
-| Test | Result |
-|------|--------|
-| `GET /api/google/drive/my-drive` | Returns files with `hasThumbnail=true` for images/videos |
-| `GET /api/google/drive/thumbnail/:id` | Returns 96KB PNG thumbnail for `Bundling 10pcs.png` |
-| `GET /api/google/drive/search?q=blueprint` | Returns `Kanal.asia Web Workflow Blueprint`, `Blueprint Workflow`, and 10 other results |
-| `GET /api/google/drive/search?q=bundling` | Returns 21 bundling-related files |
-| `GET /api/google/drive/starred` | Returns `Kanal Beta Team`, `Kanal Alpha Team`, `Kanal Confidential` |
-| `GET /api/google/drive/shared` | Returns shared resources including `Kanal Consultant` |
+| Test | Endpoint | Result |
+|------|----------|--------|
+| Search `blueprint` (backend) | `GET /api/google/drive/search?q=blueprint` | Returns `Kanal.asia Web Workflow Blueprint`, `Blueprint Workflow` + 10 more |
+| Search `blueprint` (via Vite proxy) | `GET http://localhost:5173/api/google/drive/search?q=blueprint` | Same 12 results |
+| Search `bundling` (via Vite proxy) | `GET http://localhost:5173/api/google/drive/search?q=bundling` | 21 results |
+| My Drive thumbnails | `GET /api/google/drive/my-drive` | `hasThumbnail=true` for images/videos |
+| Thumbnail proxy | `GET /api/google/drive/thumbnail/:id` | Serves 96KB PNG |
+| Starred | `GET /api/google/drive/starred` | `Kanal Beta Team`, `Kanal Alpha Team`, `Kanal Confidential` |
+| Shared | `GET /api/google/drive/shared` | `Kanal Consultant`, shared spreadsheets |
 
 ### Security
 
@@ -67,17 +58,16 @@ Rework the existing Google Drive Explorer based on runtime evidence: fix thumbna
 | Check | Result |
 |-------|--------|
 | TypeScript | PASS |
-| Build | PASS (1.67s) |
+| Build | PASS (1.79s) |
 | Lint | PASS (1 pre-existing warning) |
 
 ### Known Limitations
 
-1. Google Drive API `orderBy='relevance'` is not supported; search results are returned in API default order
-2. `corpora='allDrives'` requires specific shared drive access and is not needed when `includeItemsFromAllDrives=true` is used instead
-3. Google Drive API must be enabled in Google Cloud Console for full functionality
+1. Google Drive API does not support `orderBy='relevance'`; search results use API default order
+2. Google Drive API must be enabled in Google Cloud Console for full functionality
 
 ### Git
 
 - branch: `task/gworkspace-002-r1-drive-access-rework`
 - commit hash: *pending*
-- commit message: `fix(gworkspace): search shared content, add grid view (TASK-GWORKSPACE-003-R1)`
+- commit message: `fix(gworkspace): fix frontend search routing to use /search endpoint (TASK-GWORKSPACE-003-R1)`

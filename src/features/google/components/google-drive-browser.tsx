@@ -233,14 +233,13 @@ export function GoogleDriveBrowser({
   }, [])
 
   // Load folder contents
-  const loadFolder = useCallback(async (folderId?: string, pageToken?: string, search?: string) => {
+  const loadFolder = useCallback(async (folderId?: string, pageToken?: string) => {
     setLoadingFiles(true)
     setError(null)
     try {
       const params = new URLSearchParams()
       if (folderId) params.set('folderId', folderId)
       if (pageToken) params.set('pageToken', pageToken)
-      if (search) params.set('search', search)
 
       const data = await apiFetch<DriveListResponse>(
         `/api/google/drive/list?${params.toString()}`
@@ -254,6 +253,31 @@ export function GoogleDriveBrowser({
       setNextPageToken(data.nextPageToken)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load files.')
+    } finally {
+      setLoadingFiles(false)
+    }
+  }, [])
+
+  // Search Drive globally (uses /api/google/drive/search, not /list)
+  const loadSearchResults = useCallback(async (query: string, pageToken?: string) => {
+    setLoadingFiles(true)
+    setError(null)
+    try {
+      const params = new URLSearchParams({ q: query })
+      if (pageToken) params.set('pageToken', pageToken)
+
+      const data = await apiFetch<DriveListResponse>(
+        `/api/google/drive/search?${params.toString()}`
+      )
+
+      if (pageToken) {
+        setFiles((prev) => [...prev, ...data.files])
+      } else {
+        setFiles(data.files)
+      }
+      setNextPageToken(data.nextPageToken)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to search Drive.')
     } finally {
       setLoadingFiles(false)
     }
@@ -338,7 +362,7 @@ export function GoogleDriveBrowser({
   const handleSearch = () => {
     if (searchQuery.trim()) {
       setIsSearching(true)
-      void loadFolder(undefined, undefined, searchQuery.trim())
+      void loadSearchResults(searchQuery.trim())
     }
   }
 
@@ -746,7 +770,7 @@ export function GoogleDriveBrowser({
                     className='w-full'
                     onClick={() => {
                       if (isSearching) {
-                        void loadFolder(currentFolderId, nextPageToken, searchQuery)
+                        void loadSearchResults(searchQuery, nextPageToken)
                       } else if (currentFolderId) {
                         void loadFolder(currentFolderId, nextPageToken)
                       } else {

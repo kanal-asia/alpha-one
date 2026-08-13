@@ -15,4 +15,19 @@ export type {
   OAuthState,
 } from './oauth-service'
 
+export {
+  listDriveFolder,
+  getFolderMeta,
+  getFolderBreadcrumb,
+  searchDrive,
+  checkDriveConnection,
+} from './drive-service'
+
+export type {
+  DriveFile,
+  DriveListResponse,
+  DriveFolderMeta,
+} from './drive-service'
+
 export { createGoogleOAuthRouter } from './oauth-router'
+export { createGoogleDriveRouter } from './drive-router'

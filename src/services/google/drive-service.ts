@@ -1,0 +1,275 @@
+/**
+ * Google Drive API Service
+ *
+ * Server-side service for browsing Google Drive using the authenticated
+ * user's OAuth connection. All Google API calls use server-side tokens.
+ */
+import { getValidAccessToken, getConnection } from './oauth-service'
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface DriveFile {
+  id: string
+  name: string
+  mimeType: string
+  isFolder: boolean
+  modifiedTime: string
+  size?: string
+  iconLink?: string
+  webViewLink?: string
+  parents?: string[]
+}
+
+export interface DriveListResponse {
+  files: DriveFile[]
+  nextPageToken?: string
+}
+
+export interface DriveFolderMeta {
+  id: string
+  name: string
+  mimeType: string
+  modifiedTime: string
+  parents?: string[]
+}
+
+// ---------------------------------------------------------------------------
+// Google Drive API Helpers
+// ---------------------------------------------------------------------------
+
+const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3'
+const FOLDER_MIME = 'application/vnd.google-apps.folder'
+
+async function driveFetch<T>(
+  userId: string,
+  path: string,
+  params?: Record<string, string>
+): Promise<T> {
+  const token = await getValidAccessToken(userId)
+  if (!token) {
+    throw new Error('Google account not connected. Please connect your Google account in Settings.')
+  }
+
+  const url = new URL(`${DRIVE_API_BASE}${path}`)
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, value)
+    }
+  }
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({})) as { error?: { message?: string; code?: number } }
+    const message = error.error?.message ?? `Google Drive API error: ${response.status}`
+    const code = error.error?.code ?? response.status
+
+    if (code === 401) {
+      throw new Error('Google authorization expired or revoked. Please reconnect your Google account.')
+    }
+    if (code === 403) {
+      throw new Error('Permission denied. You do not have access to this resource.')
+    }
+    if (code === 404) {
+      throw new Error('Folder or file not found.')
+    }
+    throw new Error(message)
+  }
+
+  return response.json() as Promise<T>
+}
+
+// ---------------------------------------------------------------------------
+// Drive Operations
+// ---------------------------------------------------------------------------
+
+/**
+ * List contents of a Google Drive folder.
+ * If folderId is undefined, lists the root folder.
+ */
+export async function listDriveFolder(
+  userId: string,
+  folderId?: string,
+  pageToken?: string,
+  searchQuery?: string
+): Promise<DriveListResponse> {
+  const params: Record<string, string> = {
+    fields: 'nextPageToken,files(id,name,mimeType,modifiedTime,size,iconLink,webViewLink,parents)',
+    pageSize: '100',
+    orderBy: 'name',
+  }
+
+  // Build query
+  const queryParts: string[] = []
+
+  if (folderId) {
+    queryParts.push(`'${folderId}' in parents`)
+  } else {
+    // Root: show files without explicit parent or in root
+    queryParts.push("'root' in parents")
+  }
+
+  // Exclude trashed
+  queryParts.push('trashed = false')
+
+  // Search query
+  if (searchQuery) {
+    queryParts.push(`name contains '${searchQuery.replace(/'/g, "\\'")}'`)
+  }
+
+  params.q = queryParts.join(' and ')
+
+  if (pageToken) {
+    params.pageToken = pageToken
+  }
+
+  const response = await driveFetch<{ files: Array<{
+    id: string
+    name: string
+    mimeType: string
+    modifiedTime: string
+    size?: string
+    iconLink?: string
+    webViewLink?: string
+    parents?: string[]
+  }>; nextPageToken?: string }>(userId, '/files', params)
+
+  return {
+    files: response.files.map((file) => ({
+      id: file.id,
+      name: file.name,
+      mimeType: file.mimeType,
+      isFolder: file.mimeType === FOLDER_MIME,
+      modifiedTime: file.modifiedTime,
+      size: file.size,
+      iconLink: file.iconLink,
+      webViewLink: file.webViewLink,
+      parents: file.parents,
+    })),
+    nextPageToken: response.nextPageToken,
+  }
+}
+
+/**
+ * Get metadata for a specific folder.
+ */
+export async function getFolderMeta(
+  userId: string,
+  folderId: string
+): Promise<DriveFolderMeta> {
+  const file = await driveFetch<{
+    id: string
+    name: string
+    mimeType: string
+    modifiedTime: string
+    parents?: string[]
+  }>(userId, `/files/${folderId}`, {
+    fields: 'id,name,mimeType,modifiedTime,parents',
+  })
+
+  if (file.mimeType !== FOLDER_MIME) {
+    throw new Error('The specified ID is not a folder.')
+  }
+
+  return {
+    id: file.id,
+    name: file.name,
+    mimeType: file.mimeType,
+    modifiedTime: file.modifiedTime,
+    parents: file.parents,
+  }
+}
+
+/**
+ * Build breadcrumb path for a folder by walking up the parent chain.
+ */
+export async function getFolderBreadcrumb(
+  userId: string,
+  folderId: string
+): Promise<DriveFolderMeta[]> {
+  const breadcrumb: DriveFolderMeta[] = []
+  let currentId: string | undefined = folderId
+
+  while (currentId) {
+    const meta = await getFolderMeta(userId, currentId)
+    breadcrumb.unshift(meta)
+    currentId = meta.parents?.[0]
+  }
+
+  return breadcrumb
+}
+
+/**
+ * Search Google Drive for files and folders.
+ */
+export async function searchDrive(
+  userId: string,
+  query: string,
+  pageToken?: string
+): Promise<DriveListResponse> {
+  const params: Record<string, string> = {
+    fields: 'nextPageToken,files(id,name,mimeType,modifiedTime,size,iconLink,webViewLink,parents)',
+    pageSize: '50',
+    orderBy: 'name',
+    q: `name contains '${query.replace(/'/g, "\\'")}' and trashed = false`,
+  }
+
+  if (pageToken) {
+    params.pageToken = pageToken
+  }
+
+  const response = await driveFetch<{ files: Array<{
+    id: string
+    name: string
+    mimeType: string
+    modifiedTime: string
+    size?: string
+    iconLink?: string
+    webViewLink?: string
+    parents?: string[]
+  }>; nextPageToken?: string }>(userId, '/files', params)
+
+  return {
+    files: response.files.map((file) => ({
+      id: file.id,
+      name: file.name,
+      mimeType: file.mimeType,
+      isFolder: file.mimeType === FOLDER_MIME,
+      modifiedTime: file.modifiedTime,
+      size: file.size,
+      iconLink: file.iconLink,
+      webViewLink: file.webViewLink,
+      parents: file.parents,
+    })),
+    nextPageToken: response.nextPageToken,
+  }
+}
+
+/**
+ * Check if user has a Google Drive connection.
+ */
+export async function checkDriveConnection(userId: string): Promise<{
+  connected: boolean
+  email?: string
+  error?: string
+}> {
+  const connection = await getConnection(userId)
+
+  if (!connection) {
+    return { connected: false, error: 'Google account not connected.' }
+  }
+
+  // Try to get a valid token
+  const token = await getValidAccessToken(userId)
+  if (!token) {
+    return { connected: false, error: 'Google authorization expired. Please reconnect.' }
+  }
+
+  return { connected: true, email: connection.email }
+}

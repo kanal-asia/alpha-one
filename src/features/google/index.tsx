@@ -3,21 +3,12 @@ import { PageHeader } from '@/components/page-header'
 import { PagePlaceholder } from '@/components/page-placeholder'
 import { GoogleWorkspacePage } from './components/google-workspace-page'
 import { GoogleConnectionCard } from './components/google-connection-card'
+import { GoogleDriveBrowser } from './components/google-drive-browser'
 
-export { GoogleWorkspacePage, GoogleConnectionCard }
+export { GoogleWorkspacePage, GoogleConnectionCard, GoogleDriveBrowser }
 
 export function GoogleDrivePage() {
-  return (
-    <>
-      <PageHeader />
-      <Main>
-        <PagePlaceholder
-          title='Google Drive'
-          description='Browse and manage your Google Drive files from the workspace.'
-        />
-      </Main>
-    </>
-  )
+  return <GoogleDriveBrowser />
 }
 
 export function GoogleDocsPage() {

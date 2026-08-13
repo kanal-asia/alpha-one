@@ -10,7 +10,7 @@ import { app, runtimeManager } from '../services/opencode/server'
 import { bootstrapPlatform } from '../platform/server/bootstrap'
 import { createWorkspaceRouter } from '../platform/server/router'
 import { createWorkspaceService } from '../platform/workspace/service'
-import { createGoogleOAuthRouter } from '../services/google'
+import { createGoogleOAuthRouter, createGoogleDriveRouter } from '../services/google'
 
 const workspaceRoot = process.cwd()
 const kernel = bootstrapPlatform({
@@ -24,6 +24,9 @@ app.use('/api/ws', createWorkspaceRouter(service))
 
 // Google Workspace OAuth
 app.use('/api/google/oauth', createGoogleOAuthRouter())
+
+// Google Drive API
+app.use('/api/google/drive', createGoogleDriveRouter())
 
 // Start server if run directly
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

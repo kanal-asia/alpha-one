@@ -18,6 +18,10 @@ import {
   resolveDriveReference,
   type ResolvedDriveReference,
 } from './drive-resolver'
+import {
+  resolveScriptReference,
+  type ResolvedScriptReference,
+} from './script-resolver'
 
 export interface ResolvedReference {
   reference: ReferenceAttachment
@@ -70,6 +74,18 @@ export async function resolveReferences(
         })
       } else {
         errors.push(drive as ReferenceResolutionError)
+      }
+    } else if (reference.provider === 'apps_script') {
+      const script = await resolveScriptReference(reference, ctx.userId)
+      if ('filePath' in script && (script as ResolvedScriptReference).filePath) {
+        resolved.push({
+          reference,
+          filePath: (script as ResolvedScriptReference).filePath,
+          mimeType: (script as ResolvedScriptReference).mimeType,
+          size: (script as ResolvedScriptReference).size,
+        })
+      } else {
+        errors.push(script as ReferenceResolutionError)
       }
     } else {
       errors.push({

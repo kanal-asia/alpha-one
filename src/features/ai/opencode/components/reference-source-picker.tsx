@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Cloud, File as FileIcon } from 'lucide-react'
+import { Cloud, File as FileIcon, FileCode } from 'lucide-react'
 import type { ReferenceAttachment } from '@/features/ai/references/contract'
 import { openDriveFilePicker } from '@/features/google/components/drive-file-picker'
 import { LocalFilePicker, type LocalFileSelection } from './local-file-picker'
@@ -103,6 +103,27 @@ export function ReferenceSourcePicker({
           >
             <Cloud className='size-4' />
             Google Drive file
+          </Button>
+          <Button
+            variant='ghost'
+            size='sm'
+            className='h-9 w-full justify-start gap-2'
+            onClick={() => {
+              setOpen(false)
+              const scriptId = prompt('Enter Google Apps Script Project Script ID:')
+              if (scriptId && scriptId.trim()) {
+                const name = prompt('Enter a display name for this Apps Script project:', 'Matching SKU Platform Marketplace') ?? 'Apps Script Project'
+                onAddReference({
+                  provider: 'apps_script',
+                  name: name.trim(),
+                  fileId: scriptId.trim(),
+                  mimeType: 'application/vnd.google-apps.script',
+                })
+              }
+            }}
+          >
+            <FileCode className='size-4 text-amber-600' />
+            Google Apps Script
           </Button>
           <p className='px-2 pb-1 text-[11px] text-muted-foreground'>
             Only file metadata is attached; content is resolved server-side.

@@ -1,4 +1,4 @@
-import { Cloud, File as FileIcon, X } from 'lucide-react'
+import { Cloud, File as FileIcon, FileCode, X } from 'lucide-react'
 import type { ReferenceAttachment } from '@/features/ai/references/contract'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -18,15 +18,17 @@ export function ReferenceChips({
       {references.map((ref, i) => (
         <span
           key={ref.fileId ?? ref.path ?? `${ref.provider}-${ref.name}-${i}`}
-          className='inline-flex max-w-full items-center gap-1 rounded-full border bg-muted/60 px-2 py-0.5 text-xs text-foreground/80'
+          className='inline-flex max-w-full items-center gap-1 rounded-full border bg-muted/60 px-2.5 py-0.5 text-xs text-foreground/80'
         >
           {ref.provider === 'google_drive' ? (
             <Cloud className='size-3 shrink-0' />
+          ) : ref.provider === 'apps_script' ? (
+            <FileCode className='size-3 shrink-0 text-amber-600' />
           ) : (
             <FileIcon className='size-3 shrink-0' />
           )}
-          <span className='max-w-[180px] truncate' title={ref.path ?? ref.name}>
-            {ref.name}
+          <span className='max-w-[200px] truncate' title={ref.provider === 'apps_script' ? `Apps Script · Script ID: ${ref.fileId}` : (ref.path ?? ref.name)}>
+            {ref.name} {ref.provider === 'apps_script' && <span className='text-[10px] text-muted-foreground'>({ref.fileId})</span>}
           </span>
           {onRemove && (
             <Button

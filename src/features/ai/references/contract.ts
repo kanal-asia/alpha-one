@@ -6,7 +6,7 @@
  * owns resolution and on-demand content access.
  */
 
-export type ReferenceProvider = 'local' | 'google_drive'
+export type ReferenceProvider = 'local' | 'google_drive' | 'apps_script'
 
 export interface ReferenceAttachment {
   /** Frontend-generated temporary reference id (optional). */
@@ -44,10 +44,10 @@ export interface ReferenceResolutionError {
 export function isReferenceAttachment(value: unknown): value is ReferenceAttachment {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
-  if (v.provider !== 'local' && v.provider !== 'google_drive') return false
+  if (v.provider !== 'local' && v.provider !== 'google_drive' && v.provider !== 'apps_script') return false
   if (typeof v.name !== 'string' || !v.name) return false
   if (v.provider === 'local' && (typeof v.path !== 'string' || !v.path)) return false
-  if (v.provider === 'google_drive' && (typeof v.fileId !== 'string' || !v.fileId)) return false
+  if ((v.provider === 'google_drive' || v.provider === 'apps_script') && (typeof v.fileId !== 'string' || !v.fileId)) return false
   return true
 }
 
@@ -61,7 +61,7 @@ export function sanitizeReference(
     mimeType: reference.mimeType,
     size: reference.size,
     path: reference.provider === 'local' ? reference.path : undefined,
-    fileId: reference.provider === 'google_drive' ? reference.fileId : undefined,
+    fileId: (reference.provider === 'google_drive' || reference.provider === 'apps_script') ? reference.fileId : undefined,
     modifiedTime: reference.modifiedTime,
   }
 }

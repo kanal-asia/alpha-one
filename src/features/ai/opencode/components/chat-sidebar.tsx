@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import {
+  Archive,
+  ArchiveRestore,
   MessageSquarePlus,
   Pencil,
   Search,
   Trash2,
   MessagesSquare,
+  MoreVertical,
 } from 'lucide-react'
 import { type Chat } from '../types'
 import { Button } from '@/components/ui/button'
@@ -17,6 +20,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 type ChatSidebarProps = {
   chats: Chat[]
@@ -24,6 +37,7 @@ type ChatSidebarProps = {
   onNew: () => void
   onSelect: (id: string) => void
   onRename: (id: string, title: string) => void
+  onArchive: (id: string, archived: boolean) => void
   onDelete: (id: string) => void
 }
 
@@ -33,11 +47,17 @@ export function ChatSidebar({
   onNew,
   onSelect,
   onRename,
+  onArchive,
   onDelete,
 }: ChatSidebarProps) {
   const [query, setQuery] = useState('')
+  const [tab, setTab] = useState<'active' | 'archived'>('active')
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
 
-  const filtered = chats.filter((c) =>
+  const activeChats = chats.filter((c) => !c.archived)
+  const archivedChats = chats.filter((c) => c.archived)
+  const currentList = tab === 'active' ? activeChats : archivedChats
+  const filtered = currentList.filter((c) =>
     c.title.toLowerCase().includes(query.toLowerCase())
   )
 
@@ -49,7 +69,7 @@ export function ChatSidebar({
           New Chat
         </Button>
       </div>
-      <div className='px-3 pb-2'>
+      <div className='px-3 pb-2 space-y-2'>
         <div className='relative'>
           <Search className='absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground' />
           <Input
@@ -59,12 +79,34 @@ export function ChatSidebar({
             className='h-8 ps-8 text-xs'
           />
         </div>
+        <div className='flex items-center gap-1 rounded-lg bg-muted p-0.5 text-xs font-medium'>
+          <button
+            type='button'
+            onClick={() => setTab('active')}
+            className={cn(
+              'flex-1 rounded-md py-1 text-center transition-colors',
+              tab === 'active' ? 'bg-background shadow-xs text-foreground' : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Active ({activeChats.length})
+          </button>
+          <button
+            type='button'
+            onClick={() => setTab('archived')}
+            className={cn(
+              'flex-1 rounded-md py-1 text-center transition-colors',
+              tab === 'archived' ? 'bg-background shadow-xs text-foreground' : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Archived ({archivedChats.length})
+          </button>
+        </div>
       </div>
       <ScrollArea className='min-h-0 flex-1 px-2'>
         {filtered.length === 0 ? (
           <div className='flex flex-col items-center gap-2 px-3 py-10 text-center text-xs text-muted-foreground'>
             <MessagesSquare className='size-5' />
-            No conversations yet.
+            {tab === 'active' ? 'No active conversations.' : 'No archived conversations.'}
           </div>
         ) : (
           <ul className='space-y-1 pb-3'>
@@ -102,7 +144,7 @@ export function ChatSidebar({
                         className='size-6 opacity-0 group-hover:opacity-100'
                         aria-label='Chat options'
                       >
-                        <Pencil className='size-3.5' />
+                        <MoreVertical className='size-3.5' />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align='end'>
@@ -116,8 +158,23 @@ export function ChatSidebar({
                         Rename
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        className='text-destructive'
-                        onClick={() => onDelete(chat.id)}
+                        onClick={() => onArchive(chat.id, !chat.archived)}
+                      >
+                        {chat.archived ? (
+                          <>
+                            <ArchiveRestore className='me-2 size-3.5' />
+                            Unarchive
+                          </>
+                        ) : (
+                          <>
+                            <Archive className='me-2 size-3.5' />
+                            Archive
+                          </>
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className='text-destructive focus:text-destructive'
+                        onClick={() => setDeleteTargetId(chat.id)}
                       >
                         <Trash2 className='me-2 size-3.5' />
                         Delete
@@ -130,6 +187,31 @@ export function ChatSidebar({
           </ul>
         )}
       </ScrollArea>
+
+      <AlertDialog open={deleteTargetId !== null} onOpenChange={(o) => !o && setDeleteTargetId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this chat?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This conversation will be permanently removed from this workspace.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className='bg-destructive text-destructive-foreground hover:bg-destructive/95'
+              onClick={() => {
+                if (deleteTargetId) {
+                  onDelete(deleteTargetId)
+                  setDeleteTargetId(null)
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

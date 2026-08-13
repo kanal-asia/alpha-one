@@ -185,6 +185,8 @@ export interface Chat {
   usage?: ChatUsage
   /** Derived context usage vs the active model's context window. */
   context?: ChatContext | null
+  /** Whether the chat is archived. */
+  archived?: boolean
 }
 
 /** Mirrors the backend `opencode stats` parser (native totals). */

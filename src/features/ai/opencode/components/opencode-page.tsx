@@ -32,6 +32,7 @@ export function OpenCodeDashboard() {
     newChat,
     selectChat,
     renameChat,
+    archiveChat,
     deleteChat,
     sendMessage,
     stopGeneration,
@@ -72,6 +73,7 @@ export function OpenCodeDashboard() {
             onNew={newChat}
             onSelect={selectChat}
             onRename={renameChat}
+            onArchive={archiveChat}
             onDelete={deleteChat}
           />
         </aside>
@@ -107,6 +109,7 @@ export function OpenCodeDashboard() {
                   onNew={newChat}
                   onSelect={selectChat}
                   onRename={renameChat}
+                  onArchive={archiveChat}
                   onDelete={deleteChat}
                 />
               </SheetContent>

@@ -43,6 +43,7 @@ export function AssistantChatPage() {
     newChat,
     selectChat,
     renameChat,
+    archiveChat,
     deleteChat,
     sendMessage,
     stopGeneration,
@@ -84,6 +85,7 @@ export function AssistantChatPage() {
             onNew={newChat}
             onSelect={selectChat}
             onRename={renameChat}
+            onArchive={archiveChat}
             onDelete={deleteChat}
           />
         </aside>
@@ -167,6 +169,7 @@ export function AssistantChatPage() {
                   onNew={newChat}
                   onSelect={selectChat}
                   onRename={renameChat}
+                  onArchive={archiveChat}
                   onDelete={deleteChat}
                 />
               </SheetContent>

@@ -23,6 +23,16 @@ import {
 } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { OpenCodeConfigCard } from './opencode-config-card'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 const API_BASE = '/api/opencode'
 
@@ -36,8 +46,25 @@ export function OpenCodeSettingsPage() {
     modes,
     loadModels,
     loadProviders,
+    chats,
+    clearLocalCache,
   } = useOpenCodeStore()
   const [providerDialogOpen, setProviderDialogOpen] = useState(false)
+  const [clearCacheOpen, setClearCacheOpen] = useState(false)
+  const [storageBytes, setStorageBytes] = useState(() => {
+    let bytes = 0
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key && key.includes('opencode')) {
+          bytes += (key.length + (localStorage.getItem(key)?.length ?? 0))
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return bytes
+  })
 
   const defaultProvider = models.find(
     (m) => m.id === settings.defaultModel
@@ -110,6 +137,33 @@ export function OpenCodeSettingsPage() {
                 checked={settings.developerMode}
                 onCheckedChange={(v) => updateSettings({ developerMode: v })}
               />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className='text-base'>Storage & Data</CardTitle>
+            <CardDescription>
+              Manage local OpenCode workspace storage and browser cache.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className='space-y-4'>
+            <div className='flex items-center justify-between text-sm'>
+              <div className='space-y-0.5'>
+                <p className='font-medium'>Estimated Storage Used</p>
+                <p className='text-xs text-muted-foreground'>
+                  {(storageBytes / 1024).toFixed(1)} KB across {chats.length} saved conversation{chats.length === 1 ? '' : 's'} and local preferences.
+                </p>
+              </div>
+              <Button
+                variant='outline'
+                size='sm'
+                className='text-destructive hover:text-destructive'
+                onClick={() => setClearCacheOpen(true)}
+              >
+                Clear Local Cache
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -342,6 +396,44 @@ export function OpenCodeSettingsPage() {
           onOpenChange={setProviderDialogOpen}
           onRefreshed={() => void loadModels()}
         />
+
+        <AlertDialog open={clearCacheOpen} onOpenChange={setClearCacheOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Clear local cache?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This removes temporary OpenCode/AI Assistant cache from this browser. Your provider credentials and saved conversations will not be intentionally removed.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className='bg-destructive text-destructive-foreground hover:bg-destructive/95'
+                onClick={() => {
+                  clearLocalCache()
+                  setStorageBytes(() => {
+                    let bytes = 0
+                    try {
+                      for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i)
+                        if (key && key.includes('opencode')) {
+                          bytes += (key.length + (localStorage.getItem(key)?.length ?? 0))
+                        }
+                      }
+                    } catch {
+                      /* ignore */
+                    }
+                    return bytes
+                  })
+                  setClearCacheOpen(false)
+                  toast.success('Local cache cleared successfully.')
+                }}
+              >
+                Clear Cache
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </AILayout>
   )

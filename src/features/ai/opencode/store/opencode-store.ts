@@ -161,7 +161,9 @@ interface OpenCodeStore {
   newChat: () => void
   selectChat: (id: string) => void
   renameChat: (id: string, title: string) => void
+  archiveChat: (id: string, archived: boolean) => void
   deleteChat: (id: string) => void
+  clearLocalCache: () => void
   sendMessage: (prompt: string, references?: ReferenceAttachment[]) => Promise<void>
   stopGeneration: () => void
   retryLast: () => Promise<void>
@@ -398,6 +400,20 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
         c.id === id ? { ...c, title: title || c.title, updatedAt: new Date().toISOString() } : c
       ),
     }))
+    saveChats(get().chats)
+  },
+
+  archiveChat: (id, archived) => {
+    set((state) => {
+      const chats = state.chats.map((c) =>
+        c.id === id ? { ...c, archived, updatedAt: new Date().toISOString() } : c
+      )
+      const activeChatId =
+        state.activeChatId === id && archived
+          ? (chats.find((c) => !c.archived)?.id ?? null)
+          : state.activeChatId
+      return { chats, activeChatId }
+    })
     saveChats(get().chats)
   },
 
@@ -747,6 +763,13 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
   },
 
   clearLogs: () => set({ logs: [], runtimeEvents: [] }),
+  clearLocalCache: () => {
+    try {
+      localStorage.removeItem('alpha-workspace:opencode-model-prefs')
+    } catch {
+      /* ignore */
+    }
+  },
 }))
 
 async function ensureRunning(get: () => OpenCodeStore) {

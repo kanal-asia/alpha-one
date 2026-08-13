@@ -16,6 +16,7 @@ import {
   getFolderBreadcrumb,
   searchDrive,
   checkDriveConnection,
+  getDriveFileThumbnail,
 } from './drive-service'
 
 export function createGoogleDriveRouter(): Router {
@@ -245,6 +246,36 @@ export function createGoogleDriveRouter(): Router {
     } catch (err) {
       return res.status(500).json({
         error: err instanceof Error ? err.message : 'Failed to get breadcrumb.',
+      })
+    }
+  })
+
+  /**
+   * GET /api/google/drive/thumbnail/:fileId
+   * Proxy Google Drive thumbnail with server-side authentication.
+   * Returns the image directly (not JSON) with appropriate caching headers.
+   */
+  router.get('/thumbnail/:fileId', async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req)
+      const fileId = req.params.fileId
+
+      const connectionStatus = await checkDriveConnection(userId)
+      if (!connectionStatus.connected) {
+        return res.status(401).json({ error: 'Google account not connected.' })
+      }
+
+      const thumbnail = await getDriveFileThumbnail(userId, fileId)
+      if (!thumbnail) {
+        return res.status(404).json({ error: 'Thumbnail not available.' })
+      }
+
+      res.setHeader('Content-Type', thumbnail.contentType)
+      res.setHeader('Cache-Control', 'private, max-age=3600')
+      return res.send(thumbnail.data)
+    } catch (err) {
+      return res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to fetch thumbnail.',
       })
     }
   })

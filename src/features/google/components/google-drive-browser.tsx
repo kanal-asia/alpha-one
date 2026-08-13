@@ -21,6 +21,7 @@ import {
   Clock,
   Users,
   HardDrive,
+  Play,
 } from 'lucide-react'
 import { Main } from '@/components/layout/main'
 import { PageHeader } from '@/components/page-header'
@@ -43,6 +44,9 @@ interface DriveFile {
   size?: string
   iconLink?: string
   webViewLink?: string
+  thumbnailLink?: string
+  hasThumbnail?: boolean
+  videoMediaMetadata?: { width?: number; height?: number; durationMillis?: string }
   parents?: string[]
 }
 
@@ -119,6 +123,20 @@ function formatSize(size?: string): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function isImageMime(mimeType: string): boolean {
+  return mimeType.startsWith('image/')
+}
+
+function isVideoMime(mimeType: string): boolean {
+  return mimeType.startsWith('video/')
+}
+
+function openFileInNewTab(webViewLink?: string) {
+  if (webViewLink) {
+    window.open(webViewLink, '_blank', 'noopener,noreferrer')
+  }
 }
 
 const NAV_TABS: { id: NavTab; label: string; icon: React.ElementType; endpoint: string }[] = [
@@ -545,22 +563,55 @@ export function GoogleDriveBrowser({
                     {files.map((file) => {
                       const Icon = getFileIcon(file.mimeType)
                       const isSelected = selectedFolder?.id === file.id
+                      const showThumbnail = !file.isFolder && file.hasThumbnail && (isImageMime(file.mimeType) || isVideoMime(file.mimeType))
+                      const canOpen = !file.isFolder && !!file.webViewLink
                       return (
                         <div
                           key={file.id}
                           className={cn(
                             'flex items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-muted/50',
                             file.isFolder && 'cursor-pointer',
+                            canOpen && 'cursor-pointer',
                             isSelected && 'bg-primary/10'
                           )}
-                          onClick={() => handleFolderClick(file)}
+                          onClick={() => {
+                            if (file.isFolder) {
+                              handleFolderClick(file)
+                            } else if (canOpen) {
+                              openFileInNewTab(file.webViewLink)
+                            }
+                          }}
                         >
-                          <Icon
-                            className={cn(
-                              'size-5 shrink-0',
-                              file.isFolder ? 'text-blue-500' : 'text-muted-foreground'
-                            )}
-                          />
+                          {showThumbnail ? (
+                            <div className='relative size-10 shrink-0 overflow-hidden rounded border'>
+                              <img
+                                src={`/api/google/drive/thumbnail/${file.id}`}
+                                alt={file.name}
+                                className='size-full object-cover'
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement
+                                  target.style.display = 'none'
+                                  const fallback = target.nextElementSibling as HTMLElement
+                                  if (fallback) fallback.style.display = 'flex'
+                                }}
+                              />
+                              <div className='absolute inset-0 hidden items-center justify-center bg-muted'>
+                                <Icon className='size-5 text-muted-foreground' />
+                              </div>
+                              {isVideoMime(file.mimeType) && (
+                                <div className='absolute inset-0 flex items-center justify-center bg-black/30'>
+                                  <Play className='size-4 text-white fill-white' />
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <Icon
+                              className={cn(
+                                'size-5 shrink-0',
+                                file.isFolder ? 'text-blue-500' : 'text-muted-foreground'
+                              )}
+                            />
+                          )}
                           <div className='min-w-0 flex-1'>
                             <p className='truncate font-medium'>{file.name}</p>
                             <p className='truncate text-xs text-muted-foreground'>
@@ -568,6 +619,9 @@ export function GoogleDriveBrowser({
                               {!file.isFolder && file.size && ` · ${formatSize(file.size)}`}
                             </p>
                           </div>
+                          {canOpen && !file.isFolder && (
+                            <ExternalLink className='size-4 shrink-0 text-muted-foreground' />
+                          )}
                           {file.isFolder && mode === 'pick-folder' && (
                             <Button
                               variant={isSelected ? 'default' : 'outline'}

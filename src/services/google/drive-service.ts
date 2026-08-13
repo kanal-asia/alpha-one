@@ -19,6 +19,9 @@ export interface DriveFile {
   size?: string
   iconLink?: string
   webViewLink?: string
+  thumbnailLink?: string
+  hasThumbnail?: boolean
+  videoMediaMetadata?: { width?: number; height?: number; durationMillis?: string }
   parents?: string[]
 }
 
@@ -94,7 +97,7 @@ async function driveFetch<T>(
 // ---------------------------------------------------------------------------
 
 /** Shared field set for all Drive list queries. */
-const LIST_FIELDS = 'nextPageToken,files(id,name,mimeType,modifiedTime,size,iconLink,webViewLink,parents)'
+const LIST_FIELDS = 'nextPageToken,files(id,name,mimeType,modifiedTime,size,iconLink,webViewLink,thumbnailLink,hasThumbnail,videoMediaMetadata,parents)'
 
 /** Map raw Google API file objects to our DriveFile type. */
 function mapDriveFiles(files: Array<{
@@ -105,6 +108,9 @@ function mapDriveFiles(files: Array<{
   size?: string
   iconLink?: string
   webViewLink?: string
+  thumbnailLink?: string
+  hasThumbnail?: boolean
+  videoMediaMetadata?: { width?: number; height?: number; durationMillis?: string }
   parents?: string[]
 }>): DriveFile[] {
   return files.map((file) => ({
@@ -116,6 +122,9 @@ function mapDriveFiles(files: Array<{
     size: file.size,
     iconLink: file.iconLink,
     webViewLink: file.webViewLink,
+    thumbnailLink: file.thumbnailLink,
+    hasThumbnail: file.hasThumbnail,
+    videoMediaMetadata: file.videoMediaMetadata,
     parents: file.parents,
   }))
 }
@@ -139,7 +148,10 @@ async function driveList(
 
   const response = await driveFetch<{ files: Array<{
     id: string; name: string; mimeType: string; modifiedTime: string
-    size?: string; iconLink?: string; webViewLink?: string; parents?: string[]
+    size?: string; iconLink?: string; webViewLink?: string
+    thumbnailLink?: string; hasThumbnail?: boolean
+    videoMediaMetadata?: { width?: number; height?: number; durationMillis?: string }
+    parents?: string[]
   }>; nextPageToken?: string }>(userId, '/files', params)
 
   return {
@@ -306,6 +318,9 @@ export async function searchDrive(
     size?: string
     iconLink?: string
     webViewLink?: string
+    thumbnailLink?: string
+    hasThumbnail?: boolean
+    videoMediaMetadata?: { width?: number; height?: number; durationMillis?: string }
     parents?: string[]
   }>; nextPageToken?: string }>(userId, '/files', params)
 
@@ -319,6 +334,9 @@ export async function searchDrive(
       size: file.size,
       iconLink: file.iconLink,
       webViewLink: file.webViewLink,
+      thumbnailLink: file.thumbnailLink,
+      hasThumbnail: file.hasThumbnail,
+      videoMediaMetadata: file.videoMediaMetadata,
       parents: file.parents,
     })),
     nextPageToken: response.nextPageToken,
@@ -346,4 +364,42 @@ export async function checkDriveConnection(userId: string): Promise<{
   }
 
   return { connected: true, email: connection.email }
+}
+
+/**
+ * Fetch a file's thumbnail from Google Drive with server-side authentication.
+ * Returns the image buffer and content type, or null if not available.
+ */
+export async function getDriveFileThumbnail(
+  userId: string,
+  fileId: string
+): Promise<{ data: Buffer; contentType: string } | null> {
+  const token = await getValidAccessToken(userId)
+  if (!token) return null
+
+  // First, get the thumbnailLink from the file metadata
+  const file = await driveFetch<{
+    thumbnailLink?: string
+    hasThumbnail?: boolean
+  }>(userId, `/files/${fileId}`, {
+    fields: 'thumbnailLink,hasThumbnail',
+  })
+
+  if (!file.thumbnailLink || !file.hasThumbnail) {
+    return null
+  }
+
+  // Google thumbnailLinks are short-lived and require auth.
+  // We need to add our access token and fetch the actual image.
+  const thumbnailUrl = new URL(file.thumbnailLink)
+  thumbnailUrl.searchParams.set('access_token', token)
+
+  const response = await fetch(thumbnailUrl.toString())
+  if (!response.ok) {
+    return null
+  }
+
+  const contentType = response.headers.get('content-type') ?? 'image/jpeg'
+  const arrayBuffer = await response.arrayBuffer()
+  return { data: Buffer.from(arrayBuffer), contentType }
 }

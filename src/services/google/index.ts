@@ -25,6 +25,7 @@ export {
   getFolderBreadcrumb,
   searchDrive,
   checkDriveConnection,
+  getDriveFileThumbnail,
 } from './drive-service'
 
 export type {

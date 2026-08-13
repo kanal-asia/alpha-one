@@ -86,9 +86,12 @@ export function OpenCodeConfigCard({ models }: { models: ModelInfo[] }) {
   return (
     <div className='space-y-4'>
       <div className='flex items-center justify-between gap-2'>
-        <div className='space-y-0.5'>
+        <div className='min-w-0 flex-1 space-y-0.5'>
           <Label>Config File</Label>
-          <p className='font-mono text-xs text-muted-foreground'>
+          <p
+            className='truncate font-mono text-xs text-muted-foreground'
+            title={state?.resolvedPath ?? ''}
+          >
             {state?.resolvedPath ?? 'Loading...'}
           </p>
         </div>

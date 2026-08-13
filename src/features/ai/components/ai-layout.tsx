@@ -47,7 +47,7 @@ export function AILayout({ children, rightPanel }: AILayoutProps) {
             })}
           </nav>
         </aside>
-        <div className='flex flex-1 flex-col'>
+        <div className='flex min-w-0 flex-1 flex-col'>
           <Separator />
           <div className='flex'>
             <main className='min-w-0 flex-1 p-4'>{children}</main>

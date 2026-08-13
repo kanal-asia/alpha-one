@@ -1,5 +1,8 @@
+import { useState } from 'react'
+import { Plug, RefreshCw } from 'lucide-react'
 import { AILayout } from '../../components/ai-layout'
 import { useOpenCodeStore } from '../store/opencode-store'
+import { ConnectProviderDialog } from './connect-provider-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -22,12 +25,25 @@ import { toast } from 'sonner'
 import { OpenCodeConfigCard } from './opencode-config-card'
 
 export function OpenCodeSettingsPage() {
-  const { settings, updateSettings, detect, installed, models, modes, loadModels } =
-    useOpenCodeStore()
+  const {
+    settings,
+    updateSettings,
+    detect,
+    installed,
+    models,
+    modes,
+    loadModels,
+    loadProviders,
+  } = useOpenCodeStore()
+  const [providerDialogOpen, setProviderDialogOpen] = useState(false)
+
+  const defaultProvider = models.find(
+    (m) => m.id === settings.defaultModel
+  )?.provider
 
   return (
     <AILayout>
-      <div className='mx-auto max-w-2xl space-y-4'>
+      <div className='mx-auto w-full min-w-0 max-w-2xl space-y-4'>
         <div className='space-y-1'>
           <h1 className='text-2xl font-bold tracking-tight'>OpenCode Settings</h1>
           <p className='text-sm text-muted-foreground'>
@@ -149,6 +165,14 @@ export function OpenCodeSettingsPage() {
               />
             </div>
             <div className='space-y-1'>
+              <Label>Default Provider</Label>
+              <p className='text-xs text-muted-foreground'>
+                {defaultProvider
+                  ? `Derived from the default model (${defaultProvider}).`
+                  : 'Resolved from the default model once one is selected.'}
+              </p>
+            </div>
+            <div className='space-y-1'>
               <Label htmlFor='mode'>Default Execution Mode</Label>
               <Select
                 value={settings.defaultMode}
@@ -166,9 +190,29 @@ export function OpenCodeSettingsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <Button variant='outline' onClick={() => void loadModels()}>
-              Refresh Models & Modes
-            </Button>
+            <div className='flex flex-wrap items-center gap-2'>
+              <Button
+                variant='outline'
+                size='sm'
+                className='gap-1.5'
+                onClick={() => setProviderDialogOpen(true)}
+              >
+                <Plug className='size-3.5' />
+                Manage Providers
+              </Button>
+              <Button
+                variant='outline'
+                size='sm'
+                className='gap-1.5'
+                onClick={() => {
+                  void loadModels()
+                  void loadProviders()
+                }}
+              >
+                <RefreshCw className='size-3.5' />
+                Refresh Providers & Models
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
@@ -257,6 +301,12 @@ export function OpenCodeSettingsPage() {
             </p>
           </CardContent>
         </Card>
+
+        <ConnectProviderDialog
+          open={providerDialogOpen}
+          onOpenChange={setProviderDialogOpen}
+          onRefreshed={() => void loadModels()}
+        />
       </div>
     </AILayout>
   )

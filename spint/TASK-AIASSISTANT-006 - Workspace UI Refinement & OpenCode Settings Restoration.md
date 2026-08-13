@@ -159,3 +159,50 @@ Corrective rework of Task 006, closing two end-user gaps without regressing Task
 - branch: `task/gworkspace-002-r1-drive-access-rework`
 - commit hash: `9cdfd29`
 - commit message: `fix(ai-assistant): complete Connect Provider catalog & expose OpenCode Settings from AI Assistant (TASK-AIASSISTANT-006R1)`
+
+---
+
+## TASK-AIASSISTANT-006R1 (corrective rework) — Settings Provider & Layout UX
+
+### Objective
+
+Corrective rework: fix the AI Assistant two-pane layout so the session sidebar and chat content scroll independently, fix the OpenCode Settings horizontal clipping at its root cause, add presentation-only provider priority ordering, and unify provider management into one shared registry/state/flow.
+
+### Changes
+
+1. `src/features/ai-assistant/components/assistant-chat-page.tsx` + `src/features/ai/opencode/components/opencode-page.tsx` — replaced `flex h-[calc(100vh-3.5rem)]` (wrong: header is `h-16` = 4rem) with a `data-layout="fixed"` wrapper (`flex min-h-0 flex-1 flex-col overflow-hidden`) containing an inner row (`flex min-h-0 flex-1 overflow-hidden`). `data-layout="fixed"` is the shell's designed mechanism (`has-data-[layout=fixed]:h-svh` + inset `h-[calc(100svh-(var(--spacing)*4))]`), which correctly constrains the column height while absorbing the 8px inset margins — the same mechanism `Main fixed` uses. Main chat column and both ScrollAreas got `min-h-0`; the `<aside>` got `overflow-hidden`.
+2. `src/features/ai/opencode/components/chat-sidebar.tsx` — ScrollArea `flex-1 px-2` → `min-h-0 flex-1 px-2`.
+3. `src/features/ai/opencode/components/opencode-config-card.tsx` — Config File row: wrapper `min-w-0 flex-1`, mono path `<p>` `truncate` + `title`. This was the root-cause offender that forced the AILayout flex row wider than the viewport at ≤900px (measured: `C:\Users\ASUS\.config\opencode\opencode.jsonc` clientW 218 / scrollW 359, overflowX visible) while global `html { overflow-x: hidden }` clipped the cards.
+4. `src/features/ai/components/ai-layout.tsx` — right column `flex flex-1 flex-col` → `flex min-w-0 flex-1 flex-col` (flex min-content hygiene).
+5. `src/services/opencode/client.ts` — `fetchProviders()` sort now: connection rank → presentation priority (`PROVIDER_PRIORITY = ["opencode","openai","anthropic","google","google-vertex","openrouter"]`) → display name. Presentation-only; IDs are taken verbatim from the runtime/registry and a priority ID not in the catalog simply never appears; availability source of truth stays the registry/runtime.
+6. `src/features/ai/opencode/store/opencode-store.ts` — added `providers`, `providersLoaded`, `loadProviders()` (calls `openCodeService.listProviders()`).
+7. `src/features/ai/opencode/components/connect-provider-dialog.tsx` — refactored to consume the shared store list (`providers`/`providersLoaded`/`loadProviders`) instead of local state, added `onRefreshed?: () => void` prop fired after reload (Refresh / Disconnect), removing the duplicate local provider fetch. Same dialog is now the single provider-management flow everywhere.
+8. `src/features/ai/opencode/components/model-selector.tsx` — passes `onRefreshed={onRefresh}` to the dialog.
+9. `src/features/ai/opencode/components/settings-page.tsx` — content wrapper `mx-auto max-w-2xl` → `mx-auto w-full min-w-0 max-w-2xl`; Provider card: added **Manage Providers** button opening the shared `ConnectProviderDialog` (`onRefreshed={() => void loadModels()}`), a read-only **Default Provider** line derived from the default model's provider, and renamed the refresh action to **Refresh Providers & Models** (calls `loadProviders()` + `loadModels()`).
+
+### Validation
+
+| Check | Result |
+| --- | --- |
+| `npx tsc -b` | PASS |
+| `npx eslint .` | PASS (0 errors) |
+| `npm run build` | PASS |
+| Vitest (headless chromium) | 93/95 pass; 2 pre-existing failures in `src/context/search-provider.test.tsx` (that test carries unrelated uncommitted changes expecting `/productivity/spreadsheet` + `/google/drive` navigation that the current tree's CommandMenu does not expose) — NOT caused by this task |
+| Playwright layout (1280×800, `/workspace/assistant` + `/ai/opencode`): chat ScrollArea clientH 624 / scrollH 1324 `canScroll=true`; sidebar ScrollArea same; `verticalBodyScroll=false`; `horizontalOverflow=false`; `docH==clientH==800` | PASS |
+| Playwright settings (768/900/1100, `/ai/opencode/settings`): `horizontalOverflow=false`, `clippedCards=0` (6 cards), config path `truncate: ellipsis`, main right within viewport | PASS |
+| `GET /api/opencode/providers` — total 184; ordering connection-first then priority: connected opencode→google→google-vertex, configured openrouter, available openai→anthropic→rest alphabetical | PASS |
+| Runtime restart rule (health → stop exact listener 13972 → start once → verify) | PASS (new listener PID 5312, health=healthy) |
+
+### Constraints honored
+
+- No hard-coded provider source of truth (priority list is presentation-only, verified against the live catalog).
+- One provider registry/service/connection state — no duplicate provider fetching, no parallel credential store.
+- No fake connected/available states; UNKNOWN/absent providers simply don't rank.
+- MCP/Plugin management remains out of scope (unchanged).
+- Independent sidebar scrolling preserved and proven (no regression).
+
+### Git (006R1 corrective)
+
+- branch: `task/gworkspace-002-r1-drive-access-rework`
+- commit hash: pending
+- commit message: `fix(ai-assistant): correct settings provider and layout UX`

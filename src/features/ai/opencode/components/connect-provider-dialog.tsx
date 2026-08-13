@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Cloud,
   Copy,
@@ -11,6 +11,7 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { openCodeService } from '../services/opencode-service'
+import { useOpenCodeStore } from '../store/opencode-store'
 import type { OpenCodeAuthResult, ProviderSummary } from '../types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -28,6 +29,7 @@ import { cn } from '@/lib/utils'
 interface ConnectProviderDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onRefreshed?: () => void
 }
 
 const CONNECTION_LABEL: Record<ProviderSummary['connection'], string> = {
@@ -44,43 +46,25 @@ function isConnected(p: ProviderSummary): boolean {
 export function ConnectProviderDialog({
   open,
   onOpenChange,
+  onRefreshed,
 }: ConnectProviderDialogProps) {
-  const [providers, setProviders] = useState<ProviderSummary[]>([])
-  const [loading, setLoading] = useState(true)
+  const providers = useOpenCodeStore((s) => s.providers)
+  const providersLoaded = useOpenCodeStore((s) => s.providersLoaded)
+  const loadProviders = useOpenCodeStore((s) => s.loadProviders)
   const [busy, setBusy] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [result, setResult] = useState<{ providerId: string } & OpenCodeAuthResult | null>(null)
   const [copied, setCopied] = useState(false)
 
-  const load = useCallback(async () => {
-    try {
-      const list = await openCodeService.listProviders()
-      setProviders(list)
-    } catch {
-      setProviders([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  const reload = useCallback(async () => {
-    setLoading(true)
-    await load()
-  }, [load])
+  const reload = async () => {
+    await loadProviders()
+    onRefreshed?.()
+  }
 
   useEffect(() => {
     if (!open) return
-    let cancelled = false
-    const run = async () => {
-      await Promise.resolve()
-      if (cancelled) return
-      await load()
-    }
-    void run()
-    return () => {
-      cancelled = true
-    }
-  }, [open, load])
+    if (!providersLoaded) void loadProviders()
+  }, [open, providersLoaded, loadProviders])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -185,15 +169,15 @@ export function ConnectProviderDialog({
             size='sm'
             className='h-8 shrink-0 gap-1.5'
             onClick={() => void reload()}
-            disabled={loading}
+            disabled={!providersLoaded}
           >
-            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
+            <RefreshCw className={cn('size-3.5', !providersLoaded && 'animate-spin')} />
             Refresh Providers
           </Button>
         </div>
 
         <ScrollArea className='max-h-80'>
-          {loading ? (
+          {!providersLoaded ? (
             <div className='flex items-center justify-center py-10'>
               <Loader2 className='size-6 animate-spin text-muted-foreground' />
             </div>

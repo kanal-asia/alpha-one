@@ -198,6 +198,7 @@ export function ModelSelector({
       <ConnectProviderDialog
         open={providerDialogOpen}
         onOpenChange={setProviderDialogOpen}
+        onRefreshed={onRefresh}
       />
     </Popover>
   )

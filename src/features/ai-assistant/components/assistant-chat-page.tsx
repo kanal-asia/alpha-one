@@ -65,9 +65,10 @@ export function AssistantChatPage() {
   return (
     <>
       <PageHeader />
-      <div className='flex h-[calc(100vh-3.5rem)]'>
+      <div data-layout='fixed' className='flex min-h-0 flex-1 flex-col overflow-hidden'>
+        <div className='flex min-h-0 flex-1 overflow-hidden'>
         {/* Chat history sidebar */}
-        <aside className='hidden w-64 shrink-0 border-e md:block'>
+        <aside className='hidden w-64 shrink-0 overflow-hidden border-e md:block'>
           <ChatSidebar
             chats={chats}
             activeChatId={activeChatId}
@@ -79,7 +80,7 @@ export function AssistantChatPage() {
         </aside>
 
         {/* Main chat column */}
-        <div className='flex min-w-0 flex-1 flex-col'>
+        <div className='flex min-w-0 min-h-0 flex-1 flex-col'>
           {/* Toolbar */}
           <div className='flex flex-wrap items-center gap-2 border-b px-4 py-2'>
             <ProjectSelector />
@@ -145,7 +146,7 @@ export function AssistantChatPage() {
             </Sheet>
           </div>
 
-          <ScrollArea ref={scrollRef} className='flex-1 px-4'>
+          <ScrollArea ref={scrollRef} className='min-h-0 flex-1 px-4'>
             <div className='mx-auto max-w-3xl space-y-5 py-4'>
               {messages.length === 0 ? (
                 <EmptyState onPick={(t) => void sendMessage(t)} />
@@ -176,6 +177,7 @@ export function AssistantChatPage() {
           </div>
 
           <DeveloperPanel logs={logs} runtimeEvents={runtimeEvents} />
+        </div>
         </div>
       </div>
     </>

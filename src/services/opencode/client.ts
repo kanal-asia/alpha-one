@@ -509,9 +509,26 @@ export async function fetchProviders(): Promise<ProviderSummary[]> {
     available: 2,
     unavailable: 3,
   };
+  // Presentation-only ordering. IDs are taken verbatim from the runtime /
+  // models.dev registry and are used strictly to rank rows in the UI — a
+  // provider listed here that is not present in the catalog simply never
+  // appears. The source of truth for availability stays the registry/runtime.
+  const PROVIDER_PRIORITY = [
+    "opencode",
+    "openai",
+    "anthropic",
+    "google",
+    "google-vertex",
+    "openrouter",
+  ];
+  const priorityOf = (id: string) => {
+    const rank = PROVIDER_PRIORITY.indexOf(id);
+    return rank === -1 ? PROVIDER_PRIORITY.length : rank;
+  };
   return summaries.sort(
     (a, b) =>
       (connectionRank[a.connection] - connectionRank[b.connection]) ||
+      (priorityOf(a.id) - priorityOf(b.id)) ||
       a.name.localeCompare(b.name)
   );
 }

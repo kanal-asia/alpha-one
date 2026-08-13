@@ -9,6 +9,7 @@ import {
   type OpenCodeSession,
   type OpenCodeSessionState,
   type OpenCodeSettings,
+  type ProviderSummary,
   type WorkspaceInfo,
 } from '../types'
 import { openCodeService } from '../services/opencode-service'
@@ -90,6 +91,9 @@ interface OpenCodeStore {
   modes: ModeInfo[]
   modelsLoaded: boolean
 
+  providers: ProviderSummary[]
+  providersLoaded: boolean
+
   chats: Chat[]
   activeChatId: string | null
 
@@ -100,6 +104,7 @@ interface OpenCodeStore {
   loadWorkspaces: () => Promise<void>
   selectWorkspace: (path: string) => void
   loadModels: () => Promise<void>
+  loadProviders: () => Promise<void>
   launch: () => Promise<void>
   stop: () => Promise<void>
   restart: () => Promise<void>
@@ -171,6 +176,8 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
   models: [],
   modes: [],
   modelsLoaded: false,
+  providers: [],
+  providersLoaded: false,
 
   chats: loadChats(),
   activeChatId: null,
@@ -240,6 +247,15 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     }
     if (nextDefault) markModelUsed(nextDefault)
     set({ models, modes, modelsLoaded: true })
+  },
+
+  loadProviders: async () => {
+    try {
+      const providers = await openCodeService.listProviders()
+      set({ providers, providersLoaded: true })
+    } catch {
+      set({ providers: [], providersLoaded: true })
+    }
   },
 
   launch: async () => {

@@ -60,7 +60,7 @@ export function ChatSidebar({
           />
         </div>
       </div>
-      <ScrollArea className='flex-1 px-2'>
+      <ScrollArea className='min-h-0 flex-1 px-2'>
         {filtered.length === 0 ? (
           <div className='flex flex-col items-center gap-2 px-3 py-10 text-center text-xs text-muted-foreground'>
             <MessagesSquare className='size-5' />

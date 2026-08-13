@@ -1,5 +1,9 @@
 import { type ConnectionStatus } from '../types'
 import type { RuntimeModel } from '@/features/runtime/contract'
+import type {
+  ReferenceAttachment,
+  ReferenceResolutionError,
+} from '@/features/ai/references/contract'
 
 export type OpenCodeSessionState =
   | 'not_started'
@@ -31,6 +35,7 @@ export interface StreamChunk {
   content?: string
   error?: string
   sessionId?: string
+  referenceErrors?: ReferenceResolutionError[]
 }
 
 export interface OpenCodeSession {
@@ -93,6 +98,13 @@ export interface ProviderSummary {
   requiresAuth: boolean
 }
 
+export interface OpenCodeAuthResult {
+  ok: boolean
+  command: string
+  output: string
+  timedOut: boolean
+}
+
 export type ChatRole = 'user' | 'assistant'
 
 export type ChatMessageStatus = 'streaming' | 'done' | 'error' | 'cancelled'
@@ -107,6 +119,16 @@ export interface ChatMessage {
   mode?: string
   tokens?: number
   durationMs?: number
+  /** Reference metadata only — never file content/binary. */
+  references?: ReferenceAttachment[]
+  /** Structured resolution errors surfaced by the backend. */
+  referenceErrors?: ReferenceResolutionError[]
+}
+
+export interface ChatProjectContext {
+  id?: string
+  name?: string
+  path?: string
 }
 
 export interface Chat {
@@ -114,6 +136,8 @@ export interface Chat {
   title: string
   messages: ChatMessage[]
   sessionId?: string
+  /** Project context stamped when the chat is created/sent. */
+  project?: ChatProjectContext
   createdAt: string
   updatedAt: string
 }

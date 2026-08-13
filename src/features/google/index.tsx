@@ -5,12 +5,14 @@ import { GoogleWorkspacePage } from './components/google-workspace-page'
 import { GoogleConnectionCard } from './components/google-connection-card'
 import { GoogleDriveBrowser } from './components/google-drive-browser'
 import { DriveFolderPickerPage } from './components/drive-folder-picker-page'
+import { DriveFilePickerPage } from './components/drive-file-picker-page'
 
 export {
   GoogleWorkspacePage,
   GoogleConnectionCard,
   GoogleDriveBrowser,
   DriveFolderPickerPage,
+  DriveFilePickerPage,
 }
 
 export function GoogleDrivePage() {

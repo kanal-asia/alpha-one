@@ -14,6 +14,11 @@ import {
 import { openCodeService } from '../services/opencode-service'
 import { markModelUsed } from '../model-preferences'
 import { resolveRuntimeModel } from '@/features/runtime/contract'
+import {
+  sanitizeReference,
+  type ReferenceAttachment,
+} from '@/features/ai/references/contract'
+import { useProjectStore } from '@/features/ai-assistant/store/project-store'
 
 const DEFAULT_SETTINGS: OpenCodeSettings = {
   executablePath: 'opencode',
@@ -104,10 +109,10 @@ interface OpenCodeStore {
   selectChat: (id: string) => void
   renameChat: (id: string, title: string) => void
   deleteChat: (id: string) => void
-  sendMessage: (prompt: string) => Promise<void>
+  sendMessage: (prompt: string, references?: ReferenceAttachment[]) => Promise<void>
   stopGeneration: () => void
   retryLast: () => Promise<void>
-  editAndResend: (messageId: string, text: string) => Promise<void>
+  editAndResend: (messageId: string, text: string, references?: ReferenceAttachment[]) => Promise<void>
   continueGeneration: () => Promise<void>
 
   clearConversation: () => void
@@ -128,12 +133,26 @@ function logEntry(
   }
 }
 
+function activeProjectContext() {
+  const project = useProjectStore.getState().activeProject
+  if (!project) return undefined
+  return {
+    id: project.id,
+    name: project.name,
+    path:
+      project.contextType === 'local'
+        ? project.contextPath
+        : project.contextLabel,
+  }
+}
+
 function makeChat(firstPrompt?: string): Chat {
   const now = new Date().toISOString()
   return {
     id: newId('chat'),
     title: firstPrompt ? firstPrompt.slice(0, 40) : 'New Chat',
     messages: [],
+    project: activeProjectContext(),
     createdAt: now,
     updatedAt: now,
   }
@@ -296,8 +315,10 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     saveChats(get().chats)
   },
 
-  sendMessage: async (prompt) => {
+  sendMessage: async (prompt, incomingReferences) => {
     if (!prompt.trim() || get().isStreaming) return
+    // TASK-AIASSISTANT-005: persist reference *metadata* only, never content.
+    const references = (incomingReferences ?? []).map(sanitizeReference)
     let { activeChatId, chats } = get()
     if (!activeChatId) {
       const chat = makeChat(prompt)
@@ -306,6 +327,7 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
         role: 'user',
         content: prompt,
         createdAt: new Date().toISOString(),
+        references,
       })
       chats = [chat, ...chats]
       activeChatId = chat.id
@@ -316,6 +338,7 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
           ? {
               ...c,
               title: c.messages.length === 0 ? prompt.slice(0, 40) : c.title,
+              project: c.project ?? activeProjectContext(),
               messages: [
                 ...c.messages,
                 {
@@ -323,6 +346,7 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                   role: 'user' as const,
                   content: prompt,
                   createdAt: new Date().toISOString(),
+                  references,
                 },
               ],
               updatedAt: new Date().toISOString(),
@@ -375,7 +399,11 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     )
     get().pushLog(
       'info',
-      `[runtime-trace] payload: ${JSON.stringify({ model: selectedModel.id, message: prompt })}`
+      `[runtime-trace] payload: ${JSON.stringify({
+        model: selectedModel.id,
+        message: prompt,
+        references: references.map((r) => ({ provider: r.provider, name: r.name })),
+      })}`
     )
 
     const appendToken = (token: string) => {
@@ -467,6 +495,12 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
             }
 
             get().pushLog('error', `[runtime-trace] error: model=${selectedModel.id} ${chunk.error ?? ''}`)
+            if (chunk.referenceErrors?.length) {
+              get().pushLog(
+                'error',
+                `[references] resolution failed: ${chunk.referenceErrors.map((e) => `${e.name}:${e.code}`).join(', ')}`
+              )
+            }
             // TASK-AI-032: Guard against late exit overwriting a completed response.
             // Once a message has status 'done', it must not be converted to 'error'.
             set((state) => ({
@@ -474,16 +508,20 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                 c.id === activeChatId
                   ? {
                       ...c,
-                      messages: c.messages.map((m) =>
-                        m.id === assistantId
-                          ? {
-                              ...m,
-                              // Only set error status if not already completed
-                              status: m.status === 'done' ? 'done' : 'error',
-                              content: m.status === 'done' ? m.content : (m.content || chunk.error || 'Error'),
-                            }
-                          : m
-                      ),
+                      messages: c.messages.map((m) => {
+                        if (m.id === assistantId) {
+                          return {
+                            ...m,
+                            // Only set error status if not already completed
+                            status: m.status === 'done' ? 'done' : 'error',
+                            content: m.status === 'done' ? m.content : (m.content || chunk.error || 'Error'),
+                          }
+                        }
+                        if (m.role === 'user' && chunk.referenceErrors?.length) {
+                          return { ...m, referenceErrors: chunk.referenceErrors }
+                        }
+                        return m
+                      }),
                     }
                   : c
               ),
@@ -492,7 +530,8 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
           }
         },
         controller.signal,
-        selectedModel
+        selectedModel,
+        references
       )
     }
 
@@ -544,10 +583,10 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     const chat = get().chats.find((c) => c.id === get().activeChatId)
     if (!chat) return
     const lastUser = [...chat.messages].reverse().find((m) => m.role === 'user')
-    if (lastUser) await get().editAndResend(lastUser.id, lastUser.content)
+    if (lastUser) await get().editAndResend(lastUser.id, lastUser.content, lastUser.references)
   },
 
-  editAndResend: async (messageId, text) => {
+  editAndResend: async (messageId, text, references) => {
     const { activeChatId } = get()
     if (!activeChatId) return
     // Remove this message and everything after it, then append the edited user
@@ -567,13 +606,14 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
               role: 'user' as const,
               content: text,
               createdAt: new Date().toISOString(),
+              references,
             },
           ],
           updatedAt: new Date().toISOString(),
         }
       }),
     }))
-    await get().sendMessage(text)
+    await get().sendMessage(text, references)
   },
 
   continueGeneration: async () => {

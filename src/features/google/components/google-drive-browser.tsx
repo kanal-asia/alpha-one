@@ -75,8 +75,16 @@ type NavTab = 'my-drive' | 'shared' | 'starred' | 'recent'
 type ViewMode = 'list' | 'grid'
 
 interface GoogleDriveBrowserProps {
-  mode?: 'browse' | 'pick-folder'
+  mode?: 'browse' | 'pick-folder' | 'pick-file'
   onFolderSelect?: (folder: { id: string; name: string; path: string }) => void
+  onFileSelect?: (file: {
+    id: string
+    name: string
+    mimeType: string
+    size?: string
+    modifiedTime: string
+    path: string
+  }) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +170,7 @@ const NAV_TABS: { id: NavTab; label: string; icon: React.ElementType; endpoint: 
 export function GoogleDriveBrowser({
   mode = 'browse',
   onFolderSelect,
+  onFileSelect,
 }: GoogleDriveBrowserProps) {
   const [status, setStatus] = useState<DriveStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -179,6 +188,7 @@ export function GoogleDriveBrowser({
   const [isSearching, setIsSearching] = useState(false)
 
   const [selectedFolder, setSelectedFolder] = useState<{ id: string; name: string } | null>(null)
+  const [selectedFile, setSelectedFile] = useState<DriveFile | null>(null)
 
   const [connecting, setConnecting] = useState(false)
 
@@ -406,6 +416,18 @@ export function GoogleDriveBrowser({
     })
   }
 
+  const handleSelectFile = (file: DriveFile) => {
+    if (!onFileSelect) return
+    onFileSelect({
+      id: file.id,
+      name: file.name,
+      mimeType: file.mimeType,
+      size: file.size,
+      modifiedTime: file.modifiedTime,
+      path: folderPathFromBreadcrumb(breadcrumb, file.name),
+    })
+  }
+
   // Loading state
   if (loading) {
     return (
@@ -512,6 +534,12 @@ export function GoogleDriveBrowser({
                 <Button onClick={handleSelectFolder}>
                   <Check className='size-4' />
                   Select "{selectedFolder.name}"
+                </Button>
+              )}
+              {mode === 'pick-file' && selectedFile && (
+                <Button onClick={() => handleSelectFile(selectedFile)}>
+                  <Check className='size-4' />
+                  Select "{selectedFile.name}"
                 </Button>
               )}
             </div>
@@ -636,7 +664,9 @@ export function GoogleDriveBrowser({
                   <div className='grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'>
                     {files.map((file) => {
                       const Icon = getFileIcon(file.mimeType)
-                      const isSelected = selectedFolder?.id === file.id
+                      const isSelected =
+                        (mode === 'pick-folder' && selectedFolder?.id === file.id) ||
+                        (mode === 'pick-file' && selectedFile?.id === file.id)
                       const showThumbnail = !file.isFolder && file.hasThumbnail && (isImageMime(file.mimeType) || isVideoMime(file.mimeType))
                       const canOpen = !file.isFolder && !!file.webViewLink
                       return (
@@ -651,6 +681,8 @@ export function GoogleDriveBrowser({
                           onClick={() => {
                             if (file.isFolder) {
                               handleFolderClick(file)
+                            } else if (mode === 'pick-file') {
+                              handleSelectFile(file)
                             } else if (canOpen) {
                               openFileInNewTab(file.webViewLink)
                             }
@@ -702,7 +734,9 @@ export function GoogleDriveBrowser({
                   <div className='divide-y'>
                     {files.map((file) => {
                       const Icon = getFileIcon(file.mimeType)
-                      const isSelected = selectedFolder?.id === file.id
+                      const isSelected =
+                        (mode === 'pick-folder' && selectedFolder?.id === file.id) ||
+                        (mode === 'pick-file' && selectedFile?.id === file.id)
                       const showThumbnail = !file.isFolder && file.hasThumbnail && (isImageMime(file.mimeType) || isVideoMime(file.mimeType))
                       const canOpen = !file.isFolder && !!file.webViewLink
                       return (
@@ -717,6 +751,8 @@ export function GoogleDriveBrowser({
                           onClick={() => {
                             if (file.isFolder) {
                               handleFolderClick(file)
+                            } else if (mode === 'pick-file') {
+                              handleSelectFile(file)
                             } else if (canOpen) {
                               openFileInNewTab(file.webViewLink)
                             }
@@ -759,7 +795,7 @@ export function GoogleDriveBrowser({
                               {!file.isFolder && file.size && ` · ${formatSize(file.size)}`}
                             </p>
                           </div>
-                          {canOpen && !file.isFolder && (
+                          {canOpen && !file.isFolder && mode !== 'pick-file' && (
                             <ExternalLink className='size-4 shrink-0 text-muted-foreground' />
                           )}
                           {file.isFolder && mode === 'pick-folder' && (
@@ -770,6 +806,21 @@ export function GoogleDriveBrowser({
                               onClick={(e) => {
                                 e.stopPropagation()
                                 setSelectedFolder({ id: file.id, name: file.name })
+                              }}
+                            >
+                              <Check className='size-3.5' />
+                              Select
+                            </Button>
+                          )}
+                          {!file.isFolder && mode === 'pick-file' && (
+                            <Button
+                              variant={isSelected ? 'default' : 'outline'}
+                              size='sm'
+                              className='shrink-0'
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setSelectedFile(file)
+                                handleSelectFile(file)
                               }}
                             >
                               <Check className='size-3.5' />

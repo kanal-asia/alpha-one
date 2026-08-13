@@ -1,23 +1,22 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { MessagesSquare, Sparkles } from 'lucide-react'
-import { useOpenCodeStore } from '@/features/ai/opencode/store/opencode-store'
-import { ChatSidebar } from '@/features/ai/opencode/components/chat-sidebar'
-import { ChatMessageView } from '@/features/ai/opencode/components/chat-message'
-import { ChatComposer } from '@/features/ai/opencode/components/chat-composer'
-import { DeveloperPanel } from '@/features/ai/opencode/components/developer-panel'
-import { StatusIndicator } from '@/features/ai/opencode/components/status-indicator'
-import { ModelSelector } from '@/features/ai/opencode/components/model-selector'
+import { MessagesSquare, Terminal } from 'lucide-react'
+import { useOpenCodeStore } from '../store/opencode-store'
+import { OpenCodeToolbar } from './opencode-toolbar'
+import { ChatSidebar } from './chat-sidebar'
+import { ChatMessageView } from './chat-message'
+import { ChatComposer } from './chat-composer'
+import { DeveloperPanel } from './developer-panel'
+import { StatusIndicator } from './status-indicator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { PageHeader } from '@/components/page-header'
-import { Button } from '@/components/ui/button'
 import {
   Sheet,
   SheetContent,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { ProjectSelector } from './project-selector'
+import { Button } from '@/components/ui/button'
 
-export function AssistantChatPage() {
+export function OpenCodeDashboard() {
   const store = useOpenCodeStore()
   const {
     settings,
@@ -39,7 +38,6 @@ export function AssistantChatPage() {
     retryLast,
     editAndResend,
     continueGeneration,
-    updateSettings,
   } = store
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null
@@ -79,35 +77,17 @@ export function AssistantChatPage() {
 
         {/* Main chat column */}
         <div className='flex min-w-0 flex-1 flex-col'>
-          {/* Toolbar */}
-          <div className='flex flex-wrap items-center gap-2 border-b px-4 py-2'>
-            <ProjectSelector />
+          <OpenCodeToolbar />
 
-            <ModelSelector
-              models={models}
-              value={settings.defaultModel}
-              disabled={models.length === 0}
-              refreshing={models.length === 0}
-              onSelect={(model) => {
-                updateSettings({ defaultModel: model.id })
-              }}
-              onRefresh={() => void loadModels()}
-            />
-
-            <div className='ms-auto flex items-center gap-2'>
-              <StatusIndicator
-                model={activeModel}
-                latency={activeModel?.latency}
-              />
-            </div>
-          </div>
-
-          {/* Header */}
           <div className='flex items-center justify-between px-4 py-2'>
             <h1 className='flex items-center gap-2 text-lg font-semibold'>
-              <Sparkles className='size-5' />
-              AI Assistant
+              <Terminal className='size-5' />
+              OpenCode
             </h1>
+            <StatusIndicator
+              model={activeModel}
+              latency={activeModel?.latency}
+            />
           </div>
 
           {/* Mobile chat history trigger */}
@@ -173,17 +153,17 @@ const SUGGESTIONS = [
   'Explain the workspace structure',
   'Write a React component for a settings form',
   'Find unused imports in the project',
-  'Help me analyze a spreadsheet',
+  'Summarize the OpenCode provider integration',
 ]
 
 function EmptyState({ onPick }: { onPick: (t: string) => void }) {
   return (
     <div className='flex flex-col items-center justify-center gap-4 py-16 text-center'>
       <div className='flex size-12 items-center justify-center rounded-2xl bg-muted'>
-        <Sparkles className='size-6' />
+        <Terminal className='size-6' />
       </div>
       <div>
-        <p className='text-lg font-semibold'>How can I help you?</p>
+        <p className='text-lg font-semibold'>How can OpenCode help?</p>
         <p className='text-sm text-muted-foreground'>
           Start a conversation or pick a suggestion below.
         </p>

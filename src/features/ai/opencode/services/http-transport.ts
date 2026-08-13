@@ -1,6 +1,7 @@
 import {
   type ModeInfo,
   type ModelInfo,
+  type OpenCodeAuthResult,
   type OpenCodeSession,
   type OpenCodeSettings,
   type StreamChunk,
@@ -8,6 +9,10 @@ import {
   type ProviderSummary,
 } from '../types'
 import type { RuntimeModel } from '@/features/runtime/contract'
+import type {
+  ReferenceAttachment,
+  ReferenceResolutionError,
+} from '@/features/ai/references/contract'
 
 /**
  * Transport abstraction for talking to an OpenCode backend.
@@ -31,9 +36,12 @@ export interface OpenCodeTransport {
     prompt: string,
     onChunk: (chunk: StreamChunk) => void,
     signal?: AbortSignal,
-    model?: RuntimeModel
+    model?: RuntimeModel,
+    references?: ReferenceAttachment[]
   ): Promise<void>
   listProviders(): Promise<ProviderSummary[]>
+  connectProvider(providerId: string): Promise<OpenCodeAuthResult>
+  disconnectProvider(providerId: string): Promise<OpenCodeAuthResult>
 }
 
 const API_BASE = '/api/opencode'
@@ -151,28 +159,72 @@ export class HTTPTransport implements OpenCodeTransport {
     return res.providers
   }
 
+  async connectProvider(providerId: string): Promise<OpenCodeAuthResult> {
+    const res = await fetch(`${this.baseUrl}${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: providerId }),
+    })
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string }
+      throw new Error(err.error ?? `HTTP ${res.status}`)
+    }
+    return res.json()
+  }
+
+  async disconnectProvider(providerId: string): Promise<OpenCodeAuthResult> {
+    const res = await fetch(`${this.baseUrl}${API_BASE}/auth/logout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: providerId }),
+    })
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string }
+      throw new Error(err.error ?? `HTTP ${res.status}`)
+    }
+    return res.json()
+  }
+
   /* eslint-disable no-console -- TEMPORARY debug logging for TASK instrumentation */
   async sendPrompt(
     sessionId: string,
     prompt: string,
     onChunk: (chunk: StreamChunk) => void,
     signal?: AbortSignal,
-    model?: RuntimeModel
+    model?: RuntimeModel,
+    references?: ReferenceAttachment[]
   ): Promise<void> {
     const modelId = model?.id ?? ''
     // TASK-AI-033: Only pass session ID to server if it looks like a real CLI session ID.
     // Client-generated IDs (session-*) should NOT be sent to the CLI.
     const realSessionId = sessionId && !sessionId.startsWith('session-') ? sessionId : ''
+    // TASK-AIASSISTANT-005: send reference metadata only — no binary content.
+    const refs = (references ?? []).map((r) => ({
+      provider: r.provider,
+      name: r.name,
+      mimeType: r.mimeType,
+      size: r.size,
+      path: r.provider === 'local' ? r.path : undefined,
+      fileId: r.provider === 'google_drive' ? r.fileId : undefined,
+      modifiedTime: r.modifiedTime,
+    }))
     const res = await fetch(`${this.baseUrl}${API_BASE}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: modelId, message: prompt, sessionId: realSessionId || undefined, attachments: [] }),
+      body: JSON.stringify({ model: modelId, message: prompt, sessionId: realSessionId || undefined, references: refs }),
       signal,
     })
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      onChunk({ type: 'error', error: err.error ?? `HTTP ${res.status}` })
+      const err = (await res.json().catch(() => ({}))) as {
+        error?: string
+        referenceErrors?: ReferenceResolutionError[]
+      }
+      onChunk({
+        type: 'error',
+        error: err.error ?? `HTTP ${res.status}`,
+        referenceErrors: err.referenceErrors,
+      })
       return
     }
 

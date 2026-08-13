@@ -8,9 +8,6 @@ import {
   runChat,
 } from "./client";
 import { spawn } from "node:child_process";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { writeFile, mkdir } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { RuntimeManager, detectWorkspace } from "./runtime";
 import { openCodeRuntimeProvider, toRuntimeModelAdapter } from "./runtime-model";
@@ -20,6 +17,11 @@ import {
   type RuntimeModel,
 } from "../../features/runtime/contract";
 import {
+  isReferenceAttachment,
+  type ReferenceAttachment,
+} from "../../features/ai/references/contract";
+import { resolveReferences, uniqueResolvedPaths } from "../references/resolver";
+import {
   listProviderStates,
   setProviderKey,
   removeProviderKey,
@@ -28,6 +30,8 @@ import {
 } from "./providers-config";
 import { createGoogleOAuthRouter } from "../google/oauth-router";
 import { createGoogleDriveRouter } from "../google/drive-router";
+import { openCodeAuthLogin, openCodeAuthLogout } from "./auth";
+import { readOpenCodeConfig, patchOpenCodeConfig } from "./opencode-config";
 
 const app = express();
 app.use(cors());
@@ -39,17 +43,12 @@ app.use("/api/google/drive", createGoogleDriveRouter());
 
 const runtimeManager = new RuntimeManager(Number(process.env.PORT) || 3001);
 
-interface IncomingAttachment {
-  name?: string;
-  dataUrl?: string;
-}
-
 interface ChatRequestBody {
   model?: string;
   message?: string;
   sessionId?: string | null;
   files?: string[];
-  attachments?: IncomingAttachment[];
+  references?: unknown[];
 }
 
 /**
@@ -83,22 +82,33 @@ function trace(
   });
 }
 
-function dataUrlToBytes(dataUrl: string): { bytes: Buffer; ext: string } | null {
-  const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
-  if (!m) return null;
-  const mime = m[1];
-  const ext = mime.includes("pdf")
-    ? ".pdf"
-    : mime.includes("png")
-      ? ".png"
-      : mime.includes("jpeg")
-        ? ".jpg"
-        : mime.includes("gif")
-          ? ".gif"
-          : mime.includes("webp")
-            ? ".webp"
-            : ".bin";
-  return { bytes: Buffer.from(m[2], "base64"), ext };
+/**
+ * Resolve the request's references to `--file` paths.
+ * Returns `null` and sends a structured 400 response when any reference fails.
+ */
+async function resolveRequestReferences(
+  req: Request,
+  res: Response
+): Promise<string[] | null> {
+  const body = req.body as ChatRequestBody;
+  const references: ReferenceAttachment[] = Array.isArray(body.references)
+    ? body.references.filter(isReferenceAttachment)
+    : [];
+
+  const { resolved, errors } = await resolveReferences(references, {
+    allowedRoots: [process.cwd()],
+    userId: "local-user",
+  });
+
+  if (errors.length > 0) {
+    res.status(400).json({
+      error: "One or more attached references could not be resolved.",
+      referenceErrors: errors,
+    });
+    return null;
+  }
+
+  return uniqueResolvedPaths(resolved);
 }
 
 // ---------------------------------------------------------------------------
@@ -121,25 +131,24 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
     });
   }
   trace("payload", model.id, "chat stream request", {
-    payload: { model: model.id, message, sessionId: body.sessionId ?? null },
+    payload: {
+      model: model.id,
+      message,
+      sessionId: body.sessionId ?? null,
+      references: (Array.isArray(body.references) ? body.references : [])
+        .filter(isReferenceAttachment)
+        .map((r) => ({
+          provider: r.provider,
+          name: r.name,
+          hasFileId: Boolean(r.fileId),
+          hasPath: Boolean(r.path),
+        })),
+    },
   });
 
-  const files: string[] = [...(body.files ?? [])];
-  const tmpRoot = join(tmpdir(), "alpha-workspace-attachments");
-  try {
-    await mkdir(tmpRoot, { recursive: true });
-    for (const att of body.attachments ?? []) {
-      if (!att?.dataUrl) continue;
-      const decoded = dataUrlToBytes(att.dataUrl);
-      if (!decoded) continue;
-      const name = (att.name ?? "file").replace(/[^\w.-]/g, "_");
-      const path = join(tmpRoot, `${Date.now()}-${name}${decoded.ext}`);
-      await writeFile(path, decoded.bytes);
-      files.push(path);
-    }
-  } catch {
-    /* ignore attachment decode errors; chat still proceeds with text */
-  }
+  // TASK-AIASSISTANT-005: references are resolved server-side on demand.
+  const files = await resolveRequestReferences(req, res);
+  if (files === null) return;
 
   const resolved = resolveOpenCode();
   if (!resolved) {
@@ -380,25 +389,19 @@ app.post("/api/opencode/chat", async (req: Request, res: Response) => {
     });
   }
   trace("payload", model.id, "chat request", {
-    payload: { model: model.id, message, sessionId: body.sessionId ?? null },
+    payload: {
+      model: model.id,
+      message,
+      sessionId: body.sessionId ?? null,
+      references: (Array.isArray(body.references) ? body.references : [])
+        .filter(isReferenceAttachment)
+        .map((r) => ({ provider: r.provider, name: r.name })),
+    },
   });
 
-  const files: string[] = [...(body.files ?? [])];
-  const tmpRoot = join(tmpdir(), "alpha-workspace-attachments");
-  try {
-    await mkdir(tmpRoot, { recursive: true });
-    for (const att of body.attachments ?? []) {
-      if (!att?.dataUrl) continue;
-      const decoded = dataUrlToBytes(att.dataUrl);
-      if (!decoded) continue;
-      const name = (att.name ?? "file").replace(/[^\w.-]/g, "_");
-      const path = join(tmpRoot, `${Date.now()}-${name}${decoded.ext}`);
-      await writeFile(path, decoded.bytes);
-      files.push(path);
-    }
-  } catch {
-    /* ignore attachment decode errors; chat still proceeds with text */
-  }
+  // TASK-AIASSISTANT-005: references are resolved server-side on demand.
+  const files = await resolveRequestReferences(req, res);
+  if (files === null) return;
 
   try {
     const result = await runChat({ model, message, sessionId: body.sessionId, files });
@@ -450,6 +453,54 @@ app.get("/api/opencode/providers", async (_req: Request, res: Response) => {
     return res.json({ providers, fetchedAt: new Date().toISOString() });
   } catch (err) {
     return res.status(500).json({ providers: [], error: err instanceof Error ? err.message : "Failed to load providers" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Provider auth — reuse OpenCode's own credential mechanism.
+// ---------------------------------------------------------------------------
+app.post("/api/opencode/auth/login", async (req: Request, res: Response) => {
+  const providerId = typeof req.body?.provider === "string" ? req.body.provider.trim() : "";
+  if (!providerId) return res.status(400).json({ error: "provider is required" });
+  const result = await openCodeAuthLogin(providerId);
+  return res.json(result);
+});
+
+app.post("/api/opencode/auth/logout", async (req: Request, res: Response) => {
+  const providerId = typeof req.body?.provider === "string" ? req.body.provider.trim() : "";
+  if (!providerId) return res.status(400).json({ error: "provider is required" });
+  const result = await openCodeAuthLogout(providerId);
+  return res.json(result);
+});
+
+// ---------------------------------------------------------------------------
+// OpenCode configuration — read/write the real opencode.json source.
+// ---------------------------------------------------------------------------
+app.get("/api/opencode/config", (_req: Request, res: Response) => {
+  try {
+    const workspace = detectWorkspace();
+    const result = readOpenCodeConfig(workspace.path);
+    return res.json({ ...result, cwd: workspace.path });
+  } catch (err) {
+    return res.status(500).json({
+      error: err instanceof Error ? err.message : "Failed to read OpenCode config",
+    });
+  }
+});
+
+app.patch("/api/opencode/config", (req: Request, res: Response) => {
+  try {
+    const patch = req.body?.patch;
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+      return res.status(400).json({ error: "patch object is required" });
+    }
+    const workspace = detectWorkspace();
+    const result = patchOpenCodeConfig(workspace.path, patch as Record<string, unknown>);
+    return res.json({ ...result, cwd: workspace.path });
+  } catch (err) {
+    return res.status(400).json({
+      error: err instanceof Error ? err.message : "Failed to update OpenCode config",
+    });
   }
 });
 

@@ -76,7 +76,7 @@ type ViewMode = 'list' | 'grid'
 
 interface GoogleDriveBrowserProps {
   mode?: 'browse' | 'pick-folder'
-  onFolderSelect?: (folder: { id: string; name: string }) => void
+  onFolderSelect?: (folder: { id: string; name: string; path: string }) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +126,12 @@ function formatSize(size?: string): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function folderPathFromBreadcrumb(breadcrumb: DriveBreadcrumb[], childName?: string): string {
+  const parts = breadcrumb.map((b) => b.name)
+  const base = parts.length > 0 ? parts.join(' / ') : 'My Drive'
+  return childName ? `${base} / ${childName}` : base
 }
 
 function isImageMime(mimeType: string): boolean {
@@ -383,8 +389,21 @@ export function GoogleDriveBrowser({
 
   const handleSelectFolder = () => {
     if (selectedFolder && onFolderSelect) {
-      onFolderSelect(selectedFolder)
+      onFolderSelect({
+        ...selectedFolder,
+        path: folderPathFromBreadcrumb(breadcrumb, selectedFolder.name),
+      })
     }
+  }
+
+  const handleUseCurrentFolder = () => {
+    if (!currentFolderId || !onFolderSelect) return
+    const current = breadcrumb[breadcrumb.length - 1]
+    onFolderSelect({
+      id: currentFolderId,
+      name: current?.name ?? 'Folder',
+      path: folderPathFromBreadcrumb(breadcrumb),
+    })
   }
 
   // Loading state
@@ -483,6 +502,12 @@ export function GoogleDriveBrowser({
                   <LayoutGrid className='size-4' />
                 </Button>
               </div>
+              {mode === 'pick-folder' && currentFolderId && !isSearching && (
+                <Button variant='outline' onClick={handleUseCurrentFolder}>
+                  <Check className='size-4' />
+                  Use this folder
+                </Button>
+              )}
               {mode === 'pick-folder' && selectedFolder && (
                 <Button onClick={handleSelectFolder}>
                   <Check className='size-4' />

@@ -4,8 +4,14 @@ import { PagePlaceholder } from '@/components/page-placeholder'
 import { GoogleWorkspacePage } from './components/google-workspace-page'
 import { GoogleConnectionCard } from './components/google-connection-card'
 import { GoogleDriveBrowser } from './components/google-drive-browser'
+import { DriveFolderPickerPage } from './components/drive-folder-picker-page'
 
-export { GoogleWorkspacePage, GoogleConnectionCard, GoogleDriveBrowser }
+export {
+  GoogleWorkspacePage,
+  GoogleConnectionCard,
+  GoogleDriveBrowser,
+  DriveFolderPickerPage,
+}
 
 export function GoogleDrivePage() {
   return <GoogleDriveBrowser />

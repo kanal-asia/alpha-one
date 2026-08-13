@@ -1,6 +1,8 @@
-import { useState } from 'react'
-import { ChevronDown, FolderOpen, FolderPlus, Trash2, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ChevronDown, Cloud, FolderOpen, FolderPlus, Trash2, X } from 'lucide-react'
 import { useProjectStore, type Project, type ProjectContextType } from '../store/project-store'
+import { LocalFolderPicker } from './local-folder-picker'
+import { openDriveFolderPicker } from '@/features/google/components/drive-folder-picker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,30 +21,55 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 
+const DRIVE_PICKER_MESSAGE_SOURCE = 'alpha-gdrive-picker'
+
 export function ProjectSelector() {
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [newContextType, setNewContextType] = useState<ProjectContextType>('local')
   const [newContextPath, setNewContextPath] = useState('')
+  const [newContextLabel, setNewContextLabel] = useState('')
+  const [localPickerOpen, setLocalPickerOpen] = useState(false)
+  const driveWindowRef = useRef<Window | null>(null)
 
   const { projects, activeProject, createProject, setActiveProject, deleteProject } =
     useProjectStore()
 
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const data = e.data as {
+        source?: string
+        folder?: { id: string; name: string; path?: string }
+      } | undefined
+      if (!data || data.source !== DRIVE_PICKER_MESSAGE_SOURCE || !data.folder) return
+      setNewContextPath(data.folder.id)
+      setNewContextLabel(data.folder.path || data.folder.name)
+      driveWindowRef.current = null
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+
+  const clearContext = () => {
+    setNewContextPath('')
+    setNewContextLabel('')
+  }
+
   const handleCreate = () => {
-    if (!newName.trim()) return
+    if (!newName.trim() || !newContextPath.trim()) return
     const project = createProject({
       name: newName.trim(),
       contextType: newContextType,
-      contextPath: newContextPath.trim() || (newContextType === 'local' ? 'C:\\dev' : ''),
+      contextPath: newContextPath.trim(),
       contextLabel:
-        newContextType === 'local'
-          ? newContextPath.trim() || 'Local folder'
-          : newContextPath.trim() || 'Google Drive folder',
+        newContextLabel.trim() ||
+        (newContextType === 'local' ? newContextPath.trim() : 'Google Drive folder'),
     })
     setActiveProject(project.id)
     setNewName('')
     setNewContextPath('')
+    setNewContextLabel('')
     setCreating(false)
     setOpen(false)
   }
@@ -65,7 +92,8 @@ export function ProjectSelector() {
       </PopoverTrigger>
       <PopoverContent align='start' className='w-80 p-0'>
         {creating ? (
-          <div className='space-y-3 p-3'>
+          <>
+            <div className='space-y-3 p-3'>
             <div className='flex items-center justify-between'>
               <Label className='text-sm font-medium'>New Project</Label>
               <Button
@@ -86,7 +114,10 @@ export function ProjectSelector() {
               />
               <Select
                 value={newContextType}
-                onValueChange={(v) => setNewContextType(v as ProjectContextType)}
+                onValueChange={(v) => {
+                  setNewContextType(v as ProjectContextType)
+                  clearContext()
+                }}
               >
                 <SelectTrigger className='h-8'>
                   <SelectValue />
@@ -96,26 +127,88 @@ export function ProjectSelector() {
                   <SelectItem value='google-drive'>Google Drive folder</SelectItem>
                 </SelectContent>
               </Select>
-              <Input
-                value={newContextPath}
-                onChange={(e) => setNewContextPath(e.target.value)}
-                placeholder={
-                  newContextType === 'local'
-                    ? 'Folder path (e.g. C:\\projects\\my-project)'
-                    : 'Drive folder name or ID'
-                }
-                className='h-8'
-              />
+              {newContextType === 'local' ? (
+                <div className='space-y-1.5'>
+                  <div className='flex items-center gap-2'>
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      className='h-8 min-w-0 flex-1 justify-start gap-1.5'
+                      onClick={() => setLocalPickerOpen(true)}
+                    >
+                      <FolderOpen className='size-3.5 shrink-0 text-muted-foreground' />
+                      <span className='truncate'>
+                        {newContextPath || 'Choose folder...'}
+                      </span>
+                    </Button>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='size-8'
+                      onClick={clearContext}
+                      disabled={!newContextPath}
+                    >
+                      <X className='size-3.5' />
+                    </Button>
+                  </div>
+                  <p className='text-xs text-muted-foreground'>
+                    {newContextPath
+                      ? `Selected: ${newContextPath}`
+                      : 'Browse local folders on this machine.'}
+                  </p>
+                </div>
+              ) : (
+                <div className='space-y-1.5'>
+                  <div className='flex items-center gap-2'>
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      className='h-8 min-w-0 flex-1 justify-start gap-1.5'
+                      onClick={() => {
+                        driveWindowRef.current = openDriveFolderPicker()
+                      }}
+                    >
+                      <Cloud className='size-3.5 shrink-0 text-muted-foreground' />
+                      <span className='truncate'>
+                        {newContextLabel || newContextPath || 'Choose Drive folder...'}
+                      </span>
+                    </Button>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='size-8'
+                      onClick={clearContext}
+                      disabled={!newContextPath}
+                    >
+                      <X className='size-3.5' />
+                    </Button>
+                  </div>
+                  <p className='text-xs text-muted-foreground'>
+                    {newContextLabel
+                      ? `Selected: ${newContextLabel}`
+                      : 'Opens the Drive explorer to pick a folder.'}
+                  </p>
+                </div>
+              )}
             </div>
             <Button
               size='sm'
               className='w-full'
               onClick={handleCreate}
-              disabled={!newName.trim()}
+              disabled={!newName.trim() || !newContextPath.trim()}
             >
               Create Project
             </Button>
           </div>
+          <LocalFolderPicker
+            open={localPickerOpen}
+            onOpenChange={setLocalPickerOpen}
+            onSelect={(path) => {
+              setNewContextPath(path)
+              setNewContextLabel(path)
+            }}
+          />
+          </>
         ) : (
           <div className='flex flex-col'>
             <div className='flex items-center justify-between border-b p-2'>

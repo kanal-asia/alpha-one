@@ -11,6 +11,7 @@ import { app, runtimeManager } from '../services/opencode/server'
 import { bootstrapPlatform } from '../platform/server/bootstrap'
 import { createWorkspaceRouter } from '../platform/server/router'
 import { createWorkspaceService } from '../platform/workspace/service'
+import { createFsRouter } from '../services/fs/fs-router'
 
 const workspaceRoot = process.cwd()
 const kernel = bootstrapPlatform({
@@ -21,6 +22,7 @@ const kernel = bootstrapPlatform({
 
 const service = createWorkspaceService(kernel)
 app.use('/api/ws', createWorkspaceRouter(service))
+app.use('/api/fs', createFsRouter())
 
 // Start server if run directly
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

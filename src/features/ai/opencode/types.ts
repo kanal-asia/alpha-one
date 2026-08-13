@@ -96,6 +96,7 @@ export interface ProviderSummary {
   freeModelCount: number
   hasCredentials: boolean
   requiresAuth: boolean
+  source: 'runtime' | 'registry'
 }
 
 export interface OpenCodeAuthResult {

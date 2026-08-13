@@ -65,6 +65,9 @@ export interface ProviderStatus {
 
 export type ConnectionState = "connected" | "configured" | "available" | "unavailable";
 
+/** Where a provider entry came from. */
+export type ProviderSourceKind = "runtime" | "registry";
+
 export interface ProviderSummary {
   id: string;
   name: string;
@@ -73,6 +76,12 @@ export interface ProviderSummary {
   freeModelCount: number;
   hasCredentials: boolean;
   requiresAuth: boolean;
+  /**
+   * `runtime` = provider has live models discovered from the OpenCode CLI
+   * (`opencode models --verbose`). `registry` = provider exists in the
+   * OpenCode-supported models.dev registry cache but has no credentials yet.
+   */
+  source: ProviderSourceKind;
 }
 
 export type HealthState = "healthy" | "degraded" | "down" | "unknown";

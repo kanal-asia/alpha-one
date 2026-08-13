@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { MessagesSquare, Sparkles } from 'lucide-react'
+import { MessagesSquare, Settings2, Sparkles } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
 import { useOpenCodeStore } from '@/features/ai/opencode/store/opencode-store'
 import { ChatSidebar } from '@/features/ai/opencode/components/chat-sidebar'
 import { ChatMessageView } from '@/features/ai/opencode/components/chat-message'
@@ -99,6 +100,18 @@ export function AssistantChatPage() {
                 model={activeModel}
                 latency={activeModel?.latency}
               />
+              <Button
+                variant='outline'
+                size='sm'
+                className='h-8 gap-1.5'
+                asChild
+                aria-label='OpenCode Settings'
+              >
+                <Link to='/ai/opencode/settings'>
+                  <Settings2 className='size-3.5' />
+                  OpenCode Settings
+                </Link>
+              </Button>
             </div>
           </div>
 

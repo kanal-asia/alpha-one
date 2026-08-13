@@ -1,9 +1,20 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Cloud, Loader2, LogOut, Plug, ShieldCheck, TriangleAlert } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  Cloud,
+  Copy,
+  Loader2,
+  LogOut,
+  Plug,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  TriangleAlert,
+} from 'lucide-react'
 import { openCodeService } from '../services/opencode-service'
 import type { OpenCodeAuthResult, ProviderSummary } from '../types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import {
   Dialog,
   DialogContent,
@@ -22,8 +33,12 @@ interface ConnectProviderDialogProps {
 const CONNECTION_LABEL: Record<ProviderSummary['connection'], string> = {
   connected: 'Connected',
   configured: 'Configured',
-  available: 'Available',
+  available: 'Not connected',
   unavailable: 'Unavailable',
+}
+
+function isConnected(p: ProviderSummary): boolean {
+  return p.connection === 'connected' || p.connection === 'configured'
 }
 
 export function ConnectProviderDialog({
@@ -33,7 +48,9 @@ export function ConnectProviderDialog({
   const [providers, setProviders] = useState<ProviderSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
   const [result, setResult] = useState<{ providerId: string } & OpenCodeAuthResult | null>(null)
+  const [copied, setCopied] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -65,9 +82,23 @@ export function ConnectProviderDialog({
     }
   }, [open, load])
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const list = q
+      ? providers.filter(
+          (p) =>
+            p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)
+        )
+      : providers
+    const connected = list.filter(isConnected)
+    const available = list.filter((p) => !isConnected(p))
+    return { connected, available }
+  }, [providers, query])
+
   const handleConnect = async (provider: ProviderSummary) => {
     setBusy(provider.id)
     setResult(null)
+    setCopied(false)
     try {
       const res = await openCodeService.connectProvider(provider.id)
       setResult({ providerId: provider.id, ...res })
@@ -87,6 +118,7 @@ export function ConnectProviderDialog({
   const handleDisconnect = async (provider: ProviderSummary) => {
     setBusy(provider.id)
     setResult(null)
+    setCopied(false)
     try {
       const res = await openCodeService.disconnectProvider(provider.id)
       setResult({ providerId: provider.id, ...res })
@@ -104,11 +136,27 @@ export function ConnectProviderDialog({
     }
   }
 
+  const handleCopyCommand = async (command: string) => {
+    try {
+      await navigator.clipboard.writeText(command)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
+
+  const connectedCount = filtered.connected.length
+  const availableCount = filtered.available.length
+
   return (
     <Dialog
       open={open}
       onOpenChange={(o) => {
-        if (o) setResult(null)
+        if (o) {
+          setResult(null)
+          setQuery('')
+        }
         onOpenChange(o)
       }}
     >
@@ -116,10 +164,33 @@ export function ConnectProviderDialog({
         <DialogHeader>
           <DialogTitle>Connect Provider</DialogTitle>
           <DialogDescription>
-            Providers are discovered from your local OpenCode runtime. Credentials
-            are managed by OpenCode itself — never stored by the workspace.
+            Providers come from your local OpenCode runtime and its models.dev
+            registry. Credentials are managed by OpenCode itself — never stored
+            by the workspace.
           </DialogDescription>
         </DialogHeader>
+
+        <div className='flex items-center gap-2'>
+          <div className='relative flex-1'>
+            <Search className='absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground' />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder='Search providers...'
+              className='h-8 ps-7'
+            />
+          </div>
+          <Button
+            variant='outline'
+            size='sm'
+            className='h-8 shrink-0 gap-1.5'
+            onClick={() => void reload()}
+            disabled={loading}
+          >
+            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
+            Refresh Providers
+          </Button>
+        </div>
 
         <ScrollArea className='max-h-80'>
           {loading ? (
@@ -129,62 +200,42 @@ export function ConnectProviderDialog({
           ) : providers.length === 0 ? (
             <p className='px-3 py-8 text-center text-sm text-muted-foreground'>
               No providers discovered. Make sure the OpenCode runtime has loaded
-              models, then try again.
+              models, then try refreshing.
             </p>
           ) : (
-            <ul className='divide-y'>
-              {providers.map((provider) => (
-                <li
-                  key={provider.id}
-                  className='flex items-center gap-3 px-2 py-2.5'
-                >
-                  <Cloud className='size-5 shrink-0 text-muted-foreground' />
-                  <div className='min-w-0 flex-1'>
-                    <div className='flex items-center gap-2'>
-                      <span className='truncate text-sm font-medium'>
-                        {provider.name}
-                      </span>
-                      <ConnectionBadge connection={provider.connection} />
-                    </div>
-                    <p className='truncate text-xs text-muted-foreground'>
-                      {provider.modelCount} models · {provider.freeModelCount} free
-                      {provider.requiresAuth && ' · requires auth'}
-                    </p>
-                  </div>
-                  {provider.connection === 'connected' ? (
-                    <Button
-                      variant='outline'
-                      size='sm'
-                      className='h-8 shrink-0 gap-1.5'
-                      disabled={busy === provider.id}
-                      onClick={() => void handleDisconnect(provider)}
-                    >
-                      {busy === provider.id ? (
-                        <Loader2 className='size-3.5 animate-spin' />
-                      ) : (
-                        <LogOut className='size-3.5' />
-                      )}
-                      Disconnect
-                    </Button>
-                  ) : (
-                    <Button
-                      variant='outline'
-                      size='sm'
-                      className='h-8 shrink-0 gap-1.5'
-                      disabled={busy === provider.id}
-                      onClick={() => void handleConnect(provider)}
-                    >
-                      {busy === provider.id ? (
-                        <Loader2 className='size-3.5 animate-spin' />
-                      ) : (
-                        <Plug className='size-3.5' />
-                      )}
-                      Connect
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
+            <div className='space-y-3'>
+              {connectedCount > 0 && (
+                <ProviderSection title='Connected' count={connectedCount}>
+                  {filtered.connected.map((provider) => (
+                    <ProviderRow
+                      key={provider.id}
+                      provider={provider}
+                      busy={busy === provider.id}
+                      onConnect={() => void handleConnect(provider)}
+                      onDisconnect={() => void handleDisconnect(provider)}
+                    />
+                  ))}
+                </ProviderSection>
+              )}
+              {availableCount > 0 && (
+                <ProviderSection title='Available' count={availableCount}>
+                  {filtered.available.map((provider) => (
+                    <ProviderRow
+                      key={provider.id}
+                      provider={provider}
+                      busy={busy === provider.id}
+                      onConnect={() => void handleConnect(provider)}
+                      onDisconnect={() => void handleDisconnect(provider)}
+                    />
+                  ))}
+                </ProviderSection>
+              )}
+              {connectedCount === 0 && availableCount === 0 && (
+                <p className='px-3 py-8 text-center text-sm text-muted-foreground'>
+                  No providers match &quot;{query}&quot;.
+                </p>
+              )}
+            </div>
           )}
         </ScrollArea>
 
@@ -192,7 +243,9 @@ export function ConnectProviderDialog({
           <div
             className={cn(
               'space-y-2 rounded-lg border p-3 text-sm',
-              result.ok ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-amber-500/40 bg-amber-500/5'
+              result.ok
+                ? 'border-emerald-500/40 bg-emerald-500/5'
+                : 'border-amber-500/40 bg-amber-500/5'
             )}
           >
             <div className='flex items-start gap-2'>
@@ -201,19 +254,40 @@ export function ConnectProviderDialog({
               ) : (
                 <TriangleAlert className='mt-0.5 size-4 shrink-0 text-amber-600' />
               )}
-              <div className='min-w-0 space-y-1'>
-                <p className='font-medium'>
-                  {result.ok ? 'Disconnected.' : 'Login requires a terminal.'}
-                </p>
-                <p className='text-xs text-muted-foreground'>
-                  OpenCode provider login runs an interactive OAuth flow that the
-                  workspace runtime cannot complete in-process. Run the command in
-                  your own terminal to finish connecting, then refresh this list.
-                </p>
-                {!result.ok && (
-                  <code className='block rounded bg-muted px-2 py-1 font-mono text-xs'>
-                    {result.command}
-                  </code>
+              <div className='min-w-0 flex-1 space-y-1'>
+                {result.ok ? (
+                  <p className='font-medium'>Disconnected.</p>
+                ) : (
+                  <>
+                    <p className='font-medium'>
+                      Authentication requires terminal interaction
+                    </p>
+                    <p className='text-xs text-muted-foreground'>
+                      OpenCode provider login runs an interactive flow that the
+                      workspace runtime cannot complete in-process. Run the
+                      command in your own terminal, then click{' '}
+                      <span className='font-medium'>Refresh Providers</span> to
+                      re-read the connection state.
+                    </p>
+                    <div className='flex items-center gap-2'>
+                      <code className='min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs'>
+                        {result.command}
+                      </code>
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        className='size-6 shrink-0'
+                        aria-label='Copy command'
+                        onClick={() => void handleCopyCommand(result.command)}
+                      >
+                        {copied ? (
+                          <ShieldCheck className='size-3.5 text-emerald-600' />
+                        ) : (
+                          <Copy className='size-3.5' />
+                        )}
+                      </Button>
+                    </div>
+                  </>
                 )}
                 {result.output && !result.ok && (
                   <p className='text-xs text-muted-foreground'>
@@ -226,6 +300,82 @@ export function ConnectProviderDialog({
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+function ProviderSection({
+  title,
+  count,
+  children,
+}: {
+  title: string
+  count: number
+  children: React.ReactNode
+}) {
+  return (
+    <div>
+      <p className='px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground'>
+        {title} · {count}
+      </p>
+      <ul className='divide-y'>{children}</ul>
+    </div>
+  )
+}
+
+function ProviderRow({
+  provider,
+  busy,
+  onConnect,
+  onDisconnect,
+}: {
+  provider: ProviderSummary
+  busy: boolean
+  onConnect: () => void
+  onDisconnect: () => void
+}) {
+  const connected = isConnected(provider)
+  return (
+    <li className='flex items-center gap-3 px-2 py-2.5'>
+      <Cloud className='size-5 shrink-0 text-muted-foreground' />
+      <div className='min-w-0 flex-1'>
+        <div className='flex items-center gap-2'>
+          <span className='truncate text-sm font-medium'>{provider.name}</span>
+          <ConnectionBadge connection={provider.connection} />
+          {provider.source === 'registry' && (
+            <span className='shrink-0 text-[10px] text-muted-foreground/60'>
+              registry
+            </span>
+          )}
+        </div>
+        <p className='truncate text-xs text-muted-foreground'>
+          {provider.modelCount} models · {provider.freeModelCount} free
+          {provider.requiresAuth && ' · requires auth'}
+        </p>
+      </div>
+      {connected ? (
+        <Button
+          variant='outline'
+          size='sm'
+          className='h-8 shrink-0 gap-1.5'
+          disabled={busy}
+          onClick={onDisconnect}
+        >
+          {busy ? <Loader2 className='size-3.5 animate-spin' /> : <LogOut className='size-3.5' />}
+          Disconnect
+        </Button>
+      ) : (
+        <Button
+          variant='outline'
+          size='sm'
+          className='h-8 shrink-0 gap-1.5'
+          disabled={busy}
+          onClick={onConnect}
+        >
+          {busy ? <Loader2 className='size-3.5 animate-spin' /> : <Plug className='size-3.5' />}
+          Connect
+        </Button>
+      )}
+    </li>
   )
 }
 

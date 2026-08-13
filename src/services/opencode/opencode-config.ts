@@ -7,10 +7,10 @@ import { join } from "node:path";
  * (JSONC) instead of maintaining a parallel settings store. OpenCode v1.18 has
  * no native `opencode config` command, so configuration is file-based:
  *
- *   1. <workspace>/opencode.json          (project scope)
- *   2. <workspace>/.opencode/opencode.json
- *   3. ~/.config/opencode/opencode.json   (user scope)
- *   4. ~/.local/share/opencode/opencode.json
+ *   1. <workspace>/opencode.json(.jsonc)         (project scope)
+ *   2. <workspace>/.opencode/opencode.json(.jsonc)
+ *   3. ~/.config/opencode/opencode.json(.jsonc)  (user scope)
+ *   4. ~/.local/share/opencode/opencode.json(.jsonc)
  *
  * PATCHES are targeted: only whitelisted safe keys are merged into the resolved
  * file; all other existing keys are preserved. Comments in existing JSONC files
@@ -78,9 +78,13 @@ export function candidateConfigPaths(cwd: string): string[] {
   const home = homedir();
   return [
     join(cwd, "opencode.json"),
+    join(cwd, "opencode.jsonc"),
     join(cwd, ".opencode", "opencode.json"),
+    join(cwd, ".opencode", "opencode.jsonc"),
     join(home, ".config", "opencode", "opencode.json"),
+    join(home, ".config", "opencode", "opencode.jsonc"),
     join(home, ".local", "share", "opencode", "opencode.json"),
+    join(home, ".local", "share", "opencode", "opencode.jsonc"),
   ];
 }
 

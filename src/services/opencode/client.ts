@@ -311,6 +311,97 @@ function readConfiguredProviders(): Set<string> {
   return found;
 }
 
+export interface ModelsDevRegistryProvider {
+  id: string;
+  name: string;
+  modelCount: number;
+  freeModelCount: number;
+}
+
+export interface ModelsDevRegistry {
+  providers: ModelsDevRegistryProvider[];
+  path: string | null;
+}
+
+interface RegistryProviderEntry {
+  id?: string;
+  name?: string;
+  models?: Record<
+    string,
+    { id?: string; cost?: { input?: number | null; output?: number | null } }
+  >;
+}
+
+function registryFreeCount(models: Record<string, { id?: string; cost?: unknown }>): number {
+  let free = 0;
+  for (const [key, m] of Object.entries(models)) {
+    const cost = m.cost as { input?: number | null; output?: number | null } | undefined;
+    const zeroCost = cost && (cost.input ?? 0) === 0 && (cost.output ?? 0) === 0;
+    if (key.endsWith(":free") || zeroCost) free += 1;
+  }
+  return free;
+}
+
+function parseModelsDevRegistry(json: string): ModelsDevRegistryProvider[] {
+  const parsed = JSON.parse(json) as Record<string, RegistryProviderEntry>;
+  const providers: ModelsDevRegistryProvider[] = [];
+  for (const [id, entry] of Object.entries(parsed)) {
+    if (!entry || typeof entry !== "object") continue;
+    const models = entry.models ?? {};
+    const modelCount = Object.keys(models).length;
+    if (modelCount === 0) continue;
+    providers.push({
+      id: entry.id ?? id,
+      name: entry.name ?? id,
+      modelCount,
+      freeModelCount: registryFreeCount(models),
+    });
+  }
+  return providers;
+}
+
+const REGISTRY_CACHE_TTL_MS = 60_000;
+let registryCache: { at: number; value: ModelsDevRegistry } | null = null;
+
+/**
+ * Read the OpenCode-supported provider registry.
+ *
+ * OpenCode refreshes the models.dev catalog into a local JSON cache (via
+ * `opencode models --refresh`). This file is the runtime-supported source of
+ * available providers — including providers the user has NOT connected yet.
+ * The CLI's own `opencode models --verbose` only lists providers with live
+ * credentials, which is exactly why unconnected providers are otherwise
+ * invisible.
+ */
+export function readModelsDevRegistry(force = false): ModelsDevRegistry {
+  if (registryCache && !force && Date.now() - registryCache.at < REGISTRY_CACHE_TTL_MS) {
+    return registryCache.value;
+  }
+  const candidates = [
+    join(homedir(), ".cache", "opencode", "models.json"),
+    join(homedir(), ".config", "opencode", "models.json"),
+    join(homedir(), ".local", "share", "opencode", "models.json"),
+  ];
+  let providers: ModelsDevRegistryProvider[] = [];
+  let path: string | null = null;
+  for (const candidate of candidates) {
+    if (!fileExists(candidate)) continue;
+    try {
+      providers = parseModelsDevRegistry(readFileSync(candidate, "utf8"));
+      if (providers.length > 0) {
+        path = candidate;
+        break;
+      }
+    } catch {
+      providers = [];
+      continue;
+    }
+  }
+  const value: ModelsDevRegistry = { providers, path };
+  registryCache = { at: Date.now(), value };
+  return value;
+}
+
 export async function fetchModelsFromOpenCode(): Promise<ModelsResponse> {
   const warnings: string[] = [];
   let source: ModelsResponse["source"] = "opencode";
@@ -365,6 +456,8 @@ export async function fetchModelsFromOpenCode(): Promise<ModelsResponse> {
 export async function fetchProviders(): Promise<ProviderSummary[]> {
   const { models } = await fetchModelsFromOpenCode();
   const configured = readConfiguredProviders();
+  const registry = readModelsDevRegistry();
+  const registryById = new Map(registry.providers.map((p) => [p.id, p]));
 
   const byProvider = new Map<string, ProviderModel[]>();
   for (const m of models) {
@@ -379,20 +472,48 @@ export async function fetchProviders(): Promise<ProviderSummary[]> {
     let connection: ProviderSummary["connection"];
     if (id === "opencode" || freeCount > 0) connection = "connected";
     else if (hasCredentials) connection = "connected";
-    else connection = "available";
+    else connection = "configured";
 
     summaries.push({
       id,
-      name: id,
+      name: registryById.get(id)?.name ?? id,
       connection,
       modelCount: mods.length,
       freeModelCount: freeCount,
       hasCredentials,
       requiresAuth: !hasCredentials && freeCount === 0 && id !== "opencode",
+      source: "runtime",
     });
   }
 
-  return summaries.sort((a, b) => a.name.localeCompare(b.name));
+  // Providers present in the OpenCode-supported registry but not yet connected.
+  const runtimeIds = new Set(byProvider.keys());
+  for (const reg of registry.providers) {
+    if (runtimeIds.has(reg.id)) continue;
+    const hasCredentials = configured.has(reg.id) || configured.has(`${reg.id}/`);
+    summaries.push({
+      id: reg.id,
+      name: reg.name,
+      connection: hasCredentials ? "configured" : "available",
+      modelCount: reg.modelCount,
+      freeModelCount: reg.freeModelCount,
+      hasCredentials,
+      requiresAuth: !hasCredentials,
+      source: "registry",
+    });
+  }
+
+  const connectionRank: Record<ProviderSummary["connection"], number> = {
+    connected: 0,
+    configured: 1,
+    available: 2,
+    unavailable: 3,
+  };
+  return summaries.sort(
+    (a, b) =>
+      (connectionRank[a.connection] - connectionRank[b.connection]) ||
+      a.name.localeCompare(b.name)
+  );
 }
 
 export async function checkHealth(): Promise<HealthStatus> {

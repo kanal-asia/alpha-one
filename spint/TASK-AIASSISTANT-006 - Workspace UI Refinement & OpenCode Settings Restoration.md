@@ -157,5 +157,5 @@ Corrective rework of Task 006, closing two end-user gaps without regressing Task
 ### Git (006R1)
 
 - branch: `task/gworkspace-002-r1-drive-access-rework`
-- commit hash: `<hash>`
+- commit hash: `9cdfd29`
 - commit message: `fix(ai-assistant): complete Connect Provider catalog & expose OpenCode Settings from AI Assistant (TASK-AIASSISTANT-006R1)`

@@ -25,10 +25,16 @@ import {
   setProviderEnabled,
   validateProviderKey,
 } from "./providers-config";
+import { createGoogleOAuthRouter } from "../google/oauth-router";
+import { createGoogleDriveRouter } from "../google/drive-router";
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
+
+// Google Workspace OAuth & Drive
+app.use("/api/google/oauth", createGoogleOAuthRouter());
+app.use("/api/google/drive", createGoogleDriveRouter());
 
 const runtimeManager = new RuntimeManager(Number(process.env.PORT) || 3001);
 

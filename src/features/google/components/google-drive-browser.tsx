@@ -151,13 +151,17 @@ export function GoogleDriveBrowser({
         body: JSON.stringify({ returnTo: '/google/drive' }),
       })
       const data = await res.json()
+      if (!res.ok) {
+        setError(data.error ?? 'Unable to start Google connection. Please try again.')
+        return
+      }
       if (data.url) {
         window.location.href = data.url
       } else if (data.error) {
         setError(data.error)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to connect Google Workspace. Please try again.')
+      setError(err instanceof Error ? err.message : 'Google Workspace service is unavailable.')
     } finally {
       setConnecting(false)
     }

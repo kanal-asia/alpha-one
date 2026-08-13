@@ -46,6 +46,7 @@ export interface OpenCodeTransport {
   listProviders(): Promise<ProviderSummary[]>
   connectProvider(providerId: string): Promise<OpenCodeAuthResult>
   disconnectProvider(providerId: string): Promise<OpenCodeAuthResult>
+  saveApiKey(providerId: string, apiKey: string): Promise<{ ok: boolean }>
   fetchStats(days?: number): Promise<UsageStats | null>
   compactSession(sessionId: string): Promise<CompactResult>
   fetchConfigDefaultAgent(): Promise<string | null>
@@ -227,6 +228,13 @@ export class HTTPTransport implements OpenCodeTransport {
       { method: 'POST' }
     )
     return res
+  }
+
+  async saveApiKey(providerId: string, apiKey: string): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>('/auth/key', {
+      method: 'POST',
+      body: JSON.stringify({ provider: providerId, apiKey }),
+    })
   }
 
   async fetchConfigDefaultAgent(): Promise<string | null> {

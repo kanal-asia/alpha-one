@@ -34,7 +34,7 @@ import {
 } from "./providers-config";
 import { createGoogleOAuthRouter } from "../google/oauth-router";
 import { createGoogleDriveRouter } from "../google/drive-router";
-import { openCodeAuthLogin, openCodeAuthLogout } from "./auth";
+import { openCodeAuthLogin, openCodeAuthLogout, saveOpenCodeApiKey } from "./auth";
 import { readOpenCodeConfig, patchOpenCodeConfig } from "./opencode-config";
 
 const app = express();
@@ -477,6 +477,19 @@ app.post("/api/opencode/auth/login", async (req: Request, res: Response) => {
   if (!providerId) return res.status(400).json({ error: "provider is required" });
   const result = await openCodeAuthLogin(providerId);
   return res.json(result);
+});
+
+app.post("/api/opencode/auth/key", (req: Request, res: Response) => {
+  const providerId = typeof req.body?.provider === "string" ? req.body.provider.trim() : "";
+  const apiKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
+  if (!providerId || !apiKey) {
+    return res.status(400).json({ error: "Provider and API key are required." });
+  }
+  const ok = saveOpenCodeApiKey(providerId, apiKey);
+  if (!ok) {
+    return res.status(500).json({ error: "Failed to save API key to OpenCode credential store." });
+  }
+  return res.json({ ok: true, provider: providerId });
 });
 
 app.post("/api/opencode/auth/logout", async (req: Request, res: Response) => {

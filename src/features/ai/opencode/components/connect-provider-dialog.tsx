@@ -52,6 +52,8 @@ export function ConnectProviderDialog({
   const providersLoaded = useOpenCodeStore((s) => s.providersLoaded)
   const loadProviders = useOpenCodeStore((s) => s.loadProviders)
   const [busy, setBusy] = useState<string | null>(null)
+  const [connectingProviderId, setConnectingProviderId] = useState<string | null>(null)
+  const [apiKeyInput, setApiKeyInput] = useState('')
   const [query, setQuery] = useState('')
   const [result, setResult] = useState<{ providerId: string } & OpenCodeAuthResult | null>(null)
   const [copied, setCopied] = useState(false)
@@ -79,19 +81,50 @@ export function ConnectProviderDialog({
     return { connected, available }
   }, [providers, query])
 
-  const handleConnect = async (provider: ProviderSummary) => {
+  const handleConnectOAuth = async (provider: ProviderSummary) => {
     setBusy(provider.id)
     setResult(null)
     setCopied(false)
     try {
       const res = await openCodeService.connectProvider(provider.id)
       setResult({ providerId: provider.id, ...res })
+      await reload()
     } catch (err) {
       setResult({
         providerId: provider.id,
         ok: false,
         command: `opencode auth login --provider ${provider.id}`,
         output: err instanceof Error ? err.message : 'Connection attempt failed.',
+        timedOut: false,
+      })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleSaveApiKey = async (provider: ProviderSummary) => {
+    if (!apiKeyInput.trim()) return
+    setBusy(provider.id)
+    setResult(null)
+    setCopied(false)
+    try {
+      await openCodeService.saveApiKey(provider.id, apiKeyInput.trim())
+      setConnectingProviderId(null)
+      setApiKeyInput('')
+      await reload()
+      setResult({
+        providerId: provider.id,
+        ok: true,
+        command: `opencode auth login --provider ${provider.id}`,
+        output: 'API key saved and verified successfully in OpenCode credential store.',
+        timedOut: false,
+      })
+    } catch (err) {
+      setResult({
+        providerId: provider.id,
+        ok: false,
+        command: `opencode auth login --provider ${provider.id}`,
+        output: err instanceof Error ? err.message : 'Failed to save API key.',
         timedOut: false,
       })
     } finally {
@@ -195,7 +228,16 @@ export function ConnectProviderDialog({
                       key={provider.id}
                       provider={provider}
                       busy={busy === provider.id}
-                      onConnect={() => void handleConnect(provider)}
+                      connecting={connectingProviderId === provider.id}
+                      apiKeyInput={apiKeyInput}
+                      onApiKeyChange={setApiKeyInput}
+                      onStartConnect={() => {
+                        setConnectingProviderId(provider.id)
+                        setApiKeyInput('')
+                      }}
+                      onSaveApiKey={() => void handleSaveApiKey(provider)}
+                      onCancelConnect={() => setConnectingProviderId(null)}
+                      onConnectOAuth={() => void handleConnectOAuth(provider)}
                       onDisconnect={() => void handleDisconnect(provider)}
                     />
                   ))}
@@ -208,7 +250,16 @@ export function ConnectProviderDialog({
                       key={provider.id}
                       provider={provider}
                       busy={busy === provider.id}
-                      onConnect={() => void handleConnect(provider)}
+                      connecting={connectingProviderId === provider.id}
+                      apiKeyInput={apiKeyInput}
+                      onApiKeyChange={setApiKeyInput}
+                      onStartConnect={() => {
+                        setConnectingProviderId(provider.id)
+                        setApiKeyInput('')
+                      }}
+                      onSaveApiKey={() => void handleSaveApiKey(provider)}
+                      onCancelConnect={() => setConnectingProviderId(null)}
+                      onConnectOAuth={() => void handleConnectOAuth(provider)}
                       onDisconnect={() => void handleDisconnect(provider)}
                     />
                   ))}
@@ -309,55 +360,99 @@ function ProviderSection({
 function ProviderRow({
   provider,
   busy,
-  onConnect,
+  connecting,
+  apiKeyInput,
+  onApiKeyChange,
+  onStartConnect,
+  onSaveApiKey,
+  onCancelConnect,
+  onConnectOAuth,
   onDisconnect,
 }: {
   provider: ProviderSummary
   busy: boolean
-  onConnect: () => void
+  connecting: boolean
+  apiKeyInput: string
+  onApiKeyChange: (v: string) => void
+  onStartConnect: () => void
+  onSaveApiKey: () => void
+  onCancelConnect: () => void
+  onConnectOAuth: () => void
   onDisconnect: () => void
 }) {
   const connected = isConnected(provider)
   return (
-    <li className='flex items-center gap-3 px-2 py-2.5'>
-      <Cloud className='size-5 shrink-0 text-muted-foreground' />
-      <div className='min-w-0 flex-1'>
-        <div className='flex items-center gap-2'>
-          <span className='truncate text-sm font-medium'>{provider.name}</span>
-          <ConnectionBadge connection={provider.connection} />
-          {provider.source === 'registry' && (
-            <span className='shrink-0 text-[10px] text-muted-foreground/60'>
-              registry
-            </span>
-          )}
+    <li className='flex flex-col gap-2 px-2 py-2.5'>
+      <div className='flex items-center gap-3'>
+        <Cloud className='size-5 shrink-0 text-muted-foreground' />
+        <div className='min-w-0 flex-1'>
+          <div className='flex items-center gap-2'>
+            <span className='truncate text-sm font-medium'>{provider.name}</span>
+            <ConnectionBadge connection={provider.connection} />
+            {provider.source === 'registry' && (
+              <span className='shrink-0 text-[10px] text-muted-foreground/60'>
+                registry
+              </span>
+            )}
+          </div>
+          <p className='truncate text-xs text-muted-foreground'>
+            {provider.modelCount} models · {provider.freeModelCount} free
+            {provider.requiresAuth && ' · requires auth'}
+          </p>
         </div>
-        <p className='truncate text-xs text-muted-foreground'>
-          {provider.modelCount} models · {provider.freeModelCount} free
-          {provider.requiresAuth && ' · requires auth'}
-        </p>
+        {connected ? (
+          <Button
+            variant='outline'
+            size='sm'
+            className='h-8 shrink-0 gap-1.5'
+            disabled={busy}
+            onClick={onDisconnect}
+          >
+            {busy ? <Loader2 className='size-3.5 animate-spin' /> : <LogOut className='size-3.5' />}
+            Disconnect
+          </Button>
+        ) : (
+          <Button
+            variant='outline'
+            size='sm'
+            className='h-8 shrink-0 gap-1.5'
+            disabled={busy}
+            onClick={provider.id === 'opencode' ? onConnectOAuth : onStartConnect}
+          >
+            {busy ? <Loader2 className='size-3.5 animate-spin' /> : <Plug className='size-3.5' />}
+            Connect
+          </Button>
+        )}
       </div>
-      {connected ? (
-        <Button
-          variant='outline'
-          size='sm'
-          className='h-8 shrink-0 gap-1.5'
-          disabled={busy}
-          onClick={onDisconnect}
-        >
-          {busy ? <Loader2 className='size-3.5 animate-spin' /> : <LogOut className='size-3.5' />}
-          Disconnect
-        </Button>
-      ) : (
-        <Button
-          variant='outline'
-          size='sm'
-          className='h-8 shrink-0 gap-1.5'
-          disabled={busy}
-          onClick={onConnect}
-        >
-          {busy ? <Loader2 className='size-3.5 animate-spin' /> : <Plug className='size-3.5' />}
-          Connect
-        </Button>
+      {connecting && (
+        <div className='ms-8 space-y-2 rounded-lg border bg-muted/40 p-2.5'>
+          <p className='text-xs font-medium'>Connect {provider.name} (API Key)</p>
+          <div className='flex items-center gap-2'>
+            <Input
+              type='password'
+              placeholder='Enter API key (sk-...)'
+              value={apiKeyInput}
+              onChange={(e) => onApiKeyChange(e.target.value)}
+              className='h-8 text-xs'
+            />
+            <Button
+              size='sm'
+              className='h-8 shrink-0'
+              disabled={!apiKeyInput.trim() || busy}
+              onClick={onSaveApiKey}
+            >
+              {busy ? <Loader2 className='size-3.5 animate-spin' /> : 'Connect'}
+            </Button>
+            <Button
+              size='sm'
+              variant='ghost'
+              className='h-8 shrink-0'
+              onClick={onCancelConnect}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
       )}
     </li>
   )

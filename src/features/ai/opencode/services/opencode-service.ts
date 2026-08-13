@@ -76,6 +76,10 @@ export class OpenCodeService {
     return this.transport.disconnectProvider(providerId)
   }
 
+  async saveApiKey(providerId: string, apiKey: string): Promise<{ ok: boolean }> {
+    return this.transport.saveApiKey(providerId, apiKey)
+  }
+
   async sendPrompt(
     sessionId: string,
     prompt: string,

@@ -1,5 +1,8 @@
 import { spawn } from "node:child_process";
 import { resolveOpenCode } from "./client";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 /**
  * OpenCode-managed provider authentication.
@@ -94,4 +97,26 @@ export async function openCodeAuthLogin(providerId: string): Promise<OpenCodeAut
 /** Log out from an OpenCode-managed provider (non-interactive). */
 export async function openCodeAuthLogout(providerId: string): Promise<OpenCodeAuthResult> {
   return runAuth(["logout", providerId], 15_000);
+}
+
+/** Save an API key directly into OpenCode's canonical credential store (`auth.json`). */
+export function saveOpenCodeApiKey(providerId: string, apiKey: string): boolean {
+  try {
+    const dir = join(homedir(), ".local", "share", "opencode");
+    mkdirSync(dir, { recursive: true });
+    const authPath = join(dir, "auth.json");
+    let data: Record<string, unknown> = {};
+    if (existsSync(authPath)) {
+      data = JSON.parse(readFileSync(authPath, "utf8")) as Record<string, unknown>;
+    }
+    data[providerId] = {
+      type: "api",
+      key: apiKey.trim(),
+    };
+    writeFileSync(authPath, JSON.stringify(data, null, 2), "utf8");
+    return true;
+  } catch (err) {
+    console.error("[auth] failed to save API key", err);
+    return false;
+  }
 }

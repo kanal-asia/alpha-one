@@ -34,6 +34,7 @@ import {
 } from "./providers-config";
 import { createGoogleOAuthRouter } from "../google/oauth-router";
 import { createGoogleDriveRouter } from "../google/drive-router";
+import { createGoogleScriptRouter } from "../google/script-router";
 import { openCodeAuthLogin, openCodeAuthLogout, saveOpenCodeApiKey } from "./auth";
 import { readOpenCodeConfig, patchOpenCodeConfig } from "./opencode-config";
 
@@ -41,9 +42,10 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
-// Google Workspace OAuth & Drive
+// Google Workspace OAuth & Drive & Apps Script
 app.use("/api/google/oauth", createGoogleOAuthRouter());
 app.use("/api/google/drive", createGoogleDriveRouter());
+app.use("/api/google/script", createGoogleScriptRouter());
 
 const runtimeManager = new RuntimeManager(Number(process.env.PORT) || 3001);
 

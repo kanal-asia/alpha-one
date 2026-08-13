@@ -141,3 +141,70 @@ export async function updateScriptProjectContent(
 
   return readBack
 }
+
+export interface ScriptProjectSummary {
+  scriptId: string
+  name: string
+  modifiedTime: string
+  parentId?: string
+  boundContainerName?: string
+}
+
+/**
+ * List accessible Google Apps Script projects via Drive API query (mimeType = application/vnd.google-apps.script).
+ * Avoids any web scraping and uses official authorized Google API integration.
+ */
+export async function listScriptProjects(userId: string, searchQuery?: string): Promise<{ projects: ScriptProjectSummary[] }> {
+  const queryParts = ["mimeType = 'application/vnd.google-apps.script'", 'trashed = false']
+  if (searchQuery && searchQuery.trim()) {
+    queryParts.push(`name contains '${searchQuery.trim().replace(/'/g, "\\'")}'`)
+  }
+  const token = await getValidAccessToken(userId)
+  if (!token) {
+    throw new Error('Google account not connected.')
+  }
+
+  const url = new URL(`${DRIVE_API_BASE}/files`)
+  url.searchParams.set('q', queryParts.join(' and '))
+  url.searchParams.set('fields', 'files(id,name,modifiedTime,parents)')
+  url.searchParams.set('orderBy', 'modifiedTime desc')
+  url.searchParams.set('pageSize', '50')
+
+  const response = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    throw new Error('Failed to list Apps Script projects from Google Drive.')
+  }
+
+  const data = (await response.json()) as { files?: Array<{ id: string; name: string; modifiedTime: string; parents?: string[] }> }
+  const files = data.files ?? []
+
+  const projects: ScriptProjectSummary[] = []
+  for (const f of files) {
+    let boundContainerName: string | undefined = undefined
+    const parentId = f.parents?.[0]
+    if (parentId) {
+      try {
+        const parentRes = await fetch(`${DRIVE_API_BASE}/files/${encodeURIComponent(parentId)}?fields=name`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (parentRes.ok) {
+          const parentFile = (await parentRes.json()) as { name?: string }
+          boundContainerName = parentFile.name
+        }
+      } catch {
+        /* ignore parent resolution failure */
+      }
+    }
+    projects.push({
+      scriptId: f.id,
+      name: f.name,
+      modifiedTime: f.modifiedTime,
+      parentId,
+      boundContainerName,
+    })
+  }
+
+  return { projects }
+}

@@ -3,6 +3,7 @@ import { Cloud, File as FileIcon, FileCode } from 'lucide-react'
 import type { ReferenceAttachment } from '@/features/ai/references/contract'
 import { openDriveFilePicker } from '@/features/google/components/drive-file-picker'
 import { LocalFilePicker, type LocalFileSelection } from './local-file-picker'
+import { ScriptProjectPicker, type ScriptProjectSummary } from './script-project-picker'
 import {
   Popover,
   PopoverContent,
@@ -23,7 +24,23 @@ export function ReferenceSourcePicker({
 }: ReferenceSourcePickerProps) {
   const [open, setOpen] = useState(false)
   const [localPickerOpen, setLocalPickerOpen] = useState(false)
+  const [scriptPickerOpen, setScriptPickerOpen] = useState(false)
+  const [scriptProjects, setScriptProjects] = useState<ScriptProjectSummary[]>([])
+  const [scriptLoading, setScriptLoading] = useState(false)
   const driveWindowRef = useRef<Window | null>(null)
+
+  const fetchScriptProjects = async () => {
+    setScriptLoading(true)
+    try {
+      const res = await fetch('/api/google/script/projects')
+      const data = (await res.json()) as { projects: ScriptProjectSummary[] }
+      setScriptProjects(data.projects ?? [])
+    } catch {
+      setScriptProjects([])
+    } finally {
+      setScriptLoading(false)
+    }
+  }
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -110,16 +127,8 @@ export function ReferenceSourcePicker({
             className='h-9 w-full justify-start gap-2'
             onClick={() => {
               setOpen(false)
-              const scriptId = prompt('Enter Google Apps Script Project Script ID:')
-              if (scriptId && scriptId.trim()) {
-                const name = prompt('Enter a display name for this Apps Script project:', 'Matching SKU Platform Marketplace') ?? 'Apps Script Project'
-                onAddReference({
-                  provider: 'apps_script',
-                  name: name.trim(),
-                  fileId: scriptId.trim(),
-                  mimeType: 'application/vnd.google-apps.script',
-                })
-              }
+              setScriptPickerOpen(true)
+              void fetchScriptProjects()
             }}
           >
             <FileCode className='size-4 text-amber-600' />
@@ -135,6 +144,22 @@ export function ReferenceSourcePicker({
         open={localPickerOpen}
         onOpenChange={setLocalPickerOpen}
         onSelect={handleLocalSelect}
+      />
+
+      <ScriptProjectPicker
+        open={scriptPickerOpen}
+        onOpenChange={setScriptPickerOpen}
+        projects={scriptProjects}
+        loading={scriptLoading}
+        onRefresh={() => void fetchScriptProjects()}
+        onSelect={(project) => {
+          onAddReference({
+            provider: 'apps_script',
+            name: project.name,
+            fileId: project.scriptId,
+            mimeType: 'application/vnd.google-apps.script',
+          })
+        }}
       />
     </>
   )

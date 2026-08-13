@@ -101,5 +101,5 @@ The browser File System Access API (`window.showDirectoryPicker()`) returns dire
 ### Git
 
 - branch: `task/gworkspace-002-r1-drive-access-rework`
-- commit hash: *(filled after commit)*
+- commit hash: `c88e152`
 - commit message: `feat(ai-assistant): add local & google drive project folder pickers (TASK-AIASSISTANT-004)`

@@ -204,5 +204,5 @@ Corrective rework: fix the AI Assistant two-pane layout so the session sidebar a
 ### Git (006R1 corrective)
 
 - branch: `task/gworkspace-002-r1-drive-access-rework`
-- commit hash: pending
+- commit hash: `aee84d5`
 - commit message: `fix(ai-assistant): correct settings provider and layout UX`

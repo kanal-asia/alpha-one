@@ -88,3 +88,5 @@ Refine the Alpha Workspace AI Assistant UI and restore OpenCode settings to be d
 
 - One commit covering the uncommitted AI workspace + OpenCode + Google Drive picker feature work (Tasks 001-006), which this task builds on; the working tree previously had no commit after `TASK-AIASSISTANT-004`.
 - branch: `task/gworkspace-002-r1-drive-access-rework`
+- commit hash: `453233e`
+- commit message: `feat(ai-assistant): AI workspace, OpenCode integration, reference-only attachments & UI refinements (TASK-AIASSISTANT-005/-006)`

@@ -41,7 +41,12 @@ export function ChatComposer({
     setAttachments([])
   }
 
-  const tokenCount = value.trim() ? value.trim().split(/\s+/).length : 0
+  const textTokens = value.trim() ? value.trim().split(/\s+/).length : 0
+  const attachmentCount = attachments.length
+  const tokenDisplay =
+    attachmentCount > 0
+      ? `${attachmentCount} file${attachmentCount > 1 ? 's' : ''} · Token count unavailable`
+      : `${textTokens} tokens`
 
   return (
     <div className='rounded-2xl border bg-card p-2 shadow-sm'>
@@ -90,7 +95,7 @@ export function ChatComposer({
               </Button>
             )}
           </ReferenceSourcePicker>
-          <span className='text-xs text-muted-foreground'>{tokenCount} tokens</span>
+          <span className='text-xs text-muted-foreground'>{tokenDisplay}</span>
         </div>
         {isStreaming ? (
           <Button size='icon' className='size-8 rounded-full' onClick={onStop} aria-label='Stop'>

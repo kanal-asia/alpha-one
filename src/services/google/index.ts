@@ -17,6 +17,10 @@ export type {
 
 export {
   listDriveFolder,
+  listMyDrive,
+  listSharedWithMe,
+  listStarred,
+  listRecent,
   getFolderMeta,
   getFolderBreadcrumb,
   searchDrive,

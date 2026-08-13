@@ -17,6 +17,10 @@ import {
   Film,
   Music,
   ExternalLink,
+  Star,
+  Clock,
+  Users,
+  HardDrive,
 } from 'lucide-react'
 import { Main } from '@/components/layout/main'
 import { PageHeader } from '@/components/page-header'
@@ -60,6 +64,8 @@ interface DriveStatus {
   email?: string
   error?: string
 }
+
+type NavTab = 'my-drive' | 'shared' | 'starred' | 'recent'
 
 interface GoogleDriveBrowserProps {
   mode?: 'browse' | 'pick-folder'
@@ -115,6 +121,13 @@ function formatSize(size?: string): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+const NAV_TABS: { id: NavTab; label: string; icon: React.ElementType; endpoint: string }[] = [
+  { id: 'my-drive', label: 'My Drive', icon: HardDrive, endpoint: '/api/google/drive/my-drive' },
+  { id: 'shared', label: 'Shared with me', icon: Users, endpoint: '/api/google/drive/shared' },
+  { id: 'starred', label: 'Starred', icon: Star, endpoint: '/api/google/drive/starred' },
+  { id: 'recent', label: 'Recent', icon: Clock, endpoint: '/api/google/drive/recent' },
+]
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -131,6 +144,7 @@ export function GoogleDriveBrowser({
   const [nextPageToken, setNextPageToken] = useState<string | undefined>()
   const [loadingFiles, setLoadingFiles] = useState(false)
 
+  const [activeTab, setActiveTab] = useState<NavTab>('my-drive')
   const [currentFolderId, setCurrentFolderId] = useState<string | undefined>()
   const [breadcrumb, setBreadcrumb] = useState<DriveBreadcrumb[]>([])
 
@@ -167,42 +181,32 @@ export function GoogleDriveBrowser({
     }
   }
 
-  // Check connection status (also handles post-OAuth redirect and initial folder load)
-  useEffect(() => {
-    let cancelled = false
+  // Load files for a nav tab
+  const loadTabFiles = useCallback(async (tab: NavTab, pageToken?: string) => {
+    setLoadingFiles(true)
+    setError(null)
+    try {
+      const tabConfig = NAV_TABS.find((t) => t.id === tab)
+      if (!tabConfig) return
 
-    // Handle post-OAuth redirect params
-    const params = new URLSearchParams(window.location.search)
-    const connectedParam = params.get('google_connected') === 'true'
-    const errorParam = params.get('google_error')
-    if (connectedParam || errorParam) {
-      window.history.replaceState({}, '', window.location.pathname)
-    }
+      const params = new URLSearchParams()
+      if (pageToken) params.set('pageToken', pageToken)
 
-    async function checkStatus() {
-      try {
-        const data = await apiFetch<DriveStatus>('/api/google/drive/status')
-        if (!cancelled) {
-          setStatus(data)
-          setLoading(false)
-          // Auto-load root folder when connected
-          if (data.connected) {
-            const filesData = await apiFetch<DriveListResponse>('/api/google/drive/list')
-            if (!cancelled) {
-              setFiles(filesData.files)
-              setNextPageToken(filesData.nextPageToken)
-            }
-          }
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to check status.')
-          setLoading(false)
-        }
+      const data = await apiFetch<DriveListResponse>(
+        `${tabConfig.endpoint}?${params.toString()}`
+      )
+
+      if (pageToken) {
+        setFiles((prev) => [...prev, ...data.files])
+      } else {
+        setFiles(data.files)
       }
+      setNextPageToken(data.nextPageToken)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load files.')
+    } finally {
+      setLoadingFiles(false)
     }
-    void checkStatus()
-    return () => { cancelled = true }
   }, [])
 
   // Load folder contents
@@ -244,6 +248,50 @@ export function GoogleDriveBrowser({
     }
   }, [])
 
+  // Check connection status (also handles post-OAuth redirect and initial folder load)
+  useEffect(() => {
+    let cancelled = false
+
+    // Handle post-OAuth redirect params
+    const params = new URLSearchParams(window.location.search)
+    const connectedParam = params.get('google_connected') === 'true'
+    const errorParam = params.get('google_error')
+    if (connectedParam || errorParam) {
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+
+    async function checkStatus() {
+      try {
+        const data = await apiFetch<DriveStatus>('/api/google/drive/status')
+        if (!cancelled) {
+          setStatus(data)
+          setLoading(false)
+          // Auto-load My Drive when connected
+          if (data.connected) {
+            void loadTabFiles('my-drive')
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to check status.')
+          setLoading(false)
+        }
+      }
+    }
+    void checkStatus()
+    return () => { cancelled = true }
+  }, [loadTabFiles])
+
+  // Switch navigation tab
+  const switchTab = (tab: NavTab) => {
+    setActiveTab(tab)
+    setCurrentFolderId(undefined)
+    setBreadcrumb([])
+    setIsSearching(false)
+    setSearchQuery('')
+    void loadTabFiles(tab)
+  }
+
   // Navigate to folder
   const navigateToFolder = (folderId: string) => {
     setCurrentFolderId(folderId)
@@ -259,7 +307,7 @@ export function GoogleDriveBrowser({
     } else {
       setCurrentFolderId(undefined)
       setBreadcrumb([])
-      void loadFolder()
+      void loadTabFiles(activeTab)
     }
   }
 
@@ -276,7 +324,7 @@ export function GoogleDriveBrowser({
     setIsSearching(false)
     setCurrentFolderId(undefined)
     setBreadcrumb([])
-    void loadFolder()
+    void loadTabFiles(activeTab)
   }
 
   // Handle folder selection (for pick-folder mode)
@@ -377,15 +425,40 @@ export function GoogleDriveBrowser({
             )}
           </div>
 
+          {/* Navigation tabs */}
+          <div className='flex items-center gap-1 rounded-lg border p-1'>
+            {NAV_TABS.map((tab) => {
+              const Icon = tab.icon
+              const isActive = activeTab === tab.id && !currentFolderId && !isSearching
+              return (
+                <Button
+                  key={tab.id}
+                  variant={isActive ? 'secondary' : 'ghost'}
+                  size='sm'
+                  className='flex items-center gap-2'
+                  onClick={() => switchTab(tab.id)}
+                >
+                  <Icon className='size-4' />
+                  {tab.label}
+                </Button>
+              )
+            })}
+          </div>
+
           {/* Search and Navigation */}
           <div className='flex items-center gap-2'>
-            {isSearching ? (
-              <Button variant='ghost' size='sm' onClick={clearSearch}>
-                <ArrowLeft className='size-4' />
-                Back
-              </Button>
-            ) : currentFolderId ? (
-              <Button variant='ghost' size='sm' onClick={navigateBack}>
+            {(isSearching || currentFolderId) ? (
+              <Button
+                variant='ghost'
+                size='sm'
+                onClick={() => {
+                  if (isSearching) {
+                    clearSearch()
+                  } else {
+                    navigateBack()
+                  }
+                }}
+              >
                 <ArrowLeft className='size-4' />
                 Back
               </Button>
@@ -417,7 +490,7 @@ export function GoogleDriveBrowser({
                 onClick={() => {
                   setCurrentFolderId(undefined)
                   setBreadcrumb([])
-                  void loadFolder()
+                  void loadTabFiles(activeTab)
                 }}
               >
                 <Cloud className='size-3.5' />
@@ -526,7 +599,15 @@ export function GoogleDriveBrowser({
                     variant='outline'
                     size='sm'
                     className='w-full'
-                    onClick={() => void loadFolder(currentFolderId, nextPageToken, isSearching ? searchQuery : undefined)}
+                    onClick={() => {
+                      if (isSearching) {
+                        void loadFolder(currentFolderId, nextPageToken, searchQuery)
+                      } else if (currentFolderId) {
+                        void loadFolder(currentFolderId, nextPageToken)
+                      } else {
+                        void loadTabFiles(activeTab, nextPageToken)
+                      }
+                    }}
                   >
                     Load more
                   </Button>

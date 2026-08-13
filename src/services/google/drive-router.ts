@@ -8,6 +8,10 @@
 import { Router, type Request, type Response } from 'express'
 import {
   listDriveFolder,
+  listMyDrive,
+  listSharedWithMe,
+  listStarred,
+  listRecent,
   getFolderMeta,
   getFolderBreadcrumb,
   searchDrive,
@@ -29,6 +33,95 @@ export function createGoogleDriveRouter(): Router {
     } catch (err) {
       return res.status(500).json({
         error: err instanceof Error ? err.message : 'Failed to check Drive status.',
+      })
+    }
+  })
+
+  /**
+   * Helper: require connected account or return 401.
+   */
+  async function requireConnection(userId: string): Promise<boolean> {
+    const connectionStatus = await checkDriveConnection(userId)
+    if (!connectionStatus.connected) return false
+    return true
+  }
+
+  /**
+   * GET /api/google/drive/my-drive
+   * List the user's My Drive root contents.
+   */
+  router.get('/my-drive', async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req)
+      if (!(await requireConnection(userId))) {
+        return res.status(401).json({ error: 'Google account not connected.' })
+      }
+      const pageToken = req.query.pageToken as string | undefined
+      const result = await listMyDrive(userId, pageToken)
+      return res.json(result)
+    } catch (err) {
+      return res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to list My Drive.',
+      })
+    }
+  })
+
+  /**
+   * GET /api/google/drive/shared
+   * List files shared with the user.
+   */
+  router.get('/shared', async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req)
+      if (!(await requireConnection(userId))) {
+        return res.status(401).json({ error: 'Google account not connected.' })
+      }
+      const pageToken = req.query.pageToken as string | undefined
+      const result = await listSharedWithMe(userId, pageToken)
+      return res.json(result)
+    } catch (err) {
+      return res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to list shared files.',
+      })
+    }
+  })
+
+  /**
+   * GET /api/google/drive/starred
+   * List files starred by the user.
+   */
+  router.get('/starred', async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req)
+      if (!(await requireConnection(userId))) {
+        return res.status(401).json({ error: 'Google account not connected.' })
+      }
+      const pageToken = req.query.pageToken as string | undefined
+      const result = await listStarred(userId, pageToken)
+      return res.json(result)
+    } catch (err) {
+      return res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to list starred files.',
+      })
+    }
+  })
+
+  /**
+   * GET /api/google/drive/recent
+   * List recently modified files.
+   */
+  router.get('/recent', async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req)
+      if (!(await requireConnection(userId))) {
+        return res.status(401).json({ error: 'Google account not connected.' })
+      }
+      const pageToken = req.query.pageToken as string | undefined
+      const result = await listRecent(userId, pageToken)
+      return res.json(result)
+    } catch (err) {
+      return res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to list recent files.',
       })
     }
   })

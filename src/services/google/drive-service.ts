@@ -93,9 +93,64 @@ async function driveFetch<T>(
 // Drive Operations
 // ---------------------------------------------------------------------------
 
+/** Shared field set for all Drive list queries. */
+const LIST_FIELDS = 'nextPageToken,files(id,name,mimeType,modifiedTime,size,iconLink,webViewLink,parents)'
+
+/** Map raw Google API file objects to our DriveFile type. */
+function mapDriveFiles(files: Array<{
+  id: string
+  name: string
+  mimeType: string
+  modifiedTime: string
+  size?: string
+  iconLink?: string
+  webViewLink?: string
+  parents?: string[]
+}>): DriveFile[] {
+  return files.map((file) => ({
+    id: file.id,
+    name: file.name,
+    mimeType: file.mimeType,
+    isFolder: file.mimeType === FOLDER_MIME,
+    modifiedTime: file.modifiedTime,
+    size: file.size,
+    iconLink: file.iconLink,
+    webViewLink: file.webViewLink,
+    parents: file.parents,
+  }))
+}
+
+/**
+ * Generic list helper. Runs a Drive files.list query with the given q/orderBy
+ * and returns mapped DriveFile results.
+ */
+async function driveList(
+  userId: string,
+  q: string,
+  opts?: { orderBy?: string; pageSize?: string; pageToken?: string }
+): Promise<DriveListResponse> {
+  const params: Record<string, string> = {
+    fields: LIST_FIELDS,
+    orderBy: opts?.orderBy ?? 'name',
+    pageSize: opts?.pageSize ?? '100',
+    q,
+  }
+  if (opts?.pageToken) params.pageToken = opts.pageToken
+
+  const response = await driveFetch<{ files: Array<{
+    id: string; name: string; mimeType: string; modifiedTime: string
+    size?: string; iconLink?: string; webViewLink?: string; parents?: string[]
+  }>; nextPageToken?: string }>(userId, '/files', params)
+
+  return {
+    files: mapDriveFiles(response.files),
+    nextPageToken: response.nextPageToken,
+  }
+}
+
 /**
  * List contents of a Google Drive folder.
- * If folderId is undefined, lists the root folder.
+ * If folderId is undefined, lists the root folder (My Drive root).
  */
 export async function listDriveFolder(
   userId: string,
@@ -103,61 +158,76 @@ export async function listDriveFolder(
   pageToken?: string,
   searchQuery?: string
 ): Promise<DriveListResponse> {
-  const params: Record<string, string> = {
-    fields: 'nextPageToken,files(id,name,mimeType,modifiedTime,size,iconLink,webViewLink,parents)',
-    pageSize: '100',
-    orderBy: 'name',
-  }
-
-  // Build query
   const queryParts: string[] = []
 
   if (folderId) {
     queryParts.push(`'${folderId}' in parents`)
   } else {
-    // Root: show files without explicit parent or in root
     queryParts.push("'root' in parents")
   }
 
-  // Exclude trashed
   queryParts.push('trashed = false')
 
-  // Search query
   if (searchQuery) {
     queryParts.push(`name contains '${searchQuery.replace(/'/g, "\\'")}'`)
   }
 
-  params.q = queryParts.join(' and ')
+  return driveList(userId, queryParts.join(' and '), { pageToken })
+}
 
-  if (pageToken) {
-    params.pageToken = pageToken
-  }
+/**
+ * List files in the user's My Drive root.
+ */
+export async function listMyDrive(
+  userId: string,
+  pageToken?: string
+): Promise<DriveListResponse> {
+  return driveList(userId, "'root' in parents and trashed = false", { pageToken })
+}
 
-  const response = await driveFetch<{ files: Array<{
-    id: string
-    name: string
-    mimeType: string
-    modifiedTime: string
-    size?: string
-    iconLink?: string
-    webViewLink?: string
-    parents?: string[]
-  }>; nextPageToken?: string }>(userId, '/files', params)
+/**
+ * List files shared directly with the user.
+ * Google Drive API: `sharedWithMe = true` returns files where another user
+ * explicitly shared with the authenticated account.
+ */
+export async function listSharedWithMe(
+  userId: string,
+  pageToken?: string
+): Promise<DriveListResponse> {
+  return driveList(userId, "sharedWithMe = true and trashed = false", {
+    pageToken,
+    orderBy: 'modifiedTime desc',
+  })
+}
 
-  return {
-    files: response.files.map((file) => ({
-      id: file.id,
-      name: file.name,
-      mimeType: file.mimeType,
-      isFolder: file.mimeType === FOLDER_MIME,
-      modifiedTime: file.modifiedTime,
-      size: file.size,
-      iconLink: file.iconLink,
-      webViewLink: file.webViewLink,
-      parents: file.parents,
-    })),
-    nextPageToken: response.nextPageToken,
-  }
+/**
+ * List files/folders starred by the user.
+ */
+export async function listStarred(
+  userId: string,
+  pageToken?: string
+): Promise<DriveListResponse> {
+  return driveList(userId, "starred = true and trashed = false", {
+    pageToken,
+    orderBy: 'modifiedTime desc',
+  })
+}
+
+/**
+ * List recently modified files.
+ * Uses `modifiedTime desc` ordering as a reasonable approximation of the
+ * Google Drive UI's "Recent" view. The API does not expose a dedicated
+ * "recently accessed" query, so we order by modification time.
+ */
+export async function listRecent(
+  userId: string,
+  pageToken?: string
+): Promise<DriveListResponse> {
+  return driveList(userId, "trashed = false and mimeType != 'application/vnd.google-apps.folder'", {
+    pageToken,
+    orderBy: 'modifiedTime desc',
+    pageSize: '50',
+  })
 }
 
 /**

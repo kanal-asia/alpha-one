@@ -168,7 +168,9 @@ export async function listScriptProjects(userId: string, searchQuery?: string): 
   url.searchParams.set('q', queryParts.join(' and '))
   url.searchParams.set('fields', 'files(id,name,modifiedTime,parents)')
   url.searchParams.set('orderBy', 'modifiedTime desc')
-  url.searchParams.set('pageSize', '50')
+  url.searchParams.set('pageSize', '100')
+  url.searchParams.set('includeItemsFromAllDrives', 'true')
+  url.searchParams.set('supportsAllDrives', 'true')
 
   const response = await fetch(url.toString(), {
     headers: { Authorization: `Bearer ${token}` },

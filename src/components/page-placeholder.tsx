@@ -24,7 +24,7 @@ export function PagePlaceholder({
         <CardContent className='flex min-h-72 flex-col items-center justify-center gap-3 py-16 text-center'>
           <h2 className='text-3xl font-bold tracking-tight'>Coming Soon</h2>
           <p className='max-w-md text-sm text-muted-foreground'>
-            This section is part of the Alpha Workspace foundation and will be
+            This section is part of the Alpha One foundation and will be
             available in an upcoming sprint.
           </p>
           {children}

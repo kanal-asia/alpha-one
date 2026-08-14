@@ -1,6 +1,5 @@
 import { Link } from '@tanstack/react-router'
 import { Menu, X } from 'lucide-react'
-import alphaWorkspaceWordmarkColor from '@/assets/logo/alpha-workspace-wordmark-color-cropped.png'
 import alphaOneIconColor from '@/assets/logo/alpha-one-icon-color.png'
 import { cn } from '@/lib/utils'
 import {
@@ -32,13 +31,7 @@ export function AppTitle() {
                 alt='Alpha One'
                 className='size-8 shrink-0 object-contain'
               />
-              <span className='grid flex-1'>
-                <img
-                  src={alphaWorkspaceWordmarkColor}
-                  alt='Alpha Workspace'
-                  className='h-6 object-contain'
-                />
-              </span>
+              <span className='truncate text-sm font-bold'>Alpha One</span>
             </Link>
             <ToggleSidebar />
           </div>

@@ -21,6 +21,8 @@ type BaseNavItem = {
 type NavLink = BaseNavItem & {
   url: LinkProps['to'] | (string & {})
   items?: never
+  /** When true, renders a wordmark image instead of icon+text. */
+  wordmark?: boolean
 }
 
 type NavCollapsible = BaseNavItem & {
@@ -41,8 +43,6 @@ type SidebarData = {
   user: User
   teams: Team[]
   navGroups: NavGroup[]
-  /** Bottom-anchored AI Assistant entry — always visible, separated from groups. */
-  aiAssistant?: NavLink
 }
 
 export type { SidebarData, NavGroup, NavItem, NavCollapsible, NavLink }

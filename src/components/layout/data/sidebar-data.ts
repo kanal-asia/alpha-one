@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 import { WorkspaceLogo } from './workspace-logo'
+import { WorkspaceWordmark } from './workspace-wordmark'
 
 export const sidebarData: SidebarData = {
   user: {
@@ -30,6 +31,17 @@ export const sidebarData: SidebarData = {
     },
   ],
   navGroups: [
+    {
+      title: 'Main',
+      items: [
+        {
+          title: 'Alpha Workspace',
+          url: '/workspace/assistant',
+          icon: WorkspaceWordmark,
+          wordmark: true,
+        },
+      ],
+    },
     {
       title: 'Google Workspace',
       items: [

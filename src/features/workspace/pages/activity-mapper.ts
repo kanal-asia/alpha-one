@@ -7,7 +7,7 @@ import {
   Play,
   FileUp,
   FileCheck,
-  FileTrash2,
+  FileX2,
   Cpu,
   AlertTriangle,
   type LucideIcon,
@@ -174,7 +174,7 @@ const EVENT_MAPPINGS: Partial<Record<WorkspaceEventType, EventMapping>> = {
     title: () => 'File deleted',
     description: () => 'Removed from workspace',
     category: 'artifacts',
-    icon: FileTrash2,
+    icon: FileX2,
     iconColor: 'text-red-500',
   },
   'runtime.started': {

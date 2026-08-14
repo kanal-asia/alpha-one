@@ -764,8 +764,15 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
 
   clearLogs: () => set({ logs: [], runtimeEvents: [] }),
   clearLocalCache: () => {
+    const CLEARABLE_CACHE_KEYS = [
+      'alpha-workspace:tool-history',
+      'alpha-workspace:sidebar-collapsed',
+      'alpha-workspace:opencode-model-prefs',
+    ]
     try {
-      localStorage.removeItem('alpha-workspace:opencode-model-prefs')
+      for (const key of CLEARABLE_CACHE_KEYS) {
+        localStorage.removeItem(key)
+      }
     } catch {
       /* ignore */
     }

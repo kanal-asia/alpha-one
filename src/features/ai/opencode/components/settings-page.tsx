@@ -56,7 +56,7 @@ export function OpenCodeSettingsPage() {
     try {
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i)
-        if (key && key.includes('opencode')) {
+        if (key && key.startsWith('alpha-workspace:')) {
           bytes += (key.length + (localStorage.getItem(key)?.length ?? 0))
         }
       }
@@ -92,7 +92,7 @@ export function OpenCodeSettingsPage() {
         <div className='space-y-1'>
           <h1 className='text-2xl font-bold tracking-tight'>OpenCode Settings</h1>
           <p className='text-sm text-muted-foreground'>
-            Configure how Alpha Workspace connects to and uses your local OpenCode
+            Configure how Alpha One connects to and uses your local OpenCode
             instance.
           </p>
         </div>
@@ -153,7 +153,7 @@ export function OpenCodeSettingsPage() {
               <div className='space-y-0.5'>
                 <p className='font-medium'>Estimated Storage Used</p>
                 <p className='text-xs text-muted-foreground'>
-                  {(storageBytes / 1024).toFixed(1)} KB across {chats.length} saved conversation{chats.length === 1 ? '' : 's'} and local preferences.
+                  {(storageBytes / 1024).toFixed(1)} KB across {chats.length} saved conversation{chats.length === 1 ? '' : 's'}, model preferences, custom skills, and resources.
                 </p>
               </div>
               <Button
@@ -162,7 +162,7 @@ export function OpenCodeSettingsPage() {
                 className='text-destructive hover:text-destructive'
                 onClick={() => setClearCacheOpen(true)}
               >
-                Clear Local Cache
+                Clear Cache
               </Button>
             </div>
           </CardContent>
@@ -400,9 +400,9 @@ export function OpenCodeSettingsPage() {
         <AlertDialog open={clearCacheOpen} onOpenChange={setClearCacheOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Clear local cache?</AlertDialogTitle>
+              <AlertDialogTitle>Clear cache?</AlertDialogTitle>
               <AlertDialogDescription>
-                This removes temporary OpenCode/AI Assistant cache from this browser. Your provider credentials and saved conversations will not be intentionally removed.
+                This removes temporary cached data such as tool execution history. Your conversations, custom skills, resources, model preferences, and settings will not be deleted.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -416,7 +416,7 @@ export function OpenCodeSettingsPage() {
                     try {
                       for (let i = 0; i < localStorage.length; i++) {
                         const key = localStorage.key(i)
-                        if (key && key.includes('opencode')) {
+                        if (key && key.startsWith('alpha-workspace:')) {
                           bytes += (key.length + (localStorage.getItem(key)?.length ?? 0))
                         }
                       }
@@ -426,7 +426,7 @@ export function OpenCodeSettingsPage() {
                     return bytes
                   })
                   setClearCacheOpen(false)
-                  toast.success('Local cache cleared successfully.')
+                  toast.success('Cache cleared successfully.')
                 }}
               >
                 Clear Cache

@@ -16,13 +16,12 @@ type BaseNavItem = {
   title: string
   badge?: string
   icon?: React.ElementType
+  className?: string
 }
 
 type NavLink = BaseNavItem & {
   url: LinkProps['to'] | (string & {})
   items?: never
-  /** When true, renders a wordmark image instead of icon+text. */
-  wordmark?: boolean
 }
 
 type NavCollapsible = BaseNavItem & {

@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 import { WorkspaceLogo } from './workspace-logo'
-import { WorkspaceWordmark } from './workspace-wordmark'
+import { AlphaWorkspaceIcon } from './alpha-workspace-icon'
 
 export const sidebarData: SidebarData = {
   user: {
@@ -35,10 +35,10 @@ export const sidebarData: SidebarData = {
       title: 'Main',
       items: [
         {
-          title: 'Alpha Workspace',
+          title: 'ALPHA WORKSPACE',
           url: '/workspace/assistant',
-          icon: WorkspaceWordmark,
-          wordmark: true,
+          icon: AlphaWorkspaceIcon,
+          className: 'font-semibold',
         },
       ],
     },

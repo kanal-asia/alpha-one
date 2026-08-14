@@ -61,7 +61,7 @@ export const sidebarData: SidebarData = {
           icon: Library,
         },
         {
-          title: 'Files',
+          title: 'Results',
           url: '/workspace/artifacts',
           icon: Folder,
         },

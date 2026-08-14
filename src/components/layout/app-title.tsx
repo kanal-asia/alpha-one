@@ -1,5 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { Menu, X } from 'lucide-react'
+import alphaWorkspaceWordmarkColor from '@/assets/logo/alpha-workspace-wordmark-color-cropped.png'
+import alphaOneIconColor from '@/assets/logo/alpha-one-icon-color.png'
 import { cn } from '@/lib/utils'
 import {
   SidebarMenu,
@@ -21,12 +23,22 @@ export function AppTitle() {
         >
           <div>
             <Link
-              to='/'
+              to='/workspace/assistant'
               onClick={() => setOpenMobile(false)}
-              className='grid flex-1 text-start text-sm leading-tight'
+              className='flex flex-1 items-center gap-2 text-start text-sm leading-tight'
             >
-              <span className='truncate font-bold'>Shadcn-Admin</span>
-              <span className='truncate text-xs'>Vite + ShadcnUI</span>
+              <img
+                src={alphaOneIconColor}
+                alt='Alpha One'
+                className='size-8 shrink-0 object-contain'
+              />
+              <span className='grid flex-1'>
+                <img
+                  src={alphaWorkspaceWordmarkColor}
+                  alt='Alpha Workspace'
+                  className='h-6 object-contain'
+                />
+              </span>
             </Link>
             <ToggleSidebar />
           </div>

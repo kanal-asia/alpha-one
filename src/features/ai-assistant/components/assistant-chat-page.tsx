@@ -147,10 +147,15 @@ export function AssistantChatPage() {
 
           {/* Header */}
           <div className='flex items-center justify-between px-4 py-2'>
-            <h1 className='flex items-center gap-2 text-lg font-semibold'>
-              <Sparkles className='size-5' />
-              AI Assistant
-            </h1>
+            <div>
+              <h1 className='flex items-center gap-2 text-lg font-semibold'>
+                <Sparkles className='size-5' />
+                Alpha Workspace
+              </h1>
+              <p className='text-xs text-muted-foreground'>
+                One workspace. One assistant. All your work.
+              </p>
+            </div>
           </div>
 
           {/* Mobile chat history trigger */}

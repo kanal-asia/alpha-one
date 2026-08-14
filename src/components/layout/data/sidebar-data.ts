@@ -2,20 +2,14 @@ import {
   Activity,
   Archive,
   Boxes,
-  Calendar,
   Clock,
   Cpu,
-  FileSpreadsheet,
-  FileText,
   Folder,
   FolderOpen,
   GitBranch,
-  LayoutDashboard,
-  Mail,
-  Presentation,
+  Library,
   Server,
   Settings,
-  Sparkles,
   Terminal,
   Wrench,
 } from 'lucide-react'
@@ -30,22 +24,12 @@ export const sidebarData: SidebarData = {
   },
   teams: [
     {
-      name: 'Alpha Workspace',
+      name: 'Alpha One',
       logo: WorkspaceLogo,
-      plan: 'Local Workspace',
+      plan: 'Alpha Workspace',
     },
   ],
   navGroups: [
-    {
-      title: 'Main',
-      items: [
-        {
-          title: 'Home',
-          url: '/',
-          icon: LayoutDashboard,
-        },
-      ],
-    },
     {
       title: 'Google Workspace',
       items: [
@@ -54,36 +38,16 @@ export const sidebarData: SidebarData = {
           url: '/google/drive',
           icon: FolderOpen,
         },
-        {
-          title: 'Docs',
-          url: '/google/docs',
-          icon: FileText,
-        },
-        {
-          title: 'Sheets',
-          url: '/google/sheets',
-          icon: FileSpreadsheet,
-        },
-        {
-          title: 'Slides',
-          url: '/google/slides',
-          icon: Presentation,
-        },
-        {
-          title: 'Calendar',
-          url: '/google/calendar',
-          icon: Calendar,
-        },
-        {
-          title: 'Gmail',
-          url: '/google/gmail',
-          icon: Mail,
-        },
       ],
     },
     {
       title: 'Workspace',
       items: [
+        {
+          title: 'Resources',
+          url: '/workspace/resources',
+          icon: Library,
+        },
         {
           title: 'Files',
           url: '/workspace/artifacts',
@@ -153,12 +117,6 @@ export const sidebarData: SidebarData = {
       ],
     },
   ],
-  /** Bottom-anchored AI Assistant entry — rendered separately from collapsible groups. */
-  aiAssistant: {
-    title: 'AI Assistant',
-    url: '/workspace/assistant',
-    icon: Sparkles,
-  },
 }
 
 /** Nav groups visible for a given mode. Hides the engineer-facing Platform group unless Developer Mode is on. */

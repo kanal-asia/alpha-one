@@ -1,5 +1,5 @@
 /**
- * Alpha Workspace — combined API server entry
+ * Alpha One — combined API server entry
  *
  * Boots the OpenCode API (AI/chat/providers) and mounts the Workspace API
  * (the vertical slice: tasks, workflows, artifacts, history) on the same app.
@@ -15,7 +15,7 @@ import { createFsRouter } from '../services/fs/fs-router'
 
 const workspaceRoot = process.cwd()
 const kernel = bootstrapPlatform({
-  workspace: { id: 'local', name: 'Alpha Workspace', path: workspaceRoot },
+  workspace: { id: 'local', name: 'Alpha One', path: workspaceRoot },
   artifactsDir: join(workspaceRoot, '.alpha', 'artifacts'),
   withOpenCode: true,
 })
@@ -30,7 +30,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const server = app.listen(PORT, () => {
     if (process.env.NODE_ENV !== 'test') {
       // eslint-disable-next-line no-console
-      console.log(`Alpha Workspace API server running on http://localhost:${PORT}`)
+      console.log(`Alpha One API server running on http://localhost:${PORT}`)
     }
     void kernel.start()
     void runtimeManager.start()

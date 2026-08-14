@@ -5,10 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Main } from '@/components/layout/main'
 import { PageHeader } from '@/components/page-header'
 import { useHistoryEntry } from '../hooks'
+import { toActivityViewItem } from './activity-mapper'
 
 export function HistoryDetailPage() {
   const { eventId } = useParams({ from: '/_authenticated/workspace/history/$eventId' })
   const { data: entry, isLoading } = useHistoryEntry(eventId)
+
+  const item = entry ? toActivityViewItem(entry) : null
+  const Icon = item?.icon
 
   return (
     <>
@@ -18,44 +22,80 @@ export function HistoryDetailPage() {
           to='/workspace/history'
           className='mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground'
         >
-          <ArrowLeft className='size-4' /> History
+          <ArrowLeft className='size-4' /> Activity
         </Link>
 
         {isLoading && <p className='text-sm text-muted-foreground'>Loading…</p>}
-        {entry && (
+        {item && (
           <>
             <div className='mb-4 flex flex-wrap items-center justify-between gap-2'>
-              <div>
-                <h1 className='text-2xl font-bold tracking-tight'>{entry.type}</h1>
-                <p className='text-sm text-muted-foreground'>
-                  <span className='font-mono'>{entry.id}</span> · {entry.actor} · {entry.target}
-                </p>
+              <div className='flex items-center gap-3'>
+                {Icon && (
+                  <div className={`rounded-md bg-muted p-2 ${item.iconColor}`}>
+                    <Icon className='size-5' />
+                  </div>
+                )}
+                <div>
+                  <h1 className='text-2xl font-bold tracking-tight'>{item.title}</h1>
+                  <p className='text-sm text-muted-foreground'>{item.description}</p>
+                </div>
               </div>
-              <Badge variant='outline'>{new Date(entry.ts).toLocaleString()}</Badge>
+              <div className='flex items-center gap-2'>
+                <Badge variant='secondary'>{item.category}</Badge>
+                <Badge variant='outline'>{item.timestamp}</Badge>
+              </div>
             </div>
 
             <div className='grid gap-4 lg:grid-cols-2'>
               <Card>
                 <CardHeader className='pb-2'>
-                  <CardTitle className='text-sm font-medium'>Derived</CardTitle>
+                  <CardTitle className='text-sm font-medium'>Details</CardTitle>
                 </CardHeader>
                 <CardContent className='space-y-2 text-sm'>
-                  <DetailRow label='Status' value={entry.status ?? '—'} />
-                  <DetailRow label='Duration' value={entry.durationMs != null ? `${entry.durationMs} ms` : '—'} />
-                  <DetailRow label='Task Template' value={entry.workflowId ?? '—'} mono />
-                  <DetailRow label='Process Step' value={entry.operationId ?? '—'} mono />
-                  <DetailRow label='Result' value={entry.artifactId ?? '—'} mono />
-                  <DetailRow label='AI Engine' value={entry.runtimeId ?? '—'} mono />
-                  <DetailRow label='Service' value={entry.sdkId ?? '—'} mono />
+                  <DetailRow label='Source' value={item.source} />
+                  <DetailRow label='Actor' value={item.entry.actor} mono />
+                  <DetailRow label='Target' value={item.entry.target} mono />
+                  <DetailRow label='Event ID' value={item.entry.id} mono small />
+                  {item.entry.status && (
+                    <DetailRow
+                      label='Status'
+                      value={
+                        <Badge
+                          variant={item.entry.status === 'completed' ? 'default' : 'destructive'}
+                        >
+                          {item.entry.status}
+                        </Badge>
+                      }
+                    />
+                  )}
+                  {item.entry.durationMs != null && (
+                    <DetailRow label='Duration' value={`${item.entry.durationMs}ms`} />
+                  )}
+                  {item.entry.workflowId && (
+                    <DetailRow label='Task Template' value={item.entry.workflowId} mono />
+                  )}
+                  {item.entry.operationId && (
+                    <DetailRow label='Process Step' value={item.entry.operationId} mono />
+                  )}
+                  {item.entry.artifactId && (
+                    <DetailRow label='Result' value={item.entry.artifactId} mono />
+                  )}
+                  {item.entry.runtimeId && (
+                    <DetailRow label='AI Engine' value={item.entry.runtimeId} mono />
+                  )}
+                  {item.entry.sdkId && (
+                    <DetailRow label='Service' value={item.entry.sdkId} mono />
+                  )}
                 </CardContent>
               </Card>
+
               <Card>
                 <CardHeader className='pb-2'>
-                  <CardTitle className='text-sm font-medium'>Detail payload</CardTitle>
+                  <CardTitle className='text-sm font-medium'>Technical Payload</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <pre className='overflow-auto rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground'>
-                    {JSON.stringify(entry.detail, null, 2)}
+                  <pre className='max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground'>
+                    {JSON.stringify(item.entry.detail, null, 2)}
                   </pre>
                 </CardContent>
               </Card>
@@ -67,11 +107,21 @@ export function HistoryDetailPage() {
   )
 }
 
-function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function DetailRow({
+  label,
+  value,
+  mono,
+  small,
+}: {
+  label: string
+  value: React.ReactNode
+  mono?: boolean
+  small?: boolean
+}) {
   return (
     <div className='flex items-center justify-between gap-2'>
       <span className='text-xs uppercase text-muted-foreground'>{label}</span>
-      <span className={mono ? 'font-mono text-xs' : 'text-sm'}>{value}</span>
+      <span className={mono ? 'font-mono text-xs' : small ? 'text-xs' : 'text-sm'}>{value}</span>
     </div>
   )
 }

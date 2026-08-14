@@ -46,60 +46,47 @@ export function HistoryDetailPage() {
               </div>
             </div>
 
-            <div className='grid gap-4 lg:grid-cols-2'>
-              <Card>
-                <CardHeader className='pb-2'>
-                  <CardTitle className='text-sm font-medium'>Details</CardTitle>
-                </CardHeader>
-                <CardContent className='space-y-2 text-sm'>
-                  <DetailRow label='Source' value={item.source} />
-                  <DetailRow label='Actor' value={item.entry.actor} mono />
-                  <DetailRow label='Target' value={item.entry.target} mono />
-                  <DetailRow label='Event ID' value={item.entry.id} mono small />
-                  {item.entry.status && (
-                    <DetailRow
-                      label='Status'
-                      value={
-                        <Badge
-                          variant={item.entry.status === 'completed' ? 'default' : 'destructive'}
-                        >
-                          {item.entry.status}
-                        </Badge>
-                      }
-                    />
-                  )}
-                  {item.entry.durationMs != null && (
-                    <DetailRow label='Duration' value={`${item.entry.durationMs}ms`} />
-                  )}
-                  {item.entry.workflowId && (
-                    <DetailRow label='Task Template' value={item.entry.workflowId} mono />
-                  )}
-                  {item.entry.operationId && (
-                    <DetailRow label='Process Step' value={item.entry.operationId} mono />
-                  )}
-                  {item.entry.artifactId && (
-                    <DetailRow label='Result' value={item.entry.artifactId} mono />
-                  )}
-                  {item.entry.runtimeId && (
-                    <DetailRow label='AI Engine' value={item.entry.runtimeId} mono />
-                  )}
-                  {item.entry.sdkId && (
-                    <DetailRow label='Service' value={item.entry.sdkId} mono />
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className='pb-2'>
-                  <CardTitle className='text-sm font-medium'>Technical Payload</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <pre className='max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground'>
-                    {JSON.stringify(item.entry.detail, null, 2)}
-                  </pre>
-                </CardContent>
-              </Card>
-            </div>
+            <Card>
+              <CardHeader className='pb-2'>
+                <CardTitle className='text-sm font-medium'>Details</CardTitle>
+              </CardHeader>
+              <CardContent className='space-y-2 text-sm'>
+                <DetailRow label='Source' value={item.source} />
+                <DetailRow label='Actor' value={item.entry.actor} mono />
+                <DetailRow label='Target' value={item.entry.target} mono />
+                <DetailRow label='Event ID' value={item.entry.id} mono small />
+                {item.entry.status && (
+                  <DetailRow
+                    label='Status'
+                    value={
+                      <Badge
+                        variant={item.entry.status === 'completed' ? 'default' : 'destructive'}
+                      >
+                        {item.entry.status}
+                      </Badge>
+                    }
+                  />
+                )}
+                {item.entry.durationMs != null && (
+                  <DetailRow label='Duration' value={`${item.entry.durationMs}ms`} />
+                )}
+                {item.entry.workflowId && (
+                  <DetailRow label='Task Template' value={item.entry.workflowId} mono />
+                )}
+                {item.entry.operationId && (
+                  <DetailRow label='Process Step' value={item.entry.operationId} mono />
+                )}
+                {item.entry.artifactId && (
+                  <DetailRow label='Result' value={item.entry.artifactId} mono />
+                )}
+                {item.entry.runtimeId && (
+                  <DetailRow label='AI Engine' value={item.entry.runtimeId} mono />
+                )}
+                {item.entry.sdkId && (
+                  <DetailRow label='Service' value={item.entry.sdkId} mono />
+                )}
+              </CardContent>
+            </Card>
           </>
         )}
       </Main>

@@ -71,6 +71,11 @@ export const sidebarData: SidebarData = {
           icon: Clock,
         },
         {
+          title: 'Skills',
+          url: '/workspace/skills',
+          icon: Wrench,
+        },
+        {
           title: 'Settings',
           url: '/settings',
           icon: Settings,

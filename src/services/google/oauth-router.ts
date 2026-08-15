@@ -161,7 +161,7 @@ export function createGoogleOAuthRouter(): Router {
  * Get the client URL for redirects.
  */
 function getClientUrl(): string {
-  return process.env.CLIENT_URL || 'http://localhost:5173'
+  return process.env.CLIENT_URL || 'http://localhost:3000'
 }
 
 /**

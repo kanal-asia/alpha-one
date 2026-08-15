@@ -3,9 +3,7 @@ import express, { type Request, type Response } from "express";
 import cors from "cors";
 import {
   resolveOpenCode,
-  detectProviderStatus,
   fetchProviders,
-  runChat,
   EXECUTION_MODES,
   isExecutionMode,
   fetchStats,
@@ -422,66 +420,12 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
   });
 });
 
-// Non-streaming chat endpoint (for compatibility)
-app.post("/api/opencode/chat", async (req: Request, res: Response) => {
-  const body: ChatRequestBody = req.body;
-  const message = body.message?.trim();
-
-  if (!body.model || !message) {
-    return res.status(400).json({ error: "Both `model` and `message` are required." });
-  }
-
-  let model: RuntimeModel;
-  try {
-    model = resolveModel(body.model);
-  } catch (err) {
-    return res.status(400).json({
-      error: err instanceof Error ? err.message : "Model must be in the form `provider/id`.",
-    });
-  }
-  trace("payload", model.id, "chat request", {
-    payload: {
-      model: model.id,
-      message,
-      sessionId: body.sessionId ?? null,
-      references: (Array.isArray(body.references) ? body.references : [])
-        .filter(isReferenceAttachment)
-        .map((r) => ({ provider: r.provider, name: r.name })),
-    },
-  });
-
-  // TASK-AIASSISTANT-005: references are resolved server-side on demand.
-  const files = await resolveRequestReferences(req, res);
-  if (files === null) return;
-
-  try {
-    const result = await runChat({
-      model,
-      message,
-      sessionId: body.sessionId,
-      files,
-      agent: isExecutionMode(body.agent) ? body.agent : undefined,
-    });
-    trace("result", model.id, "chat completed", { ok: true });
-    return res.json(result);
-  } catch (err) {
-    const message2 = err instanceof Error ? err.message : "Chat request failed.";
-    trace("result", model.id, "chat failed", { ok: false });
-    return res.status(502).json({ error: message2 });
-  }
-});
-
 // ---------------------------------------------------------------------------
-// Health / status — must never hang. Fast cached path, never spawns a CLI probe.
+// Health — must never hang. Fast cached path, never spawns a CLI probe.
 // ---------------------------------------------------------------------------
 app.get("/api/opencode/health", async (_req: Request, res: Response) => {
   const health = runtimeManager.health();
   return res.json({ ...health, workspace: runtimeManager.snapshot().workspace });
-});
-
-app.get("/api/opencode/status", async (_req: Request, res: Response) => {
-  const status = await detectProviderStatus(true);
-  return res.json(status);
 });
 
 // ---------------------------------------------------------------------------

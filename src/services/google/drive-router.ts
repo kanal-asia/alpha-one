@@ -12,7 +12,6 @@ import {
   listSharedWithMe,
   listStarred,
   listRecent,
-  getFolderMeta,
   getFolderBreadcrumb,
   searchDrive,
   checkDriveConnection,
@@ -190,37 +189,6 @@ export function createGoogleDriveRouter(): Router {
       return res.status(500).json({
         error: err instanceof Error ? err.message : 'Failed to search Drive.',
       })
-    }
-  })
-
-  /**
-   * GET /api/google/drive/folder/:id
-   * Get metadata for a specific folder.
-   */
-  router.get('/folder/:id', async (req: Request, res: Response) => {
-    try {
-      const userId = getUserId(req)
-      const folderId = req.params.id
-
-      // Check connection first
-      const connectionStatus = await checkDriveConnection(userId)
-      if (!connectionStatus.connected) {
-        return res.status(401).json({
-          error: connectionStatus.error ?? 'Google account not connected.',
-        })
-      }
-
-      const meta = await getFolderMeta(userId, folderId)
-      return res.json(meta)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to get folder.'
-      if (message.includes('not found')) {
-        return res.status(404).json({ error: message })
-      }
-      if (message.includes('not a folder')) {
-        return res.status(400).json({ error: message })
-      }
-      return res.status(500).json({ error: message })
     }
   })
 

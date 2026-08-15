@@ -48,29 +48,6 @@ export function createGoogleOAuthRouter(): Router {
   })
 
   /**
-   * GET /api/google/oauth/auth-url
-   * Generates the Google OAuth authorization URL.
-   */
-  router.get('/auth-url', async (req: Request, res: Response) => {
-    try {
-      if (!isConfigured()) {
-        return res.status(503).json({
-          error: 'Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_OAUTH_REDIRECT_URI.',
-        })
-      }
-
-      const userId = getUserId(req)
-      const { url, state } = await generateAuthUrl(userId)
-
-      return res.json({ url, state })
-    } catch (err) {
-      return res.status(500).json({
-        error: err instanceof Error ? err.message : 'Failed to generate auth URL.',
-      })
-    }
-  })
-
-  /**
    * GET /api/google/oauth/callback
    * Handles the OAuth callback from Google.
    */

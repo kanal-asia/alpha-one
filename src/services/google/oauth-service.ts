@@ -51,7 +51,7 @@ export interface OAuthState {
 export const GOOGLE_OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/docs.readonly',
-  'https://www.googleapis.com/auth/spreadsheets.readonly',
+  'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/presentations.readonly',
   'https://www.googleapis.com/auth/script.projects',
   'https://www.googleapis.com/auth/userinfo.email',

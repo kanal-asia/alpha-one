@@ -33,6 +33,7 @@ import {
 import { createGoogleOAuthRouter } from "../google/oauth-router";
 import { createGoogleDriveRouter } from "../google/drive-router";
 import { createGoogleScriptRouter } from "../google/script-router";
+import { createGoogleSheetsRouter } from "../google/sheets-router";
 import { openCodeAuthLogin, openCodeAuthLogout, saveOpenCodeApiKey } from "./auth";
 import { readOpenCodeConfig, patchOpenCodeConfig } from "./opencode-config";
 
@@ -44,6 +45,7 @@ app.use(express.json({ limit: "10mb" }));
 app.use("/api/google/oauth", createGoogleOAuthRouter());
 app.use("/api/google/drive", createGoogleDriveRouter());
 app.use("/api/google/script", createGoogleScriptRouter());
+app.use("/api/google/sheets", createGoogleSheetsRouter());
 
 // ---------------------------------------------------------------------------
 // Resource Library — register agent-created resources as references.

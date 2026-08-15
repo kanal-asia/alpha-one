@@ -29,6 +29,7 @@ export type StreamEventType =
   | 'error'
   | 'warning'
   | 'session'
+  | 'file_operation'
 
 /** Scalar token metrics reported natively by OpenCode (`step_finish.tokens`). */
 export interface TokenMetrics {
@@ -49,6 +50,9 @@ export interface StreamChunk {
   /** Native usage captured from `step_finish` (PROVEN, not estimated). */
   tokens?: TokenMetrics
   cost?: number
+  /** TASK-OPENCODE-018R2: File operation metadata from tool_use events. */
+  filePath?: string
+  fileTool?: string
 }
 
 export interface OpenCodeSession {

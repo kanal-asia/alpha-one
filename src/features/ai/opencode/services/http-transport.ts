@@ -379,6 +379,16 @@ export class HTTPTransport implements OpenCodeTransport {
             }
             break
           }
+          case 'file_operation': {
+            const data = parsed.data as Record<string, unknown>
+            const filePath = String(data.filePath ?? '')
+            const tool = String(data.tool ?? '')
+            if (filePath) {
+              console.log('[OC-TRANSPORT] FILE_OPERATION', { tool, filePath })
+              onChunk({ type: 'file_operation', filePath, fileTool: tool })
+            }
+            break
+          }
           case 'step_finish':
             stepFinishReceived = true
             stepFinishAt = Date.now()

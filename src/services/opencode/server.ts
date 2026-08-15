@@ -47,6 +47,19 @@ app.use("/api/google/oauth", createGoogleOAuthRouter());
 app.use("/api/google/drive", createGoogleDriveRouter());
 app.use("/api/google/script", createGoogleScriptRouter());
 
+// ---------------------------------------------------------------------------
+// Resource Library — register agent-created resources as references.
+// ---------------------------------------------------------------------------
+app.post("/api/resources/register", (req: Request, res: Response) => {
+  const { provider, name, externalId, mimeType, url, path, size, lastModified, metadata } = req.body ?? {};
+  if (!provider || !name || !externalId) {
+    return res.status(400).json({ error: "provider, name, and externalId are required." });
+  }
+  // Server-side registration is a no-op for now — the client persists to localStorage.
+  // This endpoint exists so agent tooling can register resources server-side in the future.
+  return res.json({ id: `res-${Date.now()}`, provider, name, externalId, registeredAt: new Date().toISOString() });
+});
+
 const runtimeManager = new RuntimeManager(Number(process.env.PORT) || 3001);
 
 interface ChatRequestBody {
@@ -273,6 +286,32 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
           textExtractedLength: textExtracted.length,
           latencyMs: Date.now() - processStart,
         });
+      }
+
+      // TASK-OPENCODE-018R2: Detect file creation/edit operations.
+      // OpenCode CLI emits structured `tool_use` events with `write` or `edit`
+      // tools containing the actual file path. Emit a dedicated SSE event so
+      // the frontend can register the file as a Resource without text parsing.
+      if (evtType === "tool_use") {
+        const toolPart = (part?.type === "tool" ? part : undefined) as
+          | { tool?: string; state?: { input?: Record<string, unknown>; metadata?: Record<string, unknown> } }
+          | undefined;
+        const toolName = toolPart?.tool;
+        if (toolName === "write" || toolName === "edit") {
+          const input = toolPart?.state?.input ?? {};
+          const metadata = toolPart?.state?.metadata ?? {};
+          const filePath = String(input.filePath ?? metadata.filepath ?? "");
+          if (filePath) {
+            sendEvent("file_operation", {
+              tool: toolName,
+              filePath,
+              metadata: {
+                exists: metadata.exists,
+                diagnostics: metadata.diagnostics,
+              },
+            });
+          }
+        }
       }
 
       // TASK-AI-034: Prevent duplicate step_finish events.

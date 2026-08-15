@@ -26,6 +26,8 @@ import {
   type ReferenceAttachment,
 } from '@/features/ai/references/contract'
 import { useProjectStore } from '@/features/ai-assistant/store/project-store'
+import { registerResourceLocally } from '@/features/resources/registration'
+import { useResourceStore } from '@/features/resources/resource-store'
 
 const DEFAULT_SETTINGS: OpenCodeSettings = {
   executablePath: 'opencode',
@@ -562,6 +564,39 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                 c.id === activeChatId ? { ...c, sessionId: chunk.sessionId } : c
               ),
             }))
+          } else if (chunk.type === 'file_operation' && chunk.filePath) {
+            // TASK-OPENCODE-018R2: Register agent-created files as Resources.
+            // Uses actual tool execution evidence (write/edit) from structured
+            // OpenCode CLI events — not text parsing.
+            const filePath = chunk.filePath
+            const fileName = filePath.split(/[\\/]/).pop() ?? filePath
+            const ext = fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() : undefined
+            const mimeMap: Record<string, string> = {
+              txt: 'text/plain',
+              md: 'text/markdown',
+              csv: 'text/csv',
+              json: 'application/json',
+              js: 'text/javascript',
+              ts: 'text/typescript',
+              py: 'text/x-python',
+              html: 'text/html',
+              css: 'text/css',
+              xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              pdf: 'application/pdf',
+            }
+            const mimeType = ext ? mimeMap[ext] : undefined
+            registerResourceLocally(useResourceStore.getState(), {
+              provider: 'local',
+              name: fileName,
+              externalId: filePath,
+              mimeType,
+              path: filePath,
+              metadata: {
+                source: 'opencode_chat',
+                tool: chunk.fileTool,
+              },
+            })
+            get().pushLog('info', `[RESOURCE] REGISTERED file=${fileName} path=${filePath}`)
           } else if (chunk.type === 'done') {
             const doneLatencyMs = Date.now() - startedAt
             get().pushLog('completed', `[runtime-trace] done: model=${selectedModel.id} latency=${doneLatencyMs}ms`)

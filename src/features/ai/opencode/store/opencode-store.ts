@@ -29,6 +29,9 @@ import { useProjectStore } from '@/features/ai-assistant/store/project-store'
 import { registerResourceLocally } from '@/features/resources/registration'
 import { useResourceStore } from '@/features/resources/resource-store'
 
+/** TASK-OPENCODE-025: Canonical default model when available from OpenCode runtime. */
+const INTENDED_DEFAULT_MODEL = 'opencode/deepseek-v4-flash-free'
+
 const DEFAULT_SETTINGS: OpenCodeSettings = {
   executablePath: 'opencode',
   workspacePath: 'C:\\dev\\alpha-workspace',
@@ -298,10 +301,16 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     const stillExists = models.some((m) => m.id === current)
     let nextDefault = current
     if (!stillExists) {
-      const firstFree = [...models]
-        .sort((a, b) => Number(b.free) - Number(a.free) || a.displayName.localeCompare(b.displayName))
-        .find((m) => m.free)
-      nextDefault = firstFree?.id ?? models[0]?.id ?? ''
+      // TASK-OPENCODE-025: Prefer the intended default if available.
+      const intended = models.find((m) => m.id === INTENDED_DEFAULT_MODEL)
+      if (intended) {
+        nextDefault = intended.id
+      } else {
+        const firstFree = [...models]
+          .sort((a, b) => Number(b.free) - Number(a.free) || a.displayName.localeCompare(b.displayName))
+          .find((m) => m.free)
+        nextDefault = firstFree?.id ?? models[0]?.id ?? ''
+      }
     }
     if (nextDefault !== current) {
       get().updateSettings({ defaultModel: nextDefault })

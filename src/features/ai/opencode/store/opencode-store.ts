@@ -283,8 +283,18 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
   },
 
   loadWorkspaces: async () => {
-    const workspaces = await openCodeService.listWorkspaces()
+    const [workspaces, runtimeWs] = await Promise.all([
+      openCodeService.listWorkspaces(),
+      openCodeService.getRuntimeWorkspace(),
+    ])
     set({ workspaces })
+    // TASK-OPENCODE-025R1: Sync workspace path with runtime-detected workspace.
+    if (runtimeWs?.path) {
+      const current = get().settings.workspacePath
+      if (current !== runtimeWs.path) {
+        get().updateSettings({ workspacePath: runtimeWs.path })
+      }
+    }
   },
 
   selectWorkspace: (path) => {

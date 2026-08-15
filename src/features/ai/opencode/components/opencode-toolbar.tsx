@@ -88,8 +88,12 @@ export function OpenCodeToolbar() {
             <Input
               id='ws'
               value={settings.workspacePath}
-              onChange={(e) => updateSettings({ workspacePath: e.target.value })}
+              readOnly
+              className='text-muted-foreground'
             />
+            <p className='text-xs text-muted-foreground'>
+              Runtime-detected. Cannot be overridden manually.
+            </p>
             {workspaces.length > 0 && (
               <ul className='space-y-1'>
                 {workspaces.map((ws) => (

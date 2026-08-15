@@ -56,6 +56,10 @@ export class OpenCodeService {
     return this.transport.listWorkspaces()
   }
 
+  async getRuntimeWorkspace() {
+    return this.transport.getRuntimeWorkspace()
+  }
+
   async listModels(): Promise<ModelInfo[]> {
     return this.transport.listModels()
   }

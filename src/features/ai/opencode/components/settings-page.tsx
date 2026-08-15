@@ -178,8 +178,12 @@ export function OpenCodeSettingsPage() {
               <Input
                 id='workspace'
                 value={settings.workspacePath}
-                onChange={(e) => updateSettings({ workspacePath: e.target.value })}
+                readOnly
+                className='text-muted-foreground'
               />
+              <p className='text-xs text-muted-foreground'>
+                Runtime-detected. Cannot be overridden manually.
+              </p>
             </div>
             <div className='space-y-1'>
               <Label htmlFor='executable'>OpenCode Executable</Label>

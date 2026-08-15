@@ -50,6 +50,7 @@ export interface OpenCodeTransport {
   fetchStats(days?: number): Promise<UsageStats | null>
   compactSession(sessionId: string): Promise<CompactResult>
   fetchConfigDefaultAgent(): Promise<string | null>
+  getRuntimeWorkspace(): Promise<{ path: string } | null>
 }
 
 const API_BASE = '/api/opencode'
@@ -159,6 +160,17 @@ export class HTTPTransport implements OpenCodeTransport {
   async listWorkspaces(): Promise<WorkspaceInfo[]> {
     // Workspaces are managed client-side; return empty for now
     return []
+  }
+
+  async getRuntimeWorkspace(): Promise<{ path: string } | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/runtime/workspace`)
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.workspace ?? null
+    } catch {
+      return null
+    }
   }
 
   async listModels(): Promise<ModelInfo[]> {

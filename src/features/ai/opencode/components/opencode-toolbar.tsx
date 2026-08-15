@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { FolderOpen, Plus, Settings2 } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import { useOpenCodeStore } from '../store/opencode-store'
@@ -20,6 +20,20 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+
+/**
+ * TASK-OPENCODE-023R1: Resolve a valid default variant from the available list.
+ * Priority: persisted valid → "low" if available → first available.
+ * Never fabricates a variant the model does not provide.
+ */
+function resolveDefaultVariant(
+  available: string[],
+  persisted: string
+): string {
+  if (available.includes(persisted)) return persisted
+  if (available.includes('low')) return 'low'
+  return available[0] ?? ''
+}
 
 export function OpenCodeToolbar() {
   const {
@@ -44,10 +58,18 @@ export function OpenCodeToolbar() {
     return v ? Object.keys(v).sort() : []
   }, [selectedModel])
 
-  // If the selected variant is not available for the new model, clear it.
-  const activeVariant = variantNames.includes(settings.defaultVariant)
-    ? settings.defaultVariant
-    : ''
+  // TASK-OPENCODE-023R1: Compute valid active variant with auto-default.
+  const activeVariant = useMemo(
+    () => resolveDefaultVariant(variantNames, settings.defaultVariant),
+    [variantNames, settings.defaultVariant]
+  )
+
+  // TASK-OPENCODE-023R1: Auto-select default when variant names exist but selection is empty.
+  useEffect(() => {
+    if (variantNames.length > 0 && activeVariant && activeVariant !== settings.defaultVariant) {
+      updateSettings({ defaultVariant: activeVariant })
+    }
+  }, [variantNames, activeVariant, settings.defaultVariant, updateSettings])
 
   return (
     <div className='flex flex-wrap items-center gap-2 border-b px-4 py-2'>
@@ -107,7 +129,7 @@ export function OpenCodeToolbar() {
           value={activeVariant}
           onValueChange={(v) => updateSettings({ defaultVariant: v })}
         >
-          <SelectTrigger className='h-8 w-[110px]' aria-label='Reasoning variant'>
+          <SelectTrigger className='h-8 w-[120px]' aria-label='Reasoning variant'>
             <SelectValue placeholder='Reasoning' />
           </SelectTrigger>
           <SelectContent>

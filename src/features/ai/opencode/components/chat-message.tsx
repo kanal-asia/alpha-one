@@ -70,7 +70,7 @@ onKeyDown={(e) => {
             <p className='whitespace-pre-wrap'>{message.content}</p>
             {message.references && message.references.length > 0 && (
               <div className='mt-2'>
-                <ReferenceChips references={message.references} className='[&>span]:bg-primary-foreground/10' />
+                <ReferenceChips references={message.references} className='[&>span]:bg-primary-foreground/10 [&>span]:text-primary-foreground [&>span]:border-primary-foreground/20' />
               </div>
             )}
             {message.referenceErrors && message.referenceErrors.length > 0 && (
@@ -132,7 +132,14 @@ onKeyDown={(e) => {
           {message.content ? (
             <Markdown content={message.content} />
           ) : isStreaming ? (
-            <span className='inline-block h-3.5 w-1.5 animate-pulse bg-current align-middle' />
+            <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+              <span className='flex gap-1'>
+                <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]' />
+                <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]' />
+                <span className='inline-block size-1.5 animate-bounce rounded-full bg-current' />
+              </span>
+              <span>Thinking…</span>
+            </div>
           ) : (
             <p className='text-sm text-muted-foreground'>Empty response.</p>
           )}

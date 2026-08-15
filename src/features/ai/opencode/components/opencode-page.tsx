@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { MessagesSquare, Terminal } from 'lucide-react'
+import { useDeveloperMode } from '@/context/developer-mode-provider'
 import { useOpenCodeStore } from '../store/opencode-store'
 import { OpenCodeToolbar } from './opencode-toolbar'
 import { ChatSidebar } from './chat-sidebar'
@@ -17,6 +18,7 @@ import {
 import { Button } from '@/components/ui/button'
 
 export function OpenCodeDashboard() {
+  const { developerMode } = useDeveloperMode()
   const store = useOpenCodeStore()
   const {
     settings,
@@ -146,7 +148,7 @@ export function OpenCodeDashboard() {
             </div>
           </div>
 
-          <DeveloperPanel logs={logs} runtimeEvents={runtimeEvents} />
+          {developerMode && <DeveloperPanel logs={logs} runtimeEvents={runtimeEvents} />}
         </div>
         </div>
       </div>

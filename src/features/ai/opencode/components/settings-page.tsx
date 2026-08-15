@@ -130,7 +130,7 @@ export function OpenCodeSettingsPage() {
               <div className='space-y-0.5'>
                 <Label>Developer Mode</Label>
                 <p className='text-xs text-muted-foreground'>
-                  Show the developer console by default.
+                  Developer Panel is controlled by the global Developer Mode toggle.
                 </p>
               </div>
               <Switch

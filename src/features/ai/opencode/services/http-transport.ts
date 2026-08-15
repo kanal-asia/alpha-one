@@ -251,7 +251,8 @@ export class HTTPTransport implements OpenCodeTransport {
     signal?: AbortSignal,
     model?: RuntimeModel,
     references?: ReferenceAttachment[],
-    agent?: string
+    agent?: string,
+    variant?: string
   ): Promise<void> {
     const modelId = model?.id ?? ''
     // TASK-AI-033: Only pass session ID to server if it looks like a real CLI session ID.
@@ -276,6 +277,7 @@ export class HTTPTransport implements OpenCodeTransport {
         sessionId: realSessionId || undefined,
         references: refs,
         agent: agent ?? undefined,
+        variant: variant || undefined,
       }),
       signal,
     })

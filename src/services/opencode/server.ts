@@ -69,6 +69,8 @@ interface ChatRequestBody {
   files?: string[];
   references?: unknown[];
   agent?: string;
+  /** TASK-OPENCODE-023: Model variant (reasoning effort) — passed to --variant. */
+  variant?: string;
 }
 
 /**
@@ -178,6 +180,7 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
 
   const args = ["run", message, "--model", model.id, "--format", "json"];
   if (isExecutionMode(body.agent)) args.push("--agent", body.agent);
+  if (body.variant) args.push("--variant", body.variant);
   if (body.sessionId) args.push("--session", body.sessionId);
   for (const f of files) args.push("--file", f);
   trace("cli", model.id, "OpenCode CLI args", { cliArgs: args });

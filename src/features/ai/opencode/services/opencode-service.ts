@@ -87,9 +87,10 @@ export class OpenCodeService {
     signal?: AbortSignal,
     model?: RuntimeModel,
     references?: ReferenceAttachment[],
-    agent?: string
+    agent?: string,
+    variant?: string
   ) {
-    return this.transport.sendPrompt(sessionId, prompt, onChunk, signal, model, references, agent)
+    return this.transport.sendPrompt(sessionId, prompt, onChunk, signal, model, references, agent, variant)
   }
 
   async fetchStats(days?: number): Promise<UsageStats | null> {

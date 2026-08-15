@@ -72,9 +72,8 @@ export interface OpenCodeSettings {
   /** Model + mode chosen in the toolbar. */
   defaultModel: string
   defaultMode: string
-  /** Model defaults. */
-  temperature: number
-  maxTokens: number
+  /** TASK-OPENCODE-023: Selected reasoning variant for the active model. */
+  defaultVariant: string
   /** Behavior toggles. */
   autoSave: boolean
   streaming: boolean

@@ -33,6 +33,8 @@ export interface ProviderModel {
   latency: LatencyCategory;
   availability: Availability;
   metadata?: Record<string, unknown>;
+  /** TASK-OPENCODE-023: Available reasoning variants (e.g. "low", "high"). */
+  variants?: Record<string, Record<string, unknown>>;
 }
 
 export interface ProviderInfo {

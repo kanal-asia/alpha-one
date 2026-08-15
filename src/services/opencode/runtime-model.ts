@@ -21,6 +21,7 @@ export function toRuntimeModelAdapter(pm: ProviderModel): RuntimeModel {
     supportsTools: pm.capabilities.includes("function-calling"),
     availability: pm.availability,
     latency: pm.latency === "unknown" ? undefined : pm.latency,
+    variants: pm.variants,
   });
 }
 

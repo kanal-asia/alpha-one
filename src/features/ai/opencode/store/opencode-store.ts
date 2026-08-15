@@ -37,8 +37,7 @@ const DEFAULT_SETTINGS: OpenCodeSettings = {
   streamingSpeed: 1,
   defaultModel: '',
   defaultMode: 'build',
-  temperature: 0.7,
-  maxTokens: 4096,
+  defaultVariant: '',
   autoSave: true,
   streaming: true,
   developerMode: false,
@@ -83,7 +82,10 @@ function hydrateSettings(): OpenCodeSettings {
   if (raw.defaultMode !== 'build' && raw.defaultMode !== 'plan') {
     raw.defaultMode = 'build'
   }
-  return raw
+  // TASK-OPENCODE-023: Migrate away from removed temperature/maxTokens fields.
+  // These were presentation-only and never sent to the OpenCode runtime.
+  const { temperature: _, maxTokens: __, ...cleaned } = raw as OpenCodeSettings & { temperature?: number; maxTokens?: number }
+  return cleaned
 }
 
 /** Derived context usage (DERIVED) from native step tokens vs the model's
@@ -697,7 +699,8 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
         controller.signal,
         selectedModel,
         references,
-        get().settings.defaultMode
+        get().settings.defaultMode,
+        get().settings.defaultVariant || undefined
       )
     }
 

@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { FolderOpen, Plus, Settings2 } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import { useOpenCodeStore } from '../store/opencode-store'
@@ -32,6 +33,21 @@ export function OpenCodeToolbar() {
     modelsLoaded,
     newChat,
   } = useOpenCodeStore()
+
+  // TASK-OPENCODE-023: Derive available variants for the selected model.
+  const selectedModel = useMemo(
+    () => models.find((m) => m.id === settings.defaultModel),
+    [models, settings.defaultModel]
+  )
+  const variantNames = useMemo(() => {
+    const v = selectedModel?.variants
+    return v ? Object.keys(v).sort() : []
+  }, [selectedModel])
+
+  // If the selected variant is not available for the new model, clear it.
+  const activeVariant = variantNames.includes(settings.defaultVariant)
+    ? settings.defaultVariant
+    : ''
 
   return (
     <div className='flex flex-wrap items-center gap-2 border-b px-4 py-2'>
@@ -80,11 +96,29 @@ export function OpenCodeToolbar() {
         disabled={!modelsLoaded}
         refreshing={!modelsLoaded}
         onSelect={(model) => {
-          updateSettings({ defaultModel: model.id })
+          updateSettings({ defaultModel: model.id, defaultVariant: '' })
           markModelUsed(model.id)
         }}
         onRefresh={() => void loadModels()}
       />
+
+      {variantNames.length > 0 && (
+        <Select
+          value={activeVariant}
+          onValueChange={(v) => updateSettings({ defaultVariant: v })}
+        >
+          <SelectTrigger className='h-8 w-[110px]' aria-label='Reasoning variant'>
+            <SelectValue placeholder='Reasoning' />
+          </SelectTrigger>
+          <SelectContent>
+            {variantNames.map((v) => (
+              <SelectItem key={v} value={v}>
+                {v.charAt(0).toUpperCase() + v.slice(1)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
 
       <Select
         value={settings.defaultMode}

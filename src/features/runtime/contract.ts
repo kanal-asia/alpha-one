@@ -47,6 +47,8 @@ export interface RuntimeModel {
   availability?: string
   /** Display-only latency hint. Optional for the same reason. */
   latency?: string
+  /** TASK-OPENCODE-023: Available reasoning variants for this model (e.g. "low", "high"). */
+  variants?: Record<string, Record<string, unknown>>
 }
 
 /**
@@ -108,6 +110,7 @@ export function toRuntimeModel(input: {
   supportsTools: boolean
   availability?: RuntimeModel['availability']
   latency?: RuntimeModel['latency']
+  variants?: RuntimeModel['variants']
 }): RuntimeModel {
   return {
     id: createCanonicalId(input.provider, input.slug),
@@ -119,6 +122,7 @@ export function toRuntimeModel(input: {
     supportsTools: input.supportsTools,
     ...(input.availability != null ? { availability: input.availability } : {}),
     ...(input.latency != null ? { latency: input.latency } : {}),
+    ...(input.variants != null && Object.keys(input.variants).length > 0 ? { variants: input.variants } : {}),
   }
 }
 

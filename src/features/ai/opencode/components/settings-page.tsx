@@ -323,38 +323,10 @@ export function OpenCodeSettingsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className='grid grid-cols-2 gap-4'>
-              <div className='space-y-1'>
-                <Label htmlFor='temperature'>Temperature</Label>
-                <Input
-                  id='temperature'
-                  type='number'
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  value={settings.temperature}
-                  onChange={(e) =>
-                    updateSettings({ temperature: Number(e.target.value) || 0 })
-                  }
-                />
-              </div>
-              <div className='space-y-1'>
-                <Label htmlFor='maxtokens'>Max Tokens</Label>
-                <Input
-                  id='maxtokens'
-                  type='number'
-                  min={1}
-                  value={settings.maxTokens}
-                  onChange={(e) =>
-                    updateSettings({ maxTokens: Number(e.target.value) || 1 })
-                  }
-                />
-              </div>
-            </div>
             <p className='rounded-md bg-muted/60 px-2 py-1.5 text-[11px] text-muted-foreground'>
-              Temperature and Max Tokens are UI preferences (presentation-only).
-              The chat request does not send them to the OpenCode runtime, which
-              enforces its own model defaults.
+              Reasoning variants are available in the chat header next to the
+              model selector. They are discovered dynamically from the active
+              model and affect the actual OpenCode runtime.
             </p>
           </CardContent>
         </Card>

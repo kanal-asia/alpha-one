@@ -122,6 +122,13 @@ export function normalizeModel(raw: OpenCodeRawModel, fallbackProvider = "unknow
   const vision = modality(raw, "input", "image");
   const status = String((raw as Record<string, unknown>).status ?? "");
 
+  // TASK-OPENCODE-023: Extract variants from raw CLI output.
+  const rawVariants = (raw as Record<string, unknown>).variants;
+  const variants: Record<string, Record<string, unknown>> | undefined =
+    rawVariants && typeof rawVariants === "object" && Object.keys(rawVariants).length > 0
+      ? (rawVariants as Record<string, Record<string, unknown>>)
+      : undefined;
+
   return {
     id,
     slug,
@@ -147,6 +154,7 @@ export function normalizeModel(raw: OpenCodeRawModel, fallbackProvider = "unknow
     latency: normalizeLatency((raw as Record<string, unknown>).latency),
     availability: normalizeAvailability(status || raw.availability),
     metadata: raw,
+    variants,
   };
 }
 

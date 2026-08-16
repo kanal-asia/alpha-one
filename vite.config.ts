@@ -25,7 +25,9 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        // TASK-OPENCODE-032: Dynamic backend port for runtime isolation.
+        // Primary dev: uses 3001 (default). Isolated runtimes set BACKEND_PORT.
+        target: `http://localhost:${process.env.BACKEND_PORT || 3001}`,
         changeOrigin: true,
       },
     },

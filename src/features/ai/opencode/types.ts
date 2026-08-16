@@ -5,6 +5,29 @@ import type {
   ReferenceResolutionError,
 } from '@/features/ai/references/contract'
 
+// ---------------------------------------------------------------------------
+// TASK-OPENCODE-035: Alpha-native execution event types
+// These abstract away OpenCode-specific SSE event names and structures.
+// The adapter layer translates OpenCode events into these types.
+// ---------------------------------------------------------------------------
+
+export type AlphaExecutionEvent =
+  | { type: 'text_delta'; content: string }
+  | { type: 'tool_start'; tool: string; input: Record<string, unknown> }
+  | { type: 'tool_complete'; tool: string; output: string }
+  | { type: 'step_complete'; step: number }
+  | { type: 'execution_complete'; exitCode: number }
+  | { type: 'error'; message: string; code?: string }
+
+export type AlphaExecutionState =
+  | 'idle'
+  | 'running'
+  | 'waiting_for_tool'
+  | 'completed'
+  | 'error'
+  | 'cancelled'
+
+// Legacy types retained for backward compatibility during migration
 export type OpenCodeSessionState =
   | 'not_started'
   | 'starting'

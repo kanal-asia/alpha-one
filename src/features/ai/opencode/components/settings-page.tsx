@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
+import { NAMESPACE } from '@/lib/storage-keys'
 import {
   Card,
   CardContent,
@@ -56,7 +57,7 @@ export function OpenCodeSettingsPage() {
     try {
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i)
-        if (key && key.startsWith('alpha-workspace:')) {
+        if (key && key.startsWith(`${NAMESPACE}:`)) {
           bytes += (key.length + (localStorage.getItem(key)?.length ?? 0))
         }
       }
@@ -392,7 +393,7 @@ export function OpenCodeSettingsPage() {
                     try {
                       for (let i = 0; i < localStorage.length; i++) {
                         const key = localStorage.key(i)
-                        if (key && key.startsWith('alpha-workspace:')) {
+                        if (key && key.startsWith(`${NAMESPACE}:`)) {
                           bytes += (key.length + (localStorage.getItem(key)?.length ?? 0))
                         }
                       }

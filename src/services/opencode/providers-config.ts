@@ -93,7 +93,7 @@ interface StoreFile {
   providers: Record<string, StoredProvider>;
 }
 
-const CONFIG_DIR = join(homedir(), ".alpha-workspace");
+const CONFIG_DIR = join(homedir(), ".alpha-one");
 const CONFIG_FILE = join(CONFIG_DIR, "providers.json");
 
 function emptyStore(): StoreFile {

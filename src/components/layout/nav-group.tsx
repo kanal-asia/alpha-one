@@ -26,14 +26,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu'
-import {
-  type NavCollapsible,
-  type NavItem,
-  type NavLink,
-  type NavGroup as NavGroupProps,
-} from './types'
+import { type NavCollapsible, type NavItem, type NavLink, type NavGroup as NavGroupProps } from './types'
+import { KEYS } from '@/lib/storage-keys'
 
-const COLLAPSED_STATE_KEY = 'alpha-workspace:sidebar-collapsed'
+const COLLAPSED_STATE_KEY = KEYS.SIDEBAR_COLLAPSED
 
 function loadCollapsedState(): Record<string, boolean> {
   try {

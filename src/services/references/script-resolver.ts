@@ -31,7 +31,7 @@ export async function resolveScriptReference(
 
   try {
     const project = await getScriptProjectContent(userId, scriptId)
-    const tmpDir = join(tmpdir(), 'alpha-workspace-scripts', scriptId)
+    const tmpDir = join(tmpdir(), 'alpha-one-scripts', scriptId)
     mkdirSync(tmpDir, { recursive: true })
 
     let totalSize = 0

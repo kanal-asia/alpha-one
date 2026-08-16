@@ -1,7 +1,8 @@
 import { type ToolConfig, type ToolExecution } from './types'
+import { KEYS } from '@/lib/storage-keys'
 
-const CONFIG_KEY = 'alpha-workspace:tool-config'
-const HISTORY_KEY = 'alpha-workspace:tool-history'
+const CONFIG_KEY = KEYS.TOOL_CONFIG
+const HISTORY_KEY = KEYS.TOOL_HISTORY
 
 type ConfigOverrides = Record<string, Partial<ToolConfig>>
 

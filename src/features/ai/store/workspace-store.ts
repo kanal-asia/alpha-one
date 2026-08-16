@@ -33,11 +33,11 @@ interface WorkspaceStore {
   history: HistoryState
 }
 
-const DEFAULT_FOLDER = 'C:\\dev\\alpha-workspace'
+const DEFAULT_FOLDER = 'C:\\dev\\alpha-one'
 
 export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   workspace: {
-    projectName: 'alpha-workspace',
+    projectName: 'alpha-one',
     currentFolder: DEFAULT_FOLDER,
     status: 'disconnected',
     setStatus: (status) =>

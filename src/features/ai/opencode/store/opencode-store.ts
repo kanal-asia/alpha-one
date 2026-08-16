@@ -28,13 +28,14 @@ import {
 import { useProjectStore } from '@/features/ai-assistant/store/project-store'
 import { registerResourceLocally } from '@/features/resources/registration'
 import { useResourceStore } from '@/features/resources/resource-store'
+import { KEYS, migrateAllKeys } from '@/lib/storage-keys'
 
 /** TASK-OPENCODE-025: Canonical default model when available from OpenCode runtime. */
 const INTENDED_DEFAULT_MODEL = 'opencode/deepseek-v4-flash-free'
 
 const DEFAULT_SETTINGS: OpenCodeSettings = {
   executablePath: 'opencode',
-  workspacePath: 'C:\\dev\\alpha-workspace',
+  workspacePath: 'C:\\dev\\alpha-one',
   autoConnect: false,
   autoReconnect: false,
   streamingSpeed: 1,
@@ -46,8 +47,11 @@ const DEFAULT_SETTINGS: OpenCodeSettings = {
   developerMode: false,
 }
 
-const CHATS_KEY = 'alpha-workspace:opencode-chats'
-const SETTINGS_KEY = 'alpha-workspace:opencode-settings'
+const CHATS_KEY = KEYS.CHATS
+const SETTINGS_KEY = KEYS.SETTINGS
+
+// TASK-OPENCODE-036: Migrate legacy localStorage keys on import
+migrateAllKeys()
 
 function loadChats(): Chat[] {
   try {
@@ -886,9 +890,9 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
   clearLogs: () => set({ logs: [], runtimeEvents: [] }),
   clearLocalCache: () => {
     const CLEARABLE_CACHE_KEYS = [
-      'alpha-workspace:tool-history',
-      'alpha-workspace:sidebar-collapsed',
-      'alpha-workspace:opencode-model-prefs',
+      KEYS.TOOL_HISTORY,
+      KEYS.SIDEBAR_COLLAPSED,
+      KEYS.MODEL_PREFS,
     ]
     try {
       for (const key of CLEARABLE_CACHE_KEYS) {

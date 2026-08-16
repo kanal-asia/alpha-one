@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { KEYS } from '@/lib/storage-keys'
 
 export type ProjectContextType = 'local' | 'google-drive'
 
@@ -24,8 +25,8 @@ interface ProjectState {
   deleteProject: (id: string) => void
 }
 
-const PROJECTS_KEY = 'alpha-workspace:projects'
-const ACTIVE_PROJECT_KEY = 'alpha-workspace:active-project'
+const PROJECTS_KEY = KEYS.PROJECTS
+const ACTIVE_PROJECT_KEY = KEYS.ACTIVE_PROJECT
 
 function loadProjects(): Project[] {
   try {

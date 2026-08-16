@@ -142,7 +142,7 @@ export async function resolveDriveReference(
 
   // Transient temp file for the existing context pipeline (--file). This is
   // OS-temp scoped, not application persistent storage.
-  const tmpRoot = join(tmpdir(), 'alpha-workspace-references')
+  const tmpRoot = join(tmpdir(), 'alpha-one-references')
   await mkdir(tmpRoot, { recursive: true })
   const name = (reference.name || 'file').replace(/[^\w.-]/g, '_').slice(0, 80)
   const safeName = extname(name) ? name : `${name}${extensionFor(content.mimeType)}`

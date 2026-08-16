@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import type { SkillDefinition } from './types'
+import { KEYS } from '@/lib/storage-keys'
 
-const CUSTOM_SKILLS_KEY = 'alpha-workspace:custom-skills'
+const CUSTOM_SKILLS_KEY = KEYS.CUSTOM_SKILLS
 
 // ── Built-in skills (canonical definitions, not user-editable) ──────────────
 

@@ -1,4 +1,6 @@
-const PREFS_KEY = 'alpha-workspace:model-preferences'
+import { KEYS } from '@/lib/storage-keys'
+
+const PREFS_KEY = KEYS.MODEL_PREFS
 
 export interface ModelPreferences {
   favorites: string[]

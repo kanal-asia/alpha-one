@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import type { ResourceReference, ResourceProvider, ResourceStore } from './types'
+import { KEYS } from '@/lib/storage-keys'
 
-const RESOURCES_KEY = 'alpha-workspace:resources'
+const RESOURCES_KEY = KEYS.RESOURCES
 
 function loadResources(): ResourceReference[] {
   try {

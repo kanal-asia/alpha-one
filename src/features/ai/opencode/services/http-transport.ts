@@ -7,6 +7,7 @@ import {
   type OpenCodeSettings,
   type StreamChunk,
   type TokenMetrics,
+  type ToolEvent,
   type UsageStats,
   type WorkspaceInfo,
   type ProviderSummary,
@@ -104,6 +105,72 @@ function costFromEvent(evt: Record<string, unknown>): number | undefined {
   const part = evt.part as Record<string, unknown> | undefined
   const cost = typeof evt.cost === 'number' ? evt.cost : typeof part?.cost === 'number' ? part.cost : undefined
   return typeof cost === 'number' && Number.isFinite(cost) ? cost : undefined
+}
+
+// ---------------------------------------------------------------------------
+// TASK-OPENCODE-030: Safe tool event mapper
+// Maps technical tool names to human-readable labels without exposing
+// chain-of-thought or raw arguments.
+// ---------------------------------------------------------------------------
+
+const TOOL_LABELS: Record<string, string> = {
+  read: 'Reading file',
+  write: 'Writing file',
+  edit: 'Editing file',
+  bash: 'Running command',
+  glob: 'Searching files',
+  grep: 'Searching content',
+  todowrite: 'Updating task list',
+  webfetch: 'Fetching web content',
+  websearch: 'Searching the web',
+  task: 'Running subagent',
+}
+
+function mapToolToLabel(tool: string, input?: Record<string, unknown>): string {
+  const base = TOOL_LABELS[tool] ?? `Using ${tool}`
+  // Add safe context for specific tools without exposing sensitive data
+  if (tool === 'read' && typeof input?.filePath === 'string') {
+    const name = input.filePath.split(/[\\/]/).pop()
+    return name ? `Reading ${name}` : base
+  }
+  if (tool === 'write' && typeof input?.filePath === 'string') {
+    const name = input.filePath.split(/[\\/]/).pop()
+    return name ? `Writing ${name}` : base
+  }
+  if (tool === 'edit' && typeof input?.filePath === 'string') {
+    const name = input.filePath.split(/[\\/]/).pop()
+    return name ? `Editing ${name}` : base
+  }
+  if (tool === 'glob' && typeof input?.pattern === 'string') {
+    return `Searching for ${input.pattern}`
+  }
+  if (tool === 'bash' && typeof input?.command === 'string') {
+    // Show first meaningful part of command, not the full command
+    const cmd = input.command.trim()
+    if (cmd.startsWith('Get-ChildItem') || cmd.startsWith('ls')) return 'Browsing files'
+    if (cmd.startsWith('git ')) return 'Running git'
+    if (cmd.includes('Select-String') || cmd.includes('grep')) return 'Searching content'
+    return 'Running command'
+  }
+  return base
+}
+
+let toolEventCounter = 0
+
+function makeToolEvent(
+  tool: string,
+  status: 'running' | 'completed' | 'error',
+  input?: Record<string, unknown>,
+  detail?: string
+): ToolEvent {
+  return {
+    id: `te-${Date.now()}-${++toolEventCounter}`,
+    label: mapToolToLabel(tool, input),
+    tool,
+    status,
+    timestamp: new Date().toISOString(),
+    detail,
+  }
 }
 
 export class HTTPTransport implements OpenCodeTransport {
@@ -385,6 +452,25 @@ export class HTTPTransport implements OpenCodeTransport {
               textLength: text.length,
             })
 
+            // TASK-OPENCODE-030: Emit tool events for progress display.
+            // Only emit for tool_use events — never for reasoning/text parts.
+            if (evtType === 'tool_use') {
+              const toolPart = (part?.type === 'tool' ? part : undefined) as
+                | { tool?: string; state?: { input?: Record<string, unknown>; status?: string } }
+                | undefined
+              const toolName = toolPart?.tool
+              if (toolName) {
+                const toolInput = toolPart?.state?.input as Record<string, unknown> | undefined
+                const toolStatus = toolPart?.state?.status === 'completed' ? 'completed'
+                  : toolPart?.state?.status === 'error' ? 'error'
+                  : 'running'
+                onChunk({
+                  type: 'tool_event',
+                  toolEvent: makeToolEvent(toolName, toolStatus, toolInput),
+                })
+              }
+            }
+
             if (text) {
               textTokens++
               totalText += text
@@ -446,6 +532,8 @@ export class HTTPTransport implements OpenCodeTransport {
               stepFinishReceived,
               responseCompleted,
             })
+            // TASK-OPENCODE-030: Emit exit code for execution state tracking.
+            onChunk({ type: 'exit_code', exitCode: code })
             // TASK-AI-032: New decision model.
             // SUCCESS: responseCompleted = true → ignore non-zero exit code.
             // FAILURE: responseCompleted = false AND code !== 0 → emit error.

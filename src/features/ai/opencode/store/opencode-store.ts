@@ -504,6 +504,8 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
       status: 'streaming',
       model: get().settings.defaultModel,
       mode: get().settings.defaultMode,
+      executionState: 'working',
+      toolEvents: [],
     }
     set((state) => ({
       chats: state.chats.map((c) =>
@@ -576,7 +578,42 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
         prompt,
         (chunk) => {
           if (chunk.type === 'token' && chunk.content) appendToken(chunk.content)
-          else if (chunk.type === 'session' && chunk.sessionId) {
+          else if (chunk.type === 'tool_event' && chunk.toolEvent) {
+            // TASK-OPENCODE-030: Track tool events for progress display.
+            set((state) => ({
+              chats: state.chats.map((c) =>
+                c.id === activeChatId
+                  ? {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === assistantId
+                          ? {
+                              ...m,
+                              executionState: 'progress',
+                              toolEvents: [...(m.toolEvents ?? []), chunk.toolEvent!],
+                            }
+                          : m
+                      ),
+                    }
+                  : c
+              ),
+            }))
+            get().pushLog('info', `[tool] ${chunk.toolEvent.label}`)
+          } else if (chunk.type === 'exit_code' && chunk.exitCode != null) {
+            // TASK-OPENCODE-030: Track exit code for execution state.
+            set((state) => ({
+              chats: state.chats.map((c) =>
+                c.id === activeChatId
+                  ? {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === assistantId ? { ...m, exitCode: chunk.exitCode } : m
+                      ),
+                    }
+                  : c
+              ),
+            }))
+          } else if (chunk.type === 'session' && chunk.sessionId) {
             // TASK-AI-033: Store the real CLI session ID on the chat.
             // This is the session ID the CLI created, not a client-generated one.
             get().pushLog('info', `[SESSION] CREATE chatId=${activeChatId} sessionId=${chunk.sessionId}`)
@@ -635,18 +672,21 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                   c.id === activeChatId
                     ? {
                         ...c,
-                        messages: c.messages.map((m) =>
-                          m.id === assistantId
-                            ? {
-                                ...m,
-                                status: 'done',
-                                durationMs: Date.now() - startedAt,
-                                tokens: nativeTokens?.total ?? estimateTokens(m.content),
-                                usage: nativeTokens,
-                                cost: chunk.cost,
-                              }
-                            : m
-                        ),
+                        messages: c.messages.map((m) => {
+                          if (m.id !== assistantId) return m
+                          // TASK-OPENCODE-030: Determine execution state.
+                          const hasContent = m.content.length > 0
+                          const execState = hasContent ? 'completed' : 'completed_no_text'
+                          return {
+                            ...m,
+                            status: 'done',
+                            executionState: execState,
+                            durationMs: Date.now() - startedAt,
+                            tokens: nativeTokens?.total ?? estimateTokens(m.content),
+                            usage: nativeTokens,
+                            cost: chunk.cost,
+                          }
+                        }),
                         usage,
                         context,
                         updatedAt: new Date().toISOString(),
@@ -700,6 +740,7 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                             ...m,
                             // Only set error status if not already completed
                             status: m.status === 'done' ? 'done' : 'error',
+                            executionState: m.status === 'done' ? m.executionState : 'error',
                             content: m.status === 'done' ? m.content : (m.content || chunk.error || 'Error'),
                           }
                         }

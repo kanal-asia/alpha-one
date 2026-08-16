@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { AlertTriangle, Check, Copy, Pencil, RefreshCw, CornerDownRight } from 'lucide-react'
-import { type ChatMessage } from '../types'
+import { AlertTriangle, Check, Copy, Pencil, RefreshCw, CornerDownRight, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
+import { type ChatMessage, type ToolEvent, type ExecutionState } from '../types'
 import type { ReferenceAttachment } from '@/features/ai/references/contract'
 import { Markdown } from './markdown'
 import { ReferenceChips } from './reference-chips'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
+import { useDeveloperMode } from '@/context/developer-mode-provider'
 
 type ChatMessageProps = {
   message: ChatMessage
@@ -16,6 +17,137 @@ type ChatMessageProps = {
   onEdit: (text: string, references?: ReferenceAttachment[]) => void
   onContinue: () => void
 }
+
+// ---------------------------------------------------------------------------
+// TASK-OPENCODE-030: Execution state labels
+// ---------------------------------------------------------------------------
+
+const EXEC_STATE_LABELS: Record<ExecutionState, string> = {
+  idle: '',
+  working: 'Working…',
+  progress: 'Working…',
+  completed: 'Completed',
+  completed_no_text: 'Execution completed',
+  error: 'Request failed',
+  cancelled: 'Cancelled',
+}
+
+// ---------------------------------------------------------------------------
+// TASK-OPENCODE-030: Execution Summary
+// ---------------------------------------------------------------------------
+
+function ExecutionSummary({ toolEvents, exitCode }: { toolEvents?: ToolEvent[]; exitCode?: number }) {
+  const [expanded, setExpanded] = useState(false)
+
+  if (!toolEvents || toolEvents.length === 0) return null
+
+  // Build evidence-based summary from actual tool events
+  const completedTools = toolEvents.filter((e) => e.status === 'completed')
+  const failedTools = toolEvents.filter((e) => e.status === 'error')
+
+  return (
+    <div className='mt-2 border-t pt-2'>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className='flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors'
+      >
+        {expanded ? <ChevronDown className='size-3' /> : <ChevronRight className='size-3' />}
+        <span className='font-medium'>Execution Summary</span>
+        <span className='text-muted-foreground/60'>
+          ({completedTools.length} action{completedTools.length !== 1 ? 's' : ''}
+          {failedTools.length > 0 ? `, ${failedTools.length} failed` : ''})
+        </span>
+      </button>
+      {expanded && (
+        <ul className='mt-1.5 space-y-0.5 text-xs text-muted-foreground'>
+          {toolEvents.map((e) => (
+            <li key={e.id} className='flex items-center gap-1.5'>
+              {e.status === 'completed' ? (
+                <Check className='size-3 shrink-0 text-green-500' />
+              ) : e.status === 'error' ? (
+                <AlertTriangle className='size-3 shrink-0 text-destructive' />
+              ) : (
+                <Loader2 className='size-3 shrink-0 animate-spin' />
+              )}
+              <span>{e.label}</span>
+            </li>
+          ))}
+          {exitCode != null && exitCode !== 0 && (
+            <li className='flex items-center gap-1.5 text-destructive'>
+              <AlertTriangle className='size-3 shrink-0' />
+              <span>Process exited with code {exitCode}</span>
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TASK-OPENCODE-030: Developer Mode diagnostics
+// ---------------------------------------------------------------------------
+
+function DeveloperDiagnostics({ toolEvents, exitCode }: { toolEvents?: ToolEvent[]; exitCode?: number }) {
+  const [expanded, setExpanded] = useState(false)
+
+  if (!toolEvents || toolEvents.length === 0) return null
+
+  return (
+    <div className='mt-2 border-t pt-2'>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className='flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors'
+      >
+        {expanded ? <ChevronDown className='size-3' /> : <ChevronRight className='size-3' />}
+        <span className='font-medium text-amber-600 dark:text-amber-400'>Developer Diagnostics</span>
+      </button>
+      {expanded && (
+        <div className='mt-1.5 space-y-1 text-xs font-mono text-muted-foreground'>
+          {exitCode != null && (
+            <div>exit code: {exitCode}</div>
+          )}
+          {toolEvents.map((e) => (
+            <div key={e.id} className='flex gap-2'>
+              <span className={cn(
+                'shrink-0',
+                e.status === 'completed' ? 'text-green-500' : e.status === 'error' ? 'text-destructive' : 'text-muted-foreground'
+              )}>
+                [{e.status}]
+              </span>
+              <span className='shrink-0'>{e.tool}</span>
+              <span className='truncate opacity-60'>{e.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TASK-OPENCODE-030: Progress indicator
+// ---------------------------------------------------------------------------
+
+function ProgressIndicator({ toolEvents }: { toolEvents?: ToolEvent[] }) {
+  const lastEvent = toolEvents?.[toolEvents.length - 1]
+  const label = lastEvent?.label ?? 'Working…'
+
+  return (
+    <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+      <span className='flex gap-1'>
+        <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]' />
+        <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]' />
+        <span className='inline-block size-1.5 animate-bounce rounded-full bg-current' />
+      </span>
+      <span>{label}</span>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
 
 export function ChatMessageView({
   message,
@@ -28,6 +160,7 @@ export function ChatMessageView({
   const [copied, setCopied] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
+  const { developerMode } = useDeveloperMode()
 
   const copy = () => {
     void navigator.clipboard?.writeText(message.content)
@@ -43,7 +176,7 @@ export function ChatMessageView({
             <Input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-onKeyDown={(e) => {
+              onKeyDown={(e) => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                   setEditing(false)
                   onEdit(draft, message.references)
@@ -106,6 +239,8 @@ onKeyDown={(e) => {
   }
 
   const isStreaming = streaming && message.status === 'streaming'
+  const execState = message.executionState ?? (isStreaming ? 'working' : message.content ? 'completed' : 'idle')
+  const hasToolEvents = message.toolEvents && message.toolEvents.length > 0
 
   return (
     <div className='group flex gap-3'>
@@ -130,16 +265,30 @@ onKeyDown={(e) => {
           )}
         >
           {message.content ? (
-            <Markdown content={message.content} />
+            <>
+              <Markdown content={message.content} />
+              {/* TASK-OPENCODE-030: Execution summary below response */}
+              {message.status === 'done' && hasToolEvents && (
+                <ExecutionSummary toolEvents={message.toolEvents} exitCode={message.exitCode} />
+              )}
+            </>
           ) : isStreaming ? (
-            <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-              <span className='flex gap-1'>
-                <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]' />
-                <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]' />
-                <span className='inline-block size-1.5 animate-bounce rounded-full bg-current' />
-              </span>
-              <span>Thinking…</span>
+            <ProgressIndicator toolEvents={message.toolEvents} />
+          ) : message.executionState === 'completed_no_text' ? (
+            /* TASK-OPENCODE-030: Graceful no-final-text state */
+            <div className='space-y-2'>
+              <p className='text-sm text-muted-foreground'>
+                No final response was returned.
+              </p>
+              <p className='text-xs text-muted-foreground/70'>
+                The agent completed its available execution steps without producing a final answer.
+              </p>
+              {hasToolEvents && (
+                <ExecutionSummary toolEvents={message.toolEvents} exitCode={message.exitCode} />
+              )}
             </div>
+          ) : message.executionState === 'error' ? (
+            <p className='text-sm text-destructive'>{message.content || 'An error occurred.'}</p>
           ) : (
             <p className='text-sm text-muted-foreground'>Empty response.</p>
           )}
@@ -147,6 +296,11 @@ onKeyDown={(e) => {
             <span className='ms-1 inline-block h-3.5 w-1.5 animate-pulse bg-current align-middle' />
           )}
         </div>
+
+        {/* TASK-OPENCODE-030: Developer Mode diagnostics */}
+        {developerMode && message.status === 'done' && hasToolEvents && (
+          <DeveloperDiagnostics toolEvents={message.toolEvents} exitCode={message.exitCode} />
+        )}
 
         <div className='mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100'>
           <Button variant='ghost' size='icon' className='size-7' onClick={copy} aria-label='Copy response'>

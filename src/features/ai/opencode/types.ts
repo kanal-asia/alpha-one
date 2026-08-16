@@ -30,6 +30,8 @@ export type StreamEventType =
   | 'warning'
   | 'session'
   | 'file_operation'
+  | 'tool_event'
+  | 'exit_code'
 
 /** Scalar token metrics reported natively by OpenCode (`step_finish.tokens`). */
 export interface TokenMetrics {
@@ -53,6 +55,10 @@ export interface StreamChunk {
   /** TASK-OPENCODE-018R2: File operation metadata from tool_use events. */
   filePath?: string
   fileTool?: string
+  /** TASK-OPENCODE-030: Tool event for progress display. */
+  toolEvent?: ToolEvent
+  /** TASK-OPENCODE-030: Exit code from process. */
+  exitCode?: number
 }
 
 export interface OpenCodeSession {
@@ -126,6 +132,27 @@ export type ChatRole = 'user' | 'assistant'
 
 export type ChatMessageStatus = 'streaming' | 'done' | 'error' | 'cancelled'
 
+/** TASK-OPENCODE-030: Execution state for UI feedback. */
+export type ExecutionState =
+  | 'idle'
+  | 'working'
+  | 'progress'
+  | 'completed'
+  | 'completed_no_text'
+  | 'error'
+  | 'cancelled'
+
+/** TASK-OPENCODE-030: Safe tool event for user-facing progress. */
+export interface ToolEvent {
+  id: string
+  label: string
+  tool: string
+  status: 'running' | 'completed' | 'error'
+  timestamp: string
+  /** Developer Mode only — raw technical detail. */
+  detail?: string
+}
+
 export interface ChatMessage {
   id: string
   role: ChatRole
@@ -143,6 +170,10 @@ export interface ChatMessage {
   /** Native scalar usage reported by the runtime for this message. */
   usage?: TokenMetrics
   cost?: number
+  /** TASK-OPENCODE-030: Execution state and tool events. */
+  executionState?: ExecutionState
+  toolEvents?: ToolEvent[]
+  exitCode?: number
 }
 
 export type ContextStatus = 'normal' | 'attention' | 'high' | 'critical'

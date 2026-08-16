@@ -124,6 +124,11 @@ const TOOL_LABELS: Record<string, string> = {
   webfetch: 'Fetching web content',
   websearch: 'Searching the web',
   task: 'Running subagent',
+  // TASK-OPENCODE-031: MCP Google Sheets tools
+  'google_sheets.list_sheets': 'Listing worksheets',
+  'google_sheets.read_range': 'Reading spreadsheet',
+  'google_sheets.write_range': 'Writing to spreadsheet',
+  'google_sheets.append_rows': 'Appending rows',
 }
 
 function mapToolToLabel(tool: string, input?: Record<string, unknown>): string {
@@ -151,6 +156,16 @@ function mapToolToLabel(tool: string, input?: Record<string, unknown>): string {
     if (cmd.startsWith('git ')) return 'Running git'
     if (cmd.includes('Select-String') || cmd.includes('grep')) return 'Searching content'
     return 'Running command'
+  }
+  // TASK-OPENCODE-031: MCP tool context (safe — no token/spreadsheetId leakage)
+  if (tool === 'google_sheets.read_range' && typeof input?.range === 'string') {
+    return `Reading ${input.range}`
+  }
+  if (tool === 'google_sheets.write_range' && typeof input?.range === 'string') {
+    return `Writing to ${input.range}`
+  }
+  if (tool === 'google_sheets.append_rows' && typeof input?.range === 'string') {
+    return `Appending to ${input.range}`
   }
   return base
 }

@@ -507,24 +507,33 @@ export class HTTPTransport implements OpenCodeTransport {
           case 'step_finish':
             stepFinishReceived = true
             stepFinishAt = Date.now()
-            if (totalText.length > 0) {
-              responseCompleted = true
+            // TASK-OPENCODE-033: Only mark response complete on TERMINAL step_finish.
+            // reason='stop' = model finished (no more tool calls requested)
+            // reason='tool-calls' = intermediate step, more execution follows
+            // If no reason field, fall back to existing behavior (text + step_finish = done).
+            {
+              const reason = String((parsed.data as Record<string, unknown>)?.reason ?? '')
+              const isTerminal = reason === 'stop' || reason === ''
+              console.log('[OC-TRANSPORT] STEP_FINISH', {
+                reason,
+                isTerminal,
+                tokenEvents,
+                textTokens,
+                totalTextLength: totalText.length,
+                latencyMs: stepFinishAt - requestStart,
+                firstTextLatencyMs: firstTextAt ? stepFinishAt - firstTextAt : null,
+              })
+              if (isTerminal && totalText.length > 0) {
+                responseCompleted = true
+              }
+              // Emit done chunk with terminal flag (store uses this for lifecycle)
+              onChunk({
+                type: 'done',
+                terminal: isTerminal,
+                tokens: tokensFromEvent(parsed.data as Record<string, unknown>),
+                cost: costFromEvent(parsed.data as Record<string, unknown>),
+              })
             }
-            console.log('[OC-TRANSPORT] STEP_FINISH', {
-              tokenEvents,
-              textTokens,
-              totalTextLength: totalText.length,
-              responseCompleted,
-              latencyMs: stepFinishAt - requestStart,
-              firstTextLatencyMs: firstTextAt ? stepFinishAt - firstTextAt : null,
-            })
-            // TASK-ALPHAONE-007: surface native usage (tokens/cost) reported by
-            // the runtime instead of dropping it at the transport boundary.
-            onChunk({
-              type: 'done',
-              tokens: tokensFromEvent(parsed.data as Record<string, unknown>),
-              cost: costFromEvent(parsed.data as Record<string, unknown>),
-            })
             break
           case 'error': {
             const { message } = parsed.data as { message: string }

@@ -657,8 +657,31 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
             get().pushLog('info', `[RESOURCE] REGISTERED file=${fileName} path=${filePath}`)
           } else if (chunk.type === 'done') {
             const doneLatencyMs = Date.now() - startedAt
-            get().pushLog('completed', `[runtime-trace] done: model=${selectedModel.id} latency=${doneLatencyMs}ms`)
+            get().pushLog('completed', `[runtime-trace] done: model=${selectedModel.id} latency=${doneLatencyMs}ms terminal=${chunk.terminal}`)
             const nativeTokens = chunk.tokens
+            // TASK-OPENCODE-033: Only finalize on terminal done.
+            // Intermediate done (reason='tool-calls') updates metrics but keeps streaming.
+            if (!chunk.terminal) {
+              // Intermediate step — update usage metrics only
+              set((state) => {
+                const chat = state.chats.find((c) => c.id === activeChatId)
+                const usage = nativeTokens
+                  ? accumulateUsage(chat?.usage, nativeTokens, chunk.cost)
+                  : chat?.usage
+                const context = nativeTokens
+                  ? computeContext(nativeTokens.total, selectedModel.contextWindow)
+                  : (chat?.context ?? null)
+                return {
+                  chats: state.chats.map((c) =>
+                    c.id === activeChatId
+                      ? { ...c, usage, context, updatedAt: new Date().toISOString() }
+                      : c
+                  ),
+                }
+              })
+              return
+            }
+            // Terminal done — finalize execution state
             set((state) => {
               const chat = state.chats.find((c) => c.id === activeChatId)
               const usage = nativeTokens
@@ -674,7 +697,7 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                         ...c,
                         messages: c.messages.map((m) => {
                           if (m.id !== assistantId) return m
-                          // TASK-OPENCODE-030: Determine execution state.
+                          // TASK-OPENCODE-030/033: Determine execution state.
                           const hasContent = m.content.length > 0
                           const execState = hasContent ? 'completed' : 'completed_no_text'
                           return {

@@ -126,6 +126,41 @@ function DeveloperDiagnostics({ toolEvents, exitCode }: { toolEvents?: ToolEvent
 }
 
 // ---------------------------------------------------------------------------
+// TASK-OPENCODE-033: Live progress during streaming
+// ---------------------------------------------------------------------------
+
+function LiveProgress({ toolEvents }: { toolEvents: ToolEvent[] }) {
+  // Show completed + current tool events as live progress
+  // Only the most recent 'running' event is active; completed ones get checkmarks
+  const completed = toolEvents.filter((e) => e.status === 'completed')
+  const active = toolEvents.find((e) => e.status === 'running')
+  const lastEvent = toolEvents[toolEvents.length - 1]
+
+  return (
+    <div className='mt-2 space-y-1 text-sm text-muted-foreground'>
+      {/* Show up to 3 most recent completed events */}
+      {completed.slice(-3).map((e) => (
+        <div key={e.id} className='flex items-center gap-2'>
+          <Check className='size-3.5 shrink-0 text-green-500' />
+          <span className='truncate'>{e.label}</span>
+        </div>
+      ))}
+      {/* Active event with bouncing dots */}
+      {(active || (!lastEvent?.status || lastEvent.status === 'running')) && (
+        <div className='flex items-center gap-2'>
+          <span className='flex shrink-0 gap-0.5'>
+            <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]' />
+            <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]' />
+            <span className='inline-block size-1.5 animate-bounce rounded-full bg-current' />
+          </span>
+          <span className='truncate'>{active?.label ?? 'Working…'}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // TASK-OPENCODE-030: Progress indicator
 // ---------------------------------------------------------------------------
 
@@ -239,8 +274,13 @@ export function ChatMessageView({
   }
 
   const isStreaming = streaming && message.status === 'streaming'
+  const isTerminal = message.status === 'done' || message.status === 'error' || message.status === 'cancelled'
   const execState = message.executionState ?? (isStreaming ? 'working' : message.content ? 'completed' : 'idle')
   const hasToolEvents = message.toolEvents && message.toolEvents.length > 0
+
+  // TASK-OPENCODE-033: Live progress = tool events shown DURING streaming only
+  const liveToolEvents = isStreaming ? message.toolEvents : undefined
+  const hasLiveProgress = isStreaming && hasToolEvents
 
   return (
     <div className='group flex gap-3'>
@@ -264,18 +304,30 @@ export function ChatMessageView({
             message.status === 'error' && 'border-destructive/40'
           )}
         >
-          {message.content ? (
+          {/* --- ACTIVE STREAMING: intermediate text + live progress --- */}
+          {isStreaming && (
+            <>
+              {message.content && <Markdown content={message.content} />}
+              {hasLiveProgress ? (
+                <LiveProgress toolEvents={liveToolEvents!} />
+              ) : (
+                <ProgressIndicator toolEvents={liveToolEvents} />
+              )}
+            </>
+          )}
+
+          {/* --- TERMINAL: final text + Execution Summary --- */}
+          {!isStreaming && isTerminal && message.content && (
             <>
               <Markdown content={message.content} />
-              {/* TASK-OPENCODE-030: Execution summary below response */}
               {message.status === 'done' && hasToolEvents && (
                 <ExecutionSummary toolEvents={message.toolEvents} exitCode={message.exitCode} />
               )}
             </>
-          ) : isStreaming ? (
-            <ProgressIndicator toolEvents={message.toolEvents} />
-          ) : message.executionState === 'completed_no_text' ? (
-            /* TASK-OPENCODE-030: Graceful no-final-text state */
+          )}
+
+          {/* --- TERMINAL: no final text --- */}
+          {!isStreaming && isTerminal && !message.content && message.executionState === 'completed_no_text' && (
             <div className='space-y-2'>
               <p className='text-sm text-muted-foreground'>
                 No final response was returned.
@@ -287,17 +339,24 @@ export function ChatMessageView({
                 <ExecutionSummary toolEvents={message.toolEvents} exitCode={message.exitCode} />
               )}
             </div>
-          ) : message.executionState === 'error' ? (
+          )}
+
+          {/* --- TERMINAL: error --- */}
+          {!isStreaming && isTerminal && message.executionState === 'error' && (
             <p className='text-sm text-destructive'>{message.content || 'An error occurred.'}</p>
-          ) : (
+          )}
+
+          {/* --- TERMINAL: empty fallback --- */}
+          {!isStreaming && isTerminal && !message.content && message.executionState !== 'completed_no_text' && message.executionState !== 'error' && (
             <p className='text-sm text-muted-foreground'>Empty response.</p>
           )}
+
           {isStreaming && (
             <span className='ms-1 inline-block h-3.5 w-1.5 animate-pulse bg-current align-middle' />
           )}
         </div>
 
-        {/* TASK-OPENCODE-030: Developer Mode diagnostics */}
+        {/* TASK-OPENCODE-033: Developer Mode diagnostics — terminal only */}
         {developerMode && message.status === 'done' && hasToolEvents && (
           <DeveloperDiagnostics toolEvents={message.toolEvents} exitCode={message.exitCode} />
         )}

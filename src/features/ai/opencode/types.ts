@@ -59,6 +59,8 @@ export interface StreamChunk {
   toolEvent?: ToolEvent
   /** TASK-OPENCODE-030: Exit code from process. */
   exitCode?: number
+  /** TASK-OPENCODE-033: Whether this done chunk signals terminal completion. */
+  terminal?: boolean
 }
 
 export interface OpenCodeSession {

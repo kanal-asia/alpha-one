@@ -183,7 +183,12 @@ required.** Config: `src/services/google/oauth-service.ts` `GOOGLE_OAUTH_SCOPES`
   diffs.
 - Branch: `task/gworkspace-002-r1-drive-access-rework`. Working tree retains a large volume of
   **pre-existing unrelated** uncommitted changes from prior sessions — not touched by R1.
-- Commit created after this summary: see Git section at bottom.
+- Commit created after this summary: **`6c2e137`** — "TASK-OPENCODE-047-R1: Google Sheets MCP
+  corrective rework — expand update_spreadsheet to 17-op safe allowlist (formatting, validation,
+  filters, copyPaste, named ranges, CF rules), R1C1 read support, untrusted-data/prompt-injection
+  boundary, API contract fixes (string condition values, gridProperties field masks, no allowInvalid),
+  verified via disposable suite + Alpha Workspace E2E + real Kanal Indonesia workflow". 2 files changed
+  (828 insertions, 39 deletions). Parent: `31ba799`.
 
 ## J. E2E (Alpha Workspace UI) — PASS
 

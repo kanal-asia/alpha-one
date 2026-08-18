@@ -953,9 +953,11 @@ Out-of-scope findings only:
 
 ## P. Final Verdict
 
-`PASS`
+`PASS WITH LIMITATION` (updated by TASK-049-SCR on 2026-08-18; see §28)
 
 Criteria met: smoke test before implementation (run 3 reproduced false terminal); audit before fix; root cause PROVEN (continuation empty-message + unconditional terminal done); minimal fix addressing both; direct MCP regression 28/28; large-dataset E2E completed (0 repeated reads, Execution Summary reached); real Kanal workflow completed through the UI with correct output; read-back proves output; source + `Ref Cofund` unchanged; working state active during execution; Todo not terminal; Execution Summary after completion; no false terminal. No manual intervention was required for any post-fix completion.
+
+Limitation: TASK-049 vs TASK-048 is not a controlled same-model/same-provider comparison (the Free agent was exhausted mid-testing and testing moved to `opencode-go/deepseek-v4-flash`); live continuation was not exercised in the corrective smoke run (statically verified + previously live in TASK-050).
 
 ---
 
@@ -1001,3 +1003,69 @@ The desired behavior is:
 not:
 
 `READ → REREAD → REREAD → DELEGATE → REREAD → EXHAUST`
+
+---
+
+# 28. SMALL CORRECTIVE REWORK — TASK-049-SCR (appended 2026-08-18)
+
+## A. Reason for Corrective Rework
+
+TASK-049's testing sequence moved from the Free agent to another model after the Free agent reached its usage limit. The successful TASK-049 executions must NOT be presented as a controlled A/B comparison against TASK-048 under identical model/provider conditions. This corrective rework records the model/provider change precisely, re-runs a controlled smoke test on the available non-exhausted agent, re-verifies the proven runtime behavior, and corrects any over-claimed causality in the summary. Historical evidence is preserved; this section is appended.
+
+## B. Previous Model/Provider Context
+
+- Prior TASK-049 testing: `opencode/deepseek-v4-flash-free` (provider `opencode`, Free).
+- The Free agent reached its usage limit: `Error from provider (Console): Rate limit exceeded. Please try again later. statusCode: 429, isRetryable: true` — 6 occurrences in `alpha-server-049.log` (lines 2801, 2805, 2848, 2852, 7846, 7850).
+- Testing subsequently continued on `opencode-go/deepseek-v4-flash` (provider `opencode-go`, paid / non-exhausted, context 1.0M), selected via the UI ModelSelector by the test operator — NOT an automatic Alpha routing decision (no code/model-routing change; store default remains the Free model).
+- Classification: `EXTERNAL / PROVIDER LIMITATION` for the Free-agent exhaustion.
+
+## C. Corrective Smoke Test (2026-08-18)
+
+Real Alpha Workspace (`http://localhost:3000/workspace/assistant`), Developer Mode OFF. Disposable `1qmtFLkix4fOo94K71JyFlKIHj12p0PD-AA0ejVqeF_8` (`ALPHA_ONE_MCP049SCR_2026-08-18`), Sheet1 A1:X131 (130 products × 24 cols, 3144 cells). Prompt: real Product Performance / Flash Sale workflow (identify Dead Stock/Slow Moving with stock above average, create new tab `FlashSale049SCR`, populate candidates, verify, do not modify source). Model: `opencode-go/deepseek-v4-flash`.
+
+## D. Runtime Evidence
+
+Lifecycle: Working (`Working…` 20.9s) → thinking (`Memproses permintaan…` 35.5s) → tool execution (13 tool_use across 11 steps) → Execution Summary at 163.3s. Server `PROCESS CLOSE { code: 0, terminalStepFinishReceived: true, decision: 'SUCCESS' }`, session `ses_feb573992ffe8Bnyg7WyTcIz9c`, totalLatencyMs 140851. No errors, no retries, no false terminal.
+
+## E. Large Dataset Evidence
+
+- Tool calls: 13 (list_sheets, get_spreadsheet, read_range ×4, bash ×3, create_sheet, write_ranges, update_spreadsheet ×2).
+- Reads: 4 (header A1:V5, status cols W1:X3, tail A130:V131, output read-back A1:Q40). Writes: 1 write_ranges + 2 update_spreadsheet.
+- Repeated identical reads: 0. Failed calls: 0. Retries: 0. Step exhaustion: none (single process).
+- Completion: yes (`SUCCESS`). Output `FlashSale049SCR` sheetId 983420913, 39/39 candidates correct (0 missing, 0 extra), source Sheet1 unchanged.
+- Classification: `PROVEN: no repeated identical reads occurred during this execution.` — NOT claimed that caching/read optimization fixed repeated reads (no such mechanism implemented).
+
+## F. Continuation Evidence
+
+- Static re-verification: current `server.ts` (lines 409-410, 444) passes a real `CONTINUATION_MESSAGE` (not `opencode run ""`); line 595 gates `done(terminal=true)` on `terminalStepFinishReceived && textExtracted.length > 0`; non-terminal + exit 0 → bounded `spawnContinuation()`; limit → `settle(false, 1)`.
+- Corrective smoke: continuation was NOT exercised — the workflow completed in a single execution before continuation was required. Per spec: `Continuation not exercised because the execution completed before continuation was required.` This is NOT a continuation failure.
+- Live continuation was previously exercised in TASK-050 Dev-ON E2E (server `CONTINUING SESSION` → `CONTINUATION PROCESS SPAWNED pid 20008 attempt 1` → `CONTINUATION PROCESS CLOSE { attempt 1, terminalStepFinishReceived: true, isTerminal: true }`), confirming the fixed path works end-to-end.
+
+## G. Safety Evidence
+
+Disposable dataset only (no real business data mutated). Output confined to new tab `FlashSale049SCR`. Source `Sheet1` unchanged (read-back header intact). No destructive operations; CREATE/UPDATE invariant preserved.
+
+## H. Root-Cause Classification
+
+- PROVEN Alpha Workspace/runtime defect: empty continuation invocation (`opencode run ""`) + unconditional `done(terminal=true)` (false terminal) — fixed by TASK-049.
+- EXTERNAL provider limitation: Free-agent 429 rate-limit exhaustion during prior testing (not Alpha code).
+- UNPROVEN optimization hypothesis: caching/read-optimization (none implemented; zero repeated reads in the corrective run is an observed result, not proof of an optimization mechanism).
+
+## I. Source Changes
+
+`NO SOURCE CHANGE REQUIRED` — the corrective smoke test passed end-to-end and proved no defect remains. No source code was modified by this corrective rework.
+
+## J. Final Corrective Verdict
+
+`PASS WITH LIMITATION` (updated from `PASS`).
+
+Rationale: the implementation and real-workflow evidence remain valid, and the corrective smoke test reproduced the large-dataset success with no defect. However, per the controlled-comparison rule (§14), TASK-049 vs TASK-048 is NOT a controlled same-model/same-provider benchmark, and continuation was not exercised in the corrective run (only statically verified + previously live in TASK-050). These are evidence/context conditions, not defects — so FAIL is not warranted, and PASS WITH LIMITATION is the precise verdict.
+
+### Required Final Statement
+
+- Did TASK-049 fix a proven Alpha Workspace/runtime defect? `YES` — the empty continuation invocation and unconditional terminal done were PROVEN runtime defects and are fixed.
+- Did the Free-agent limit affect the earlier test? `YES` — the Free agent returned 429 `Rate limit exceeded` (PROVEN), forcing a test-agent change; classified as external/provider limitation.
+- Did the corrective smoke test reproduce the large-dataset success? `YES` — one-execution completion, 39/39 candidates, 0 repeated reads, honest terminal, `SUCCESS` on `opencode-go/deepseek-v4-flash`.
+- What is proven vs unproven about the large-dataset optimization? `PROVEN`: no repeated identical reads occurred; the continuation/false-terminal defects were fixed. `NOT PROVEN`: that the model change or the TASK-049 code alone caused the performance improvement (conditions differed from TASK-048); no caching mechanism exists.
+- Was any source-code change required? `NO` — corrective work is documentation/evidence only.
+- Is TASK-049 now PASS, PASS WITH LIMITATION, or FAIL? `PASS WITH LIMITATION`.

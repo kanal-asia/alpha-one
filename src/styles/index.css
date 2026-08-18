@@ -85,3 +85,49 @@
     height: 0;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * TASK-OPENCODE-050-SCR2: Runtime activity indicator.
+ * A subtle segmented "progress" motion (1→2→3→4) that communicates the agent
+ * is actively working. Native CSS only; no terminal cursor/bar; stops when the
+ * element is removed (i.e. when runtime is no longer streaming).
+ * ------------------------------------------------------------------------- */
+@keyframes activityPulse {
+  0% {
+    opacity: 0.2;
+    transform: translateX(0);
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.35;
+    transform: translateX(0);
+  }
+}
+
+.activity-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.activity-indicator__seg {
+  width: 4px;
+  height: 10px;
+  border-radius: 2px;
+  background: currentColor;
+  animation: activityPulse 1.1s ease-in-out infinite;
+}
+
+.activity-indicator__seg:nth-child(1) { animation-delay: 0s; }
+.activity-indicator__seg:nth-child(2) { animation-delay: 0.15s; }
+.activity-indicator__seg:nth-child(3) { animation-delay: 0.3s; }
+.activity-indicator__seg:nth-child(4) { animation-delay: 0.45s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-indicator__seg {
+    animation: none;
+    opacity: 0.5;
+  }
+}

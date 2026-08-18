@@ -134,7 +134,23 @@ function DeveloperDiagnostics({ toolEvents, exitCode, lifecycle }: { toolEvents?
 // TASK-OPENCODE-050: Lifecycle-aware progress — always shows an active working
 // line while streaming (previously dropped when the last tool event was
 // 'completed'), plus plan and tool-status summary.
+// TASK-OPENCODE-050-SCR2: The visible list is EXECUTION ACTIVITY (from real
+// tool/lifecycle events), not a Todo list. The persistent indicator uses a
+// subtle native-CSS activity animation (not a terminal cursor/bar) and only
+// animates while streaming.
 // ---------------------------------------------------------------------------
+
+/** TASK-OPENCODE-050-SCR2: subtle segmented activity animation (1→2→3→4). */
+function ActivityIndicator({ className }: { className?: string }) {
+  return (
+    <span className={cn('activity-indicator text-muted-foreground', className)} aria-hidden='true'>
+      <span className='activity-indicator__seg' />
+      <span className='activity-indicator__seg' />
+      <span className='activity-indicator__seg' />
+      <span className='activity-indicator__seg' />
+    </span>
+  )
+}
 
 function TodoPlan({ plan }: { plan?: { id: string; content: string; status: 'pending' | 'in_progress' | 'completed' }[] }) {
   if (!plan || plan.length === 0) return null
@@ -166,11 +182,7 @@ function LiveProgress({ toolEvents, plan, lifecycle }: { toolEvents: ToolEvent[]
   const lastEvent = toolEvents[toolEvents.length - 1]
 
   // TASK-OPENCODE-050-SCR: Separate lifecycle detail from persistent status.
-  //
-  // Lifecycle detail (WHAT the agent is doing) — stage-specific, from the
-  // actual lifecycle/tool events: completed tools with ✓, current action with ●.
-  // The current action prefers a genuinely running tool/continuation; falls back
-  // to the last tool label; only shows the thinking stage when nothing else ran.
+  // TASK-OPENCODE-050-SCR2: lifecycle detail is presented as EXECUTION ACTIVITY.
   const runningStage = [...(lifecycle ?? [])].reverse().find((s) => s.status === 'running')
   let currentAction: string
   if (active?.label) currentAction = active.label
@@ -182,7 +194,7 @@ function LiveProgress({ toolEvents, plan, lifecycle }: { toolEvents: ToolEvent[]
   return (
     <div className='mt-2 space-y-1.5 text-sm text-muted-foreground'>
       <TodoPlan plan={plan} />
-      {/* Lifecycle detail: last few completed/failed tools */}
+      {/* Execution activity (WHAT): completed/failed steps stay visible. */}
       {[...completed.slice(-3), ...failed.slice(-2)].map((e) => (
         <div key={e.id} className='flex items-center gap-2'>
           {e.status === 'error' ? (
@@ -193,19 +205,15 @@ function LiveProgress({ toolEvents, plan, lifecycle }: { toolEvents: ToolEvent[]
           <span className='truncate'>{e.label}</span>
         </div>
       ))}
-      {/* Lifecycle detail: current lifecycle action (stage-specific) */}
-      <div className='flex items-center gap-2'>
+      {/* Current activity (●) — visually distinct from completed steps. */}
+      <div className='flex items-center gap-2 font-medium text-foreground/80'>
         <span className='size-3.5 shrink-0 text-primary'>●</span>
         <span className='truncate'>{currentAction}</span>
       </div>
-      {/* Persistent status — state-based, neutral (TASK-OPENCODE-050-SCR).
-          Always shown while streaming; does NOT claim a specific stage. */}
+      {/* Persistent status — state-based, neutral. Subtle activity animation
+          only while streaming (this component renders only when streaming). */}
       <div className='flex items-center gap-2'>
-        <span className='flex shrink-0 gap-0.5'>
-          <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]' />
-          <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]' />
-          <span className='inline-block size-1.5 animate-bounce rounded-full bg-current' />
-        </span>
+        <ActivityIndicator />
         <span className='truncate'>Sedang bekerja...</span>
       </div>
     </div>
@@ -215,20 +223,13 @@ function LiveProgress({ toolEvents, plan, lifecycle }: { toolEvents: ToolEvent[]
 // ---------------------------------------------------------------------------
 // TASK-OPENCODE-030: Progress indicator (fallback before any tool event)
 // TASK-OPENCODE-050-SCR: persistent status is state-based (neutral wording).
+// TASK-OPENCODE-050-SCR2: uses the segmented activity animation.
 // ---------------------------------------------------------------------------
 
-function ProgressIndicator({ toolEvents, lifecycle }: { toolEvents?: ToolEvent[]; lifecycle?: LifecycleStage[] }) {
-  // TASK-OPENCODE-050-SCR: the persistent running state must answer only
-  // "is the agent still working?" — it must NOT claim a specific stage.
-  void toolEvents
-  void lifecycle
+function ProgressIndicator() {
   return (
     <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-      <span className='flex gap-1'>
-        <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]' />
-        <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]' />
-        <span className='inline-block size-1.5 animate-bounce rounded-full bg-current' />
-      </span>
+      <ActivityIndicator />
       <span>Sedang bekerja...</span>
     </div>
   )
@@ -375,7 +376,7 @@ export function ChatMessageView({
               {hasLiveProgress ? (
                 <LiveProgress toolEvents={liveToolEvents!} plan={message.plan} lifecycle={message.lifecycle} />
               ) : (
-                <ProgressIndicator toolEvents={liveToolEvents} lifecycle={message.lifecycle} />
+                <ProgressIndicator />
               )}
             </>
           )}

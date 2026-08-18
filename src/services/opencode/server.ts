@@ -458,6 +458,9 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
         env: { ...process.env, OPENCODE_NO_TUI: "1", CI: "1", NO_COLOR: "1" },
       });
       activeChild = continueChild;
+      // TASK-OPENCODE-050: Emit a continuation lifecycle event so the frontend
+      // can represent "↻ Melanjutkan pekerjaan..." instead of implying completion.
+      sendEvent("continuation", { attempt: continuationCount, sessionId: extractedSessionId });
       if (process.env.NODE_ENV !== "test") {
         console.log("[API] CONTINUATION PROCESS SPAWNED", { pid: continueChild.pid, sessionId: extractedSessionId, attempt: continuationCount });
       }

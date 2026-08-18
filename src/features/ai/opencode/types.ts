@@ -55,6 +55,29 @@ export type StreamEventType =
   | 'file_operation'
   | 'tool_event'
   | 'exit_code'
+  /** TASK-OPENCODE-050: step_start forwarded as a thinking/stage signal. */
+  | 'thinking'
+  /** TASK-OPENCODE-050: continuation (auto-resumed session) lifecycle event. */
+  | 'continuation'
+
+/** TASK-OPENCODE-050: A high-level lifecycle stage shown in the execution UI. */
+export interface LifecycleStage {
+  id: string
+  kind: 'request' | 'thinking' | 'todo' | 'tool' | 'continuation' | 'verification' | 'completed' | 'failed' | 'interrupted'
+  label: string
+  status: 'running' | 'completed' | 'error'
+  timestamp: string
+  /** Developer Mode only — technical detail (tool name, range, attempt, etc.). */
+  detail?: string
+}
+
+/** TASK-OPENCODE-050: A Todo/plan item derived from `todowrite` tool input. */
+export interface TodoItem {
+  id: string
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+  priority?: string
+}
 
 /** Scalar token metrics reported natively by OpenCode (`step_finish.tokens`). */
 export interface TokenMetrics {
@@ -84,6 +107,10 @@ export interface StreamChunk {
   exitCode?: number
   /** TASK-OPENCODE-033: Whether this done chunk signals terminal completion. */
   terminal?: boolean
+  /** TASK-OPENCODE-050: step_start forwarded as a thinking/stage signal. */
+  thinking?: boolean
+  /** TASK-OPENCODE-050: continuation lifecycle event payload. */
+  continuation?: { attempt: number; sessionId?: string }
 }
 
 export interface OpenCodeSession {
@@ -176,6 +203,8 @@ export interface ToolEvent {
   timestamp: string
   /** Developer Mode only — raw technical detail. */
   detail?: string
+  /** TASK-OPENCODE-050: Structured Todo/plan items when the tool is `todowrite`. */
+  todos?: TodoItem[]
 }
 
 export interface ChatMessage {
@@ -199,6 +228,12 @@ export interface ChatMessage {
   executionState?: ExecutionState
   toolEvents?: ToolEvent[]
   exitCode?: number
+  /** TASK-OPENCODE-050: Aggregated execution lifecycle for observability. */
+  lifecycle?: LifecycleStage[]
+  /** TASK-OPENCODE-050: Todo/plan derived from `todowrite` tool input. */
+  plan?: TodoItem[]
+  /** TASK-OPENCODE-050: Number of automatic continuations (auto-resumed session). */
+  continuations?: number
 }
 
 export type ContextStatus = 'normal' | 'attention' | 'high' | 'critical'

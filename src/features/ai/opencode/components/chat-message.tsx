@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { AlertTriangle, Check, Copy, Pencil, RefreshCw, CornerDownRight, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
-import { type ChatMessage, type ToolEvent, type ExecutionState } from '../types'
+import { AlertTriangle, Check, Copy, Pencil, RefreshCw, CornerDownRight, ChevronDown, ChevronRight, Loader2, RotateCcw, Square } from 'lucide-react'
+import { type ChatMessage, type ToolEvent, type LifecycleStage } from '../types'
 import type { ReferenceAttachment } from '@/features/ai/references/contract'
 import { Markdown } from './markdown'
 import { ReferenceChips } from './reference-chips'
@@ -16,20 +16,6 @@ type ChatMessageProps = {
   onRetry: () => void
   onEdit: (text: string, references?: ReferenceAttachment[]) => void
   onContinue: () => void
-}
-
-// ---------------------------------------------------------------------------
-// TASK-OPENCODE-030: Execution state labels
-// ---------------------------------------------------------------------------
-
-const EXEC_STATE_LABELS: Record<ExecutionState, string> = {
-  idle: '',
-  working: 'Working…',
-  progress: 'Working…',
-  completed: 'Completed',
-  completed_no_text: 'Execution completed',
-  error: 'Request failed',
-  cancelled: 'Cancelled',
 }
 
 // ---------------------------------------------------------------------------
@@ -88,10 +74,10 @@ function ExecutionSummary({ toolEvents, exitCode }: { toolEvents?: ToolEvent[]; 
 // TASK-OPENCODE-030: Developer Mode diagnostics
 // ---------------------------------------------------------------------------
 
-function DeveloperDiagnostics({ toolEvents, exitCode }: { toolEvents?: ToolEvent[]; exitCode?: number }) {
+function DeveloperDiagnostics({ toolEvents, exitCode, lifecycle }: { toolEvents?: ToolEvent[]; exitCode?: number; lifecycle?: LifecycleStage[] }) {
   const [expanded, setExpanded] = useState(false)
 
-  if (!toolEvents || toolEvents.length === 0) return null
+  if ((!toolEvents || toolEvents.length === 0) && (!lifecycle || lifecycle.length === 0)) return null
 
   return (
     <div className='mt-2 border-t pt-2'>
@@ -107,7 +93,24 @@ function DeveloperDiagnostics({ toolEvents, exitCode }: { toolEvents?: ToolEvent
           {exitCode != null && (
             <div>exit code: {exitCode}</div>
           )}
-          {toolEvents.map((e) => (
+          {lifecycle && lifecycle.length > 0 && (
+            <div className='space-y-0.5 border-b pb-1'>
+              {lifecycle.map((s) => (
+                <div key={s.id} className='flex gap-2'>
+                  <span className={cn(
+                    'shrink-0',
+                    s.status === 'completed' ? 'text-green-500' : s.status === 'error' ? 'text-destructive' : 'text-muted-foreground'
+                  )}>
+                    [{s.status}]
+                  </span>
+                  <span className='shrink-0'>{s.kind}</span>
+                  <span className='truncate'>{s.label}</span>
+                  {s.detail && <span className='truncate opacity-60'>{s.detail}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          {toolEvents?.map((e) => (
             <div key={e.id} className='flex gap-2'>
               <span className={cn(
                 'shrink-0',
@@ -117,6 +120,7 @@ function DeveloperDiagnostics({ toolEvents, exitCode }: { toolEvents?: ToolEvent
               </span>
               <span className='shrink-0'>{e.tool}</span>
               <span className='truncate opacity-60'>{e.label}</span>
+              {e.detail && <span className='truncate opacity-60'>{e.detail}</span>}
             </div>
           ))}
         </div>
@@ -127,46 +131,88 @@ function DeveloperDiagnostics({ toolEvents, exitCode }: { toolEvents?: ToolEvent
 
 // ---------------------------------------------------------------------------
 // TASK-OPENCODE-033: Live progress during streaming
+// TASK-OPENCODE-050: Lifecycle-aware progress — always shows an active working
+// line while streaming (previously dropped when the last tool event was
+// 'completed'), plus plan and tool-status summary.
 // ---------------------------------------------------------------------------
 
-function LiveProgress({ toolEvents }: { toolEvents: ToolEvent[] }) {
-  // Show completed + current tool events as live progress
-  // Only the most recent 'running' event is active; completed ones get checkmarks
+function TodoPlan({ plan }: { plan?: { id: string; content: string; status: 'pending' | 'in_progress' | 'completed' }[] }) {
+  if (!plan || plan.length === 0) return null
+  return (
+    <div className='mt-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm'>
+      <p className='mb-1 text-xs font-medium text-muted-foreground'>Rencana pekerjaan</p>
+      <ul className='space-y-0.5'>
+        {plan.map((t) => (
+          <li key={t.id} className='flex items-center gap-2 text-muted-foreground'>
+            {t.status === 'completed' ? (
+              <Check className='size-3.5 shrink-0 text-green-500' />
+            ) : t.status === 'in_progress' ? (
+              <Loader2 className='size-3.5 shrink-0 animate-spin text-primary' />
+            ) : (
+              <span className='inline-block size-3.5 shrink-0 rounded-full border text-center text-[9px] leading-[12px]'>○</span>
+            )}
+            <span className={cn(t.status === 'completed' && 'line-through opacity-60')}>{t.content}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function LiveProgress({ toolEvents, plan, lifecycle }: { toolEvents: ToolEvent[]; plan?: ChatMessage['plan']; lifecycle?: LifecycleStage[] }) {
   const completed = toolEvents.filter((e) => e.status === 'completed')
+  const failed = toolEvents.filter((e) => e.status === 'error')
   const active = toolEvents.find((e) => e.status === 'running')
   const lastEvent = toolEvents[toolEvents.length - 1]
 
+  // TASK-OPENCODE-050: current stage label — from the lifecycle (thinking/
+  // continuation) or the most recent tool, or a default while streaming.
+  const runningStage = [...(lifecycle ?? [])].reverse().find((s) => s.status === 'running')
+  let stageLabel = 'Working…'
+  if (runningStage?.kind === 'thinking') stageLabel = 'Memproses permintaan…'
+  else if (runningStage?.kind === 'continuation') stageLabel = 'Melanjutkan pekerjaan…'
+  else if (active?.label) stageLabel = active.label
+  else if (lastEvent?.label && lastEvent.status === 'completed') stageLabel = `${lastEvent.label}…`
+  else if (lastEvent?.label) stageLabel = lastEvent.label
+
   return (
-    <div className='mt-2 space-y-1 text-sm text-muted-foreground'>
-      {/* Show up to 3 most recent completed events */}
-      {completed.slice(-3).map((e) => (
+    <div className='mt-2 space-y-1.5 text-sm text-muted-foreground'>
+      <TodoPlan plan={plan} />
+      {/* Tool summary: last few completed/failed tools */}
+      {[...completed.slice(-3), ...failed.slice(-2)].map((e) => (
         <div key={e.id} className='flex items-center gap-2'>
-          <Check className='size-3.5 shrink-0 text-green-500' />
+          {e.status === 'error' ? (
+            <AlertTriangle className='size-3.5 shrink-0 text-destructive' />
+          ) : (
+            <Check className='size-3.5 shrink-0 text-green-500' />
+          )}
           <span className='truncate'>{e.label}</span>
         </div>
       ))}
-      {/* Active event with bouncing dots */}
-      {(active || (!lastEvent?.status || lastEvent.status === 'running')) && (
-        <div className='flex items-center gap-2'>
-          <span className='flex shrink-0 gap-0.5'>
-            <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]' />
-            <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]' />
-            <span className='inline-block size-1.5 animate-bounce rounded-full bg-current' />
-          </span>
-          <span className='truncate'>{active?.label ?? 'Working…'}</span>
-        </div>
-      )}
+      {/* Active working line — ALWAYS shown while streaming (TASK-OPENCODE-050) */}
+      <div className='flex items-center gap-2'>
+        <span className='flex shrink-0 gap-0.5'>
+          <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]' />
+          <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]' />
+          <span className='inline-block size-1.5 animate-bounce rounded-full bg-current' />
+        </span>
+        <span className='truncate'>{stageLabel}</span>
+      </div>
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// TASK-OPENCODE-030: Progress indicator
+// TASK-OPENCODE-030: Progress indicator (fallback before any tool event)
 // ---------------------------------------------------------------------------
 
-function ProgressIndicator({ toolEvents }: { toolEvents?: ToolEvent[] }) {
+function ProgressIndicator({ toolEvents, lifecycle }: { toolEvents?: ToolEvent[]; lifecycle?: LifecycleStage[] }) {
   const lastEvent = toolEvents?.[toolEvents.length - 1]
-  const label = lastEvent?.label ?? 'Working…'
+  const runningStage = [...(lifecycle ?? [])].reverse().find((s) => s.status === 'running')
+  const label =
+    runningStage?.kind === 'continuation' ? 'Melanjutkan pekerjaan…'
+    : runningStage?.kind === 'thinking' ? 'Memproses permintaan…'
+    : lastEvent?.label ?? 'Working…'
 
   return (
     <div className='flex items-center gap-2 text-sm text-muted-foreground'>
@@ -275,12 +321,16 @@ export function ChatMessageView({
 
   const isStreaming = streaming && message.status === 'streaming'
   const isTerminal = message.status === 'done' || message.status === 'error' || message.status === 'cancelled'
-  const execState = message.executionState ?? (isStreaming ? 'working' : message.content ? 'completed' : 'idle')
   const hasToolEvents = message.toolEvents && message.toolEvents.length > 0
+  const hasLifecycle = message.lifecycle && message.lifecycle.length > 0
 
   // TASK-OPENCODE-033: Live progress = tool events shown DURING streaming only
   const liveToolEvents = isStreaming ? message.toolEvents : undefined
   const hasLiveProgress = isStreaming && hasToolEvents
+
+  // TASK-OPENCODE-050: Continuation indicator — show while continuing even if
+  // the working line is otherwise hidden.
+  const isContinuing = isStreaming && (message.continuations ?? 0) > 0
 
   return (
     <div className='group flex gap-3'>
@@ -307,11 +357,17 @@ export function ChatMessageView({
           {/* --- ACTIVE STREAMING: intermediate text + live progress --- */}
           {isStreaming && (
             <>
+              {isContinuing && (
+                <div className='mb-1 flex items-center gap-2 text-sm text-muted-foreground'>
+                  <RotateCcw className='size-3.5 shrink-0 text-primary' />
+                  <span>Melanjutkan pekerjaan…</span>
+                </div>
+              )}
               {message.content && <Markdown content={message.content} />}
               {hasLiveProgress ? (
-                <LiveProgress toolEvents={liveToolEvents!} />
+                <LiveProgress toolEvents={liveToolEvents!} plan={message.plan} lifecycle={message.lifecycle} />
               ) : (
-                <ProgressIndicator toolEvents={liveToolEvents} />
+                <ProgressIndicator toolEvents={liveToolEvents} lifecycle={message.lifecycle} />
               )}
             </>
           )}
@@ -324,6 +380,19 @@ export function ChatMessageView({
                 <ExecutionSummary toolEvents={message.toolEvents} exitCode={message.exitCode} />
               )}
             </>
+          )}
+
+          {/* --- TERMINAL: interrupted/cancelled (distinct from completion) --- */}
+          {!isStreaming && isTerminal && message.status === 'cancelled' && !message.content && (
+            <div className='space-y-2'>
+              <p className='flex items-center gap-1.5 text-sm text-muted-foreground'>
+                <Square className='size-3.5 shrink-0' />
+                Eksekusi dihentikan
+              </p>
+              {hasToolEvents && (
+                <ExecutionSummary toolEvents={message.toolEvents} exitCode={message.exitCode} />
+              )}
+            </div>
           )}
 
           {/* --- TERMINAL: no final text --- */}
@@ -342,12 +411,20 @@ export function ChatMessageView({
           )}
 
           {/* --- TERMINAL: error --- */}
-          {!isStreaming && isTerminal && message.executionState === 'error' && (
-            <p className='text-sm text-destructive'>{message.content || 'An error occurred.'}</p>
+          {!isStreaming && isTerminal && message.executionState === 'error' && message.status !== 'cancelled' && (
+            <div className='space-y-2'>
+              <p className='flex items-center gap-1.5 text-sm text-destructive'>
+                <AlertTriangle className='size-3.5 shrink-0' />
+                {message.content || 'An error occurred.'}
+              </p>
+              {hasToolEvents && (
+                <ExecutionSummary toolEvents={message.toolEvents} exitCode={message.exitCode} />
+              )}
+            </div>
           )}
 
           {/* --- TERMINAL: empty fallback --- */}
-          {!isStreaming && isTerminal && !message.content && message.executionState !== 'completed_no_text' && message.executionState !== 'error' && (
+          {!isStreaming && isTerminal && !message.content && message.executionState !== 'completed_no_text' && message.executionState !== 'error' && message.status !== 'cancelled' && (
             <p className='text-sm text-muted-foreground'>Empty response.</p>
           )}
 
@@ -356,9 +433,10 @@ export function ChatMessageView({
           )}
         </div>
 
-        {/* TASK-OPENCODE-033: Developer Mode diagnostics — terminal only */}
-        {developerMode && message.status === 'done' && hasToolEvents && (
-          <DeveloperDiagnostics toolEvents={message.toolEvents} exitCode={message.exitCode} />
+        {/* TASK-OPENCODE-033/050: Developer Mode diagnostics — live while streaming,
+            terminal otherwise. Adds lifecycle/tool/detail for observability. */}
+        {developerMode && hasToolEvents && hasLifecycle && (
+          <DeveloperDiagnostics toolEvents={message.toolEvents} exitCode={message.exitCode} lifecycle={message.lifecycle} />
         )}
 
         <div className='mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100'>

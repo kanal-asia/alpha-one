@@ -8,6 +8,7 @@ import {
   type StreamChunk,
   type TokenMetrics,
   type ToolEvent,
+  type TodoItem,
   type UsageStats,
   type WorkspaceInfo,
   type ProviderSummary,
@@ -129,6 +130,21 @@ const TOOL_LABELS: Record<string, string> = {
   'google_sheets.read_range': 'Reading spreadsheet',
   'google_sheets.write_range': 'Writing to spreadsheet',
   'google_sheets.append_rows': 'Appending rows',
+  // TASK-OPENCODE-050: Actual MCP tool names use the `google-sheets_google_sheets_*`
+  // convention (dash prefix). The keys above were never matched, so the UI fell
+  // back to raw `Using google-sheets_...` labels. Map the real names here.
+  'google-sheets_google_sheets_list_sheets': 'Memeriksa struktur spreadsheet',
+  'google-sheets_google_sheets_get_spreadsheet': 'Membaca metadata spreadsheet',
+  'google-sheets_google_sheets_read_range': 'Membaca data',
+  'google-sheets_google_sheets_read_ranges': 'Membaca beberapa bagian data',
+  'google-sheets_google_sheets_write_range': 'Menulis data',
+  'google-sheets_google_sheets_write_ranges': 'Menambahkan hasil',
+  'google-sheets_google_sheets_write_formulas': 'Menambahkan rumus',
+  'google-sheets_google_sheets_append_rows': 'Menambahkan baris',
+  'google-sheets_google_sheets_create_sheet': 'Membuat sheet baru',
+  'google-sheets_google_sheets_insert_dimension': 'Mengubah ukuran sheet',
+  'google-sheets_google_sheets_update_spreadsheet': 'Memformat / mengatur sheet',
+  'google-sheets_google_sheets_get_spreadsheet_info': 'Membaca informasi spreadsheet',
 }
 
 function mapToolToLabel(tool: string, input?: Record<string, unknown>): string {
@@ -167,7 +183,76 @@ function mapToolToLabel(tool: string, input?: Record<string, unknown>): string {
   if (tool === 'google_sheets.append_rows' && typeof input?.range === 'string') {
     return `Appending to ${input.range}`
   }
+  // TASK-OPENCODE-050: Real MCP names — safe range context (sheet name only, no
+  // cell values). This enriches the label without exposing data content.
+  if (tool.startsWith('google-sheets_')) {
+    const range = typeof input?.range === 'string' ? input.range : undefined
+    const ranges = Array.isArray(input?.ranges) ? (input.ranges as string[]) : undefined
+    const sheetName = range?.split('!')[0] ?? ranges?.[0]?.split('!')[0]
+    const safeSheet = sheetName && sheetName !== 'Sheet1' ? ` ${sheetName.replace(/'/g, '')}` : ''
+    if (tool.endsWith('read_range') || tool.endsWith('read_ranges')) return `Membaca data${safeSheet}`
+    if (tool.endsWith('write_range') || tool.endsWith('write_ranges')) return `Menulis data${safeSheet}`
+    if (tool.endsWith('write_formulas')) return `Menambahkan rumus${safeSheet}`
+    if (tool.endsWith('create_sheet')) {
+      const title = typeof input?.title === 'string' ? input.title : undefined
+      return title ? `Membuat sheet "${title}"` : 'Membuat sheet baru'
+    }
+    if (tool.endsWith('update_spreadsheet')) {
+      const op = typeof input?.operation === 'string' ? input.operation : undefined
+      const opLabel: Record<string, string> = {
+        repeatCell: 'Memformat sel',
+        setDataValidation: 'Menambahkan validasi data',
+        setBasicFilter: 'Menambahkan filter',
+        addConditionalFormatRule: 'Menambahkan format kondisional',
+        updateSheetProperties: 'Mengatur properti sheet',
+        autoResizeDimensions: 'Menyesuaikan ukuran kolom/baris',
+        updateDimensionProperties: 'Mengatur ukuran baris/kolom',
+        addSheet: 'Menambahkan tab baru',
+        mergeCells: 'Menggabungkan sel',
+        addNamedRange: 'Menambahkan named range',
+      }
+      return opLabel[op ?? ''] ?? 'Mengatur sheet'
+    }
+    if (tool.endsWith('list_sheets')) return 'Memeriksa struktur spreadsheet'
+    if (tool.endsWith('get_spreadsheet')) return 'Membaca metadata spreadsheet'
+    if (tool.endsWith('append_rows')) return 'Menambahkan baris'
+    if (tool.endsWith('insert_dimension')) return 'Mengubah ukuran sheet'
+  }
   return base
+}
+
+function toolDetail(tool: string, input?: Record<string, unknown>): string | undefined {
+  // Developer Mode only — safe technical detail (operation/range/sheet), never values.
+  if (tool.startsWith('google-sheets_')) {
+    const parts: string[] = []
+    const op = typeof input?.operation === 'string' ? input.operation : undefined
+    if (op) parts.push(`operation: ${op}`)
+    const range = typeof input?.range === 'string' ? input.range : undefined
+    if (range) parts.push(`range: ${range}`)
+    const ranges = Array.isArray(input?.ranges) ? (input.ranges as string[]) : undefined
+    if (ranges && ranges.length > 0) parts.push(`ranges: ${ranges.join(', ')}`)
+    const title = typeof input?.title === 'string' ? input.title : undefined
+    if (title) parts.push(`sheet: ${title}`)
+    const sheetTitle = typeof input?.sheetTitle === 'string' ? input.sheetTitle : undefined
+    if (sheetTitle) parts.push(`target: ${sheetTitle}`)
+    return parts.length > 0 ? parts.join(' ') : undefined
+  }
+  if (tool === 'todowrite') return 'todowrite'
+  return undefined
+}
+
+function parseTodos(input?: Record<string, unknown>): TodoItem[] | undefined {
+  const todos = Array.isArray(input?.todos) ? (input.todos as Array<Record<string, unknown>>) : undefined
+  if (!todos) return undefined
+  return todos.map((t, i) => ({
+    id: `td-${Date.now()}-${i}`,
+    content: String(t.content ?? ''),
+    status:
+      t.status === 'completed' ? 'completed'
+      : t.status === 'in_progress' ? 'in_progress'
+      : 'pending',
+    priority: typeof t.priority === 'string' ? t.priority : undefined,
+  }))
 }
 
 let toolEventCounter = 0
@@ -176,7 +261,8 @@ function makeToolEvent(
   tool: string,
   status: 'running' | 'completed' | 'error',
   input?: Record<string, unknown>,
-  detail?: string
+  detail?: string,
+  todos?: TodoItem[]
 ): ToolEvent {
   return {
     id: `te-${Date.now()}-${++toolEventCounter}`,
@@ -184,7 +270,8 @@ function makeToolEvent(
     tool,
     status,
     timestamp: new Date().toISOString(),
-    detail,
+    detail: detail ?? toolDetail(tool, input),
+    todos,
   }
 }
 
@@ -467,6 +554,12 @@ export class HTTPTransport implements OpenCodeTransport {
               textLength: text.length,
             })
 
+            // TASK-OPENCODE-050: Forward step_start as a thinking/stage signal so
+            // the UI can show "● Memproses..." between tool calls (was dropped).
+            if (evtType === 'step_start') {
+              onChunk({ type: 'thinking', thinking: true })
+            }
+
             // TASK-OPENCODE-030: Emit tool events for progress display.
             // Only emit for tool_use events — never for reasoning/text parts.
             if (evtType === 'tool_use') {
@@ -481,9 +574,16 @@ export class HTTPTransport implements OpenCodeTransport {
                   : 'running'
                 onChunk({
                   type: 'tool_event',
-                  toolEvent: makeToolEvent(toolName, toolStatus, toolInput),
+                  toolEvent: makeToolEvent(toolName, toolStatus, toolInput, undefined, parseTodos(toolInput)),
                 })
               }
+            }
+
+            // TASK-OPENCODE-050: Never leak reasoning/thinking text as assistant
+            // answer content (private model reasoning must stay private).
+            if (evtType === 'reasoning' || part?.type === 'reasoning') {
+              if (!text) onChunk({ type: 'thinking', thinking: true })
+              break
             }
 
             if (text) {
@@ -511,25 +611,28 @@ export class HTTPTransport implements OpenCodeTransport {
             // reason='stop' = model finished (no more tool calls requested)
             // reason='tool-calls' = intermediate step, more execution follows
             // If no reason field, fall back to existing behavior (text + step_finish = done).
+            //
+            // TASK-OPENCODE-044: Do NOT mark responseCompleted here.
+            // The server controls stream lifecycle via the 'done' event.
+            // The transport only breaks the loop when it receives
+            // done(terminal=true) from the server, not from step_finish directly.
             {
               const reason = String((parsed.data as Record<string, unknown>)?.reason ?? '')
-              const isTerminal = reason === 'stop' || reason === ''
+              const isTerminalByReason = reason === 'stop' || reason === ''
               console.log('[OC-TRANSPORT] STEP_FINISH', {
                 reason,
-                isTerminal,
+                isTerminalByReason,
                 tokenEvents,
                 textTokens,
                 totalTextLength: totalText.length,
                 latencyMs: stepFinishAt - requestStart,
                 firstTextLatencyMs: firstTextAt ? stepFinishAt - firstTextAt : null,
               })
-              if (isTerminal && totalText.length > 0) {
-                responseCompleted = true
-              }
-              // Emit done chunk with terminal flag (store uses this for lifecycle)
+              // Emit done chunk — server decides terminal flag based on workflow state
+              // Transport does NOT set responseCompleted here
               onChunk({
                 type: 'done',
-                terminal: isTerminal,
+                terminal: false,
                 tokens: tokensFromEvent(parsed.data as Record<string, unknown>),
                 cost: costFromEvent(parsed.data as Record<string, unknown>),
               })
@@ -575,12 +678,43 @@ export class HTTPTransport implements OpenCodeTransport {
               // Response incomplete and process failed — emit error.
               onChunk({ type: 'error', error: `OpenCode exited with code ${code}` })
             }
+            // TASK-OPENCODE-039: When code === 0 but response is incomplete,
+            // do NOT emit terminal done here. The store will handle finalization
+            // based on the step_finish reason and content state.
+            break
+          }
+          case 'done': {
+            // TASK-OPENCODE-044: Handle terminal done event from server.
+            // The server sends done(terminal=true) when the workflow is genuinely complete.
+            // This is the authoritative signal for stream lifecycle.
+            const { terminal } = parsed.data as { terminal?: boolean }
+            console.log('[OC-TRANSPORT] DONE EVENT', { terminal, responseCompleted })
+            if (terminal && !responseCompleted) {
+              responseCompleted = true
+              // Emit terminal done to store for finalization
+              onChunk({
+                type: 'done',
+                terminal: true,
+                tokens: tokensFromEvent(parsed.data as Record<string, unknown>),
+                cost: costFromEvent(parsed.data as Record<string, unknown>),
+              })
+            }
             break
           }
           case 'session': {
             const { sessionId: realSessionId } = parsed.data as { sessionId: string }
             console.log('[OC-TRANSPORT] SESSION EVENT', { realSessionId })
             onChunk({ type: 'session', sessionId: realSessionId })
+            break
+          }
+          case 'continuation': {
+            // TASK-OPENCODE-050: Auto-continuation (same logical task resumed).
+            const data = parsed.data as { attempt?: number; sessionId?: string }
+            console.log('[OC-TRANSPORT] CONTINUATION EVENT', data)
+            onChunk({
+              type: 'continuation',
+              continuation: { attempt: data.attempt ?? 1, sessionId: data.sessionId },
+            })
             break
           }
           case 'stderr': {

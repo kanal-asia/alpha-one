@@ -8,6 +8,7 @@ import {
   type ConnectionStatus,
   type ContextStatus,
   type ExecutionLogEntry,
+  type LifecycleStage,
   type ModeInfo,
   type ModelInfo,
   type OpenCodeSession,
@@ -32,6 +33,46 @@ import { KEYS, migrateAllKeys } from '@/lib/storage-keys'
 
 /** TASK-OPENCODE-025: Canonical default model when available from OpenCode runtime. */
 const INTENDED_DEFAULT_MODEL = 'opencode/deepseek-v4-flash-free'
+
+// ---------------------------------------------------------------------------
+// TASK-OPENCODE-050: Lifecycle observability helpers
+// ---------------------------------------------------------------------------
+
+let lifecycleSeq = 0
+function nextLifecycleId(): string {
+  lifecycleSeq += 1
+  return `lc-${Date.now()}-${lifecycleSeq}`
+}
+
+function pushStage(
+  stages: LifecycleStage[] | undefined,
+  kind: LifecycleStage['kind'],
+  label: string,
+  status: LifecycleStage['status'],
+  detail?: string
+): LifecycleStage[] {
+  return [...(stages ?? []), { id: nextLifecycleId(), kind, label, status, timestamp: new Date().toISOString(), detail }]
+}
+
+function appendOrUpdateStage(
+  stages: LifecycleStage[] | undefined,
+  kind: LifecycleStage['kind'],
+  label: string,
+  status: LifecycleStage['status'],
+  detail?: string
+): LifecycleStage[] {
+  const existing = stages ?? []
+  // A running stage of the same kind replaces any prior running stage of that
+  // kind (e.g. thinking→thinking, tool→tool) so the list stays compact.
+  const idx = [...existing].reverse().findIndex((s) => s.kind === kind && s.status === 'running')
+  if (idx >= 0) {
+    const realIdx = existing.length - 1 - idx
+    const next = [...existing]
+    next[realIdx] = { ...next[realIdx], label, status, detail }
+    return next
+  }
+  return [...existing, { id: nextLifecycleId(), kind, label, status, timestamp: new Date().toISOString(), detail }]
+}
 
 const DEFAULT_SETTINGS: OpenCodeSettings = {
   executablePath: 'opencode',
@@ -510,6 +551,8 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
       mode: get().settings.defaultMode,
       executionState: 'working',
       toolEvents: [],
+      lifecycle: pushStage(undefined, 'request', 'Memahami permintaan', 'running'),
+      continuations: 0,
     }
     set((state) => ({
       chats: state.chats.map((c) =>
@@ -582,8 +625,8 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
         prompt,
         (chunk) => {
           if (chunk.type === 'token' && chunk.content) appendToken(chunk.content)
-          else if (chunk.type === 'tool_event' && chunk.toolEvent) {
-            // TASK-OPENCODE-030: Track tool events for progress display.
+          else if (chunk.type === 'thinking' && chunk.thinking) {
+            // TASK-OPENCODE-050: step_start → thinking stage.
             set((state) => ({
               chats: state.chats.map((c) =>
                 c.id === activeChatId
@@ -594,7 +637,67 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                           ? {
                               ...m,
                               executionState: 'progress',
-                              toolEvents: [...(m.toolEvents ?? []), chunk.toolEvent!],
+                              lifecycle: appendOrUpdateStage(m.lifecycle, 'thinking', 'Memproses permintaan…', 'running'),
+                            }
+                          : m
+                      ),
+                    }
+                  : c
+              ),
+            }))
+          } else if (chunk.type === 'continuation' && chunk.continuation) {
+            // TASK-OPENCODE-050: Auto-continuation lifecycle.
+            const { attempt, sessionId } = chunk.continuation
+            set((state) => ({
+              chats: state.chats.map((c) =>
+                c.id === activeChatId
+                  ? {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === assistantId
+                          ? {
+                              ...m,
+                              executionState: 'progress',
+                              continuations: (m.continuations ?? 0) + 1,
+                              lifecycle: pushStage(
+                                m.lifecycle,
+                                'continuation',
+                                'Melanjutkan pekerjaan',
+                                'running',
+                                sessionId ? `attempt ${attempt} · ${sessionId}` : `attempt ${attempt}`
+                              ),
+                            }
+                          : m
+                      ),
+                    }
+                  : c
+              ),
+            }))
+            get().pushLog('info', `[lifecycle] continuation attempt=${attempt}`)
+          } else if (chunk.type === 'tool_event' && chunk.toolEvent) {
+            // TASK-OPENCODE-030: Track tool events for progress display.
+            // TASK-OPENCODE-050: also update lifecycle + derive Todo plan from
+            // todowrite tool input.
+            const te = chunk.toolEvent
+            set((state) => ({
+              chats: state.chats.map((c) =>
+                c.id === activeChatId
+                  ? {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === assistantId
+                          ? {
+                              ...m,
+                              executionState: 'progress',
+                              toolEvents: [...(m.toolEvents ?? []), te],
+                              lifecycle: appendOrUpdateStage(
+                                m.lifecycle,
+                                'tool',
+                                te.label,
+                                te.status === 'error' ? 'error' : te.status === 'completed' ? 'completed' : 'running',
+                                te.detail
+                              ),
+                              plan: te.todos ? [...te.todos] : m.plan,
                             }
                           : m
                       ),
@@ -712,6 +815,13 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                             tokens: nativeTokens?.total ?? estimateTokens(m.content),
                             usage: nativeTokens,
                             cost: chunk.cost,
+                            lifecycle: pushStage(
+                              m.lifecycle,
+                              execState === 'completed' ? 'completed' : 'failed',
+                              execState === 'completed' ? 'Selesai' : 'Eksekusi tidak selesai',
+                              execState === 'completed' ? 'completed' : 'error',
+                              execState === 'completed' ? undefined : 'agent stopped without a final answer'
+                            ),
                           }
                         }),
                         usage,
@@ -769,6 +879,10 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                             status: m.status === 'done' ? 'done' : 'error',
                             executionState: m.status === 'done' ? m.executionState : 'error',
                             content: m.status === 'done' ? m.content : (m.content || chunk.error || 'Error'),
+                            lifecycle:
+                              m.status === 'done'
+                                ? m.lifecycle
+                                : pushStage(m.lifecycle, 'failed', chunk.error || 'Eksekusi gagal', 'error'),
                           }
                         }
                         if (m.role === 'user' && chunk.referenceErrors?.length) {
@@ -826,7 +940,15 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
           ? {
               ...c,
               messages: c.messages.map((m) =>
-                m.status === 'streaming' ? { ...m, status: 'cancelled' } : m
+                m.status === 'streaming'
+                  ? {
+                      ...m,
+                      status: 'cancelled',
+                      // TASK-OPENCODE-050: Cancelled is a first-class lifecycle state.
+                      executionState: 'cancelled',
+                      lifecycle: pushStage(m.lifecycle, 'interrupted', 'Eksekusi dihentikan', 'error'),
+                    }
+                  : m
               ),
             }
           : c

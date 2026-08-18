@@ -165,20 +165,24 @@ function LiveProgress({ toolEvents, plan, lifecycle }: { toolEvents: ToolEvent[]
   const active = toolEvents.find((e) => e.status === 'running')
   const lastEvent = toolEvents[toolEvents.length - 1]
 
-  // TASK-OPENCODE-050: current stage label — from the lifecycle (thinking/
-  // continuation) or the most recent tool, or a default while streaming.
+  // TASK-OPENCODE-050-SCR: Separate lifecycle detail from persistent status.
+  //
+  // Lifecycle detail (WHAT the agent is doing) — stage-specific, from the
+  // actual lifecycle/tool events: completed tools with ✓, current action with ●.
+  // The current action prefers a genuinely running tool/continuation; falls back
+  // to the last tool label; only shows the thinking stage when nothing else ran.
   const runningStage = [...(lifecycle ?? [])].reverse().find((s) => s.status === 'running')
-  let stageLabel = 'Working…'
-  if (runningStage?.kind === 'thinking') stageLabel = 'Memproses permintaan…'
-  else if (runningStage?.kind === 'continuation') stageLabel = 'Melanjutkan pekerjaan…'
-  else if (active?.label) stageLabel = active.label
-  else if (lastEvent?.label && lastEvent.status === 'completed') stageLabel = `${lastEvent.label}…`
-  else if (lastEvent?.label) stageLabel = lastEvent.label
+  let currentAction: string
+  if (active?.label) currentAction = active.label
+  else if (runningStage?.kind === 'continuation') currentAction = 'Melanjutkan pekerjaan…'
+  else if (lastEvent?.label) currentAction = lastEvent.status === 'completed' ? `${lastEvent.label}…` : lastEvent.label
+  else if (runningStage?.kind === 'thinking') currentAction = 'Memproses permintaan…'
+  else currentAction = 'Working…'
 
   return (
     <div className='mt-2 space-y-1.5 text-sm text-muted-foreground'>
       <TodoPlan plan={plan} />
-      {/* Tool summary: last few completed/failed tools */}
+      {/* Lifecycle detail: last few completed/failed tools */}
       {[...completed.slice(-3), ...failed.slice(-2)].map((e) => (
         <div key={e.id} className='flex items-center gap-2'>
           {e.status === 'error' ? (
@@ -189,14 +193,20 @@ function LiveProgress({ toolEvents, plan, lifecycle }: { toolEvents: ToolEvent[]
           <span className='truncate'>{e.label}</span>
         </div>
       ))}
-      {/* Active working line — ALWAYS shown while streaming (TASK-OPENCODE-050) */}
+      {/* Lifecycle detail: current lifecycle action (stage-specific) */}
+      <div className='flex items-center gap-2'>
+        <span className='size-3.5 shrink-0 text-primary'>●</span>
+        <span className='truncate'>{currentAction}</span>
+      </div>
+      {/* Persistent status — state-based, neutral (TASK-OPENCODE-050-SCR).
+          Always shown while streaming; does NOT claim a specific stage. */}
       <div className='flex items-center gap-2'>
         <span className='flex shrink-0 gap-0.5'>
           <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]' />
           <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]' />
           <span className='inline-block size-1.5 animate-bounce rounded-full bg-current' />
         </span>
-        <span className='truncate'>{stageLabel}</span>
+        <span className='truncate'>Sedang bekerja...</span>
       </div>
     </div>
   )
@@ -204,16 +214,14 @@ function LiveProgress({ toolEvents, plan, lifecycle }: { toolEvents: ToolEvent[]
 
 // ---------------------------------------------------------------------------
 // TASK-OPENCODE-030: Progress indicator (fallback before any tool event)
+// TASK-OPENCODE-050-SCR: persistent status is state-based (neutral wording).
 // ---------------------------------------------------------------------------
 
 function ProgressIndicator({ toolEvents, lifecycle }: { toolEvents?: ToolEvent[]; lifecycle?: LifecycleStage[] }) {
-  const lastEvent = toolEvents?.[toolEvents.length - 1]
-  const runningStage = [...(lifecycle ?? [])].reverse().find((s) => s.status === 'running')
-  const label =
-    runningStage?.kind === 'continuation' ? 'Melanjutkan pekerjaan…'
-    : runningStage?.kind === 'thinking' ? 'Memproses permintaan…'
-    : lastEvent?.label ?? 'Working…'
-
+  // TASK-OPENCODE-050-SCR: the persistent running state must answer only
+  // "is the agent still working?" — it must NOT claim a specific stage.
+  void toolEvents
+  void lifecycle
   return (
     <div className='flex items-center gap-2 text-sm text-muted-foreground'>
       <span className='flex gap-1'>
@@ -221,7 +229,7 @@ function ProgressIndicator({ toolEvents, lifecycle }: { toolEvents?: ToolEvent[]
         <span className='inline-block size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]' />
         <span className='inline-block size-1.5 animate-bounce rounded-full bg-current' />
       </span>
-      <span>{label}</span>
+      <span>Sedang bekerja...</span>
     </div>
   )
 }

@@ -4,7 +4,6 @@ import { Link } from '@tanstack/react-router'
 import { useOpenCodeStore } from '../store/opencode-store'
 import { ModelSelector } from './model-selector'
 import { UsageIndicator } from './usage-indicator'
-import { markModelUsed } from '../model-preferences'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -41,17 +40,26 @@ export function OpenCodeToolbar() {
     models,
     modes,
     workspaces,
+    chats,
+    activeChatId,
     updateSettings,
     selectWorkspace,
     loadModels,
     modelsLoaded,
     newChat,
+    setActiveChatModel,
   } = useOpenCodeStore()
+
+  // TASK-OPENCODE-053: The toolbar model selector is session-scoped. The active
+  // chat's own model wins; otherwise the configured/default model is shown.
+  // Selecting a model mutates only the active chat — never settings.defaultModel.
+  const activeChat = chats.find((c) => c.id === activeChatId) ?? null
+  const effectiveModelId = activeChat?.model ?? settings.defaultModel
 
   // TASK-OPENCODE-023: Derive available variants for the selected model.
   const selectedModel = useMemo(
-    () => models.find((m) => m.id === settings.defaultModel),
-    [models, settings.defaultModel]
+    () => models.find((m) => m.id === effectiveModelId),
+    [models, effectiveModelId]
   )
   const variantNames = useMemo(() => {
     const v = selectedModel?.variants
@@ -118,12 +126,14 @@ export function OpenCodeToolbar() {
 
       <ModelSelector
         models={models}
-        value={settings.defaultModel}
+        value={effectiveModelId}
         disabled={!modelsLoaded}
         refreshing={!modelsLoaded}
         onSelect={(model) => {
-          updateSettings({ defaultModel: model.id, defaultVariant: '' })
-          markModelUsed(model.id)
+          // TASK-OPENCODE-053: Session-scoped model selection. Does NOT change
+          // the configured/default model; a New Chat still starts with the default.
+          setActiveChatModel(model.id)
+          updateSettings({ defaultVariant: '' })
         }}
         onRefresh={() => void loadModels()}
       />

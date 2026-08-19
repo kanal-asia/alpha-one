@@ -271,6 +271,9 @@ export interface Chat {
   title: string
   messages: ChatMessage[]
   sessionId?: string
+  /** TASK-OPENCODE-053: Per-session model override.
+   *  undefined = fall back to the configured/default model (settings.defaultModel). */
+  model?: string
   /** Project context stamped when the chat is created/sent. */
   project?: ChatProjectContext
   createdAt: string

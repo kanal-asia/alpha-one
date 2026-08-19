@@ -3,6 +3,7 @@ import {
   type Chat,
   type ChatContext,
   type ChatMessage,
+  type ChatProjectContext,
   type ChatUsage,
   type CompactResult,
   type ConnectionStatus,
@@ -26,7 +27,6 @@ import {
   sanitizeReference,
   type ReferenceAttachment,
 } from '@/features/ai/references/contract'
-import { useProjectStore } from '@/features/ai-assistant/store/project-store'
 import { registerResourceLocally } from '@/features/resources/registration'
 import { useResourceStore } from '@/features/resources/resource-store'
 import { KEYS, migrateAllKeys } from '@/lib/storage-keys'
@@ -216,6 +216,10 @@ interface OpenCodeStore {
   archiveChat: (id: string, archived: boolean) => void
   deleteChat: (id: string) => void
   clearLocalCache: () => void
+  // TASK-OPENCODE-053: Per-session model/project assignment. These mutate only
+  // the active chat — they never touch the workspace-global configured default.
+  setActiveChatModel: (modelId: string) => void
+  setActiveChatProject: (project: ChatProjectContext | undefined) => void
   sendMessage: (prompt: string, references?: ReferenceAttachment[]) => Promise<void>
   stopGeneration: () => void
   retryLast: () => Promise<void>
@@ -240,26 +244,16 @@ function logEntry(
   }
 }
 
-function activeProjectContext() {
-  const project = useProjectStore.getState().activeProject
-  if (!project) return undefined
-  return {
-    id: project.id,
-    name: project.name,
-    path:
-      project.contextType === 'local'
-        ? project.contextPath
-        : project.contextLabel,
-  }
-}
-
 function makeChat(firstPrompt?: string): Chat {
   const now = new Date().toISOString()
   return {
     id: newId('chat'),
     title: firstPrompt ? firstPrompt.slice(0, 40) : 'New Chat',
     messages: [],
-    project: activeProjectContext(),
+    // TASK-OPENCODE-053: New Chat starts project-empty. The previous session's
+    // (or the workspace-global active) project must not be inherited; the user
+    // picks a project explicitly via the Recent Projects fast track.
+    project: undefined,
     createdAt: now,
     updatedAt: now,
   }
@@ -457,10 +451,35 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
       activeChatId: chat.id,
       isStreaming: false,
     }))
+    // TASK-OPENCODE-053: Persist the freshly created session (consistent with
+    // every other chat mutation) so a new chat survives a reload.
+    saveChats(get().chats)
     get().pushRuntimeEvent(`New chat created: ${chat.id}`)
   },
 
   selectChat: (id) => set({ activeChatId: id, isStreaming: false }),
+
+  setActiveChatModel: (modelId) => {
+    const id = get().activeChatId
+    if (!id) return
+    set((state) => ({
+      chats: state.chats.map((c) =>
+        c.id === id ? { ...c, model: modelId, updatedAt: new Date().toISOString() } : c
+      ),
+    }))
+    saveChats(get().chats)
+  },
+
+  setActiveChatProject: (project) => {
+    const id = get().activeChatId
+    if (!id) return
+    set((state) => ({
+      chats: state.chats.map((c) =>
+        c.id === id ? { ...c, project, updatedAt: new Date().toISOString() } : c
+      ),
+    }))
+    saveChats(get().chats)
+  },
 
   renameChat: (id, title) => {
     set((state) => ({
@@ -522,7 +541,10 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
           ? {
               ...c,
               title: c.messages.length === 0 ? prompt.slice(0, 40) : c.title,
-              project: c.project ?? activeProjectContext(),
+              // TASK-OPENCODE-053: Preserve the chat's own project only. Do not
+              // auto-attach the workspace-global active project — an untouched
+              // New Chat must stay project-empty until the user picks a project.
+              project: c.project,
               messages: [
                 ...c.messages,
                 {
@@ -540,6 +562,11 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
       set({ chats: updated })
     }
 
+    const activeChat = get().chats.find((c) => c.id === activeChatId)
+    // TASK-OPENCODE-053: Per-session model. The chat's own model wins; otherwise
+    // fall back to the configured/default model (never the previous session's).
+    const effectiveModel = activeChat?.model ?? get().settings.defaultModel
+
     const assistantId = newId('msg')
     const assistantMsg: ChatMessage = {
       id: assistantId,
@@ -547,7 +574,7 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
       content: '',
       createdAt: new Date().toISOString(),
       status: 'streaming',
-      model: get().settings.defaultModel,
+      model: effectiveModel,
       mode: get().settings.defaultMode,
       executionState: 'working',
       toolEvents: [],
@@ -569,12 +596,11 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     // TASK-AI-033: Use the real CLI session ID stored on the chat, not the
     // global session object. The global session.id is a client-generated fake.
     // The chat.sessionId is the real ID extracted from CLI output events.
-    const activeChat = get().chats.find((c) => c.id === activeChatId)
     const realSessionId = activeChat?.sessionId ?? ''
 
     // Runtime Contract (TASK-AI-031): resolve the canonical RuntimeModel and
     // pass it to the transport. The transport extracts `.id` — nothing else.
-    const selectedModel = resolveRuntimeModel(get().models, get().settings.defaultModel)
+    const selectedModel = resolveRuntimeModel(get().models, effectiveModel)
     get().pushLog(
       'info',
       `[runtime-trace] selected model: ${JSON.stringify({

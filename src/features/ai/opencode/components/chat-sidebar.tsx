@@ -12,7 +12,6 @@ import {
 import { type Chat } from '../types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import {
   DropdownMenu,
@@ -102,19 +101,22 @@ export function ChatSidebar({
           </button>
         </div>
       </div>
-      <ScrollArea className='min-h-0 flex-1 px-2'>
+      {/* TASK-OPENCODE-053: Plain scroll container (not Radix ScrollArea) so the
+          list is width-constrained to the sidebar. Radix's viewport let the ul
+          escape to its max-content width, clipping the pinned action buttons. */}
+      <div className='min-h-0 flex-1 overflow-y-auto px-2'>
         {filtered.length === 0 ? (
           <div className='flex flex-col items-center gap-2 px-3 py-10 text-center text-xs text-muted-foreground'>
             <MessagesSquare className='size-5' />
             {tab === 'active' ? 'No active conversations.' : 'No archived conversations.'}
           </div>
         ) : (
-          <ul className='space-y-1 pb-3'>
+          <ul className='w-full min-w-0 space-y-1 pb-3'>
             {filtered.map((chat) => (
               <li key={chat.id}>
                 <div
                   className={cn(
-                    'group flex items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors',
+                    'flex items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors',
                     chat.id === activeChatId
                       ? 'bg-muted font-medium'
                       : 'hover:bg-accent'
@@ -141,7 +143,10 @@ export function ChatSidebar({
                       <Button
                         variant='ghost'
                         size='icon'
-                        className='size-6 opacity-0 group-hover:opacity-100'
+                        // TASK-OPENCODE-053: Actions are pinned and always
+                        // visible (shrink-0) — never dependent on title length
+                        // or sidebar width. Title truncates instead.
+                        className='size-6 shrink-0 text-muted-foreground hover:text-foreground'
                         aria-label='Chat options'
                       >
                         <MoreVertical className='size-3.5' />
@@ -186,7 +191,7 @@ export function ChatSidebar({
             ))}
           </ul>
         )}
-      </ScrollArea>
+      </div>
 
       <AlertDialog open={deleteTargetId !== null} onOpenChange={(o) => !o && setDeleteTargetId(null)}>
         <AlertDialogContent>

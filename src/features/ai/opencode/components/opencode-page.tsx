@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { MessagesSquare, Terminal } from 'lucide-react'
 import { useDeveloperMode } from '@/context/developer-mode-provider'
 import { useOpenCodeStore } from '../store/opencode-store'
+import { useProjectStore, type Project } from '@/features/ai-assistant/store/project-store'
 import { OpenCodeToolbar } from './opencode-toolbar'
 import { ChatSidebar } from './chat-sidebar'
 import { ChatMessageView } from './chat-message'
@@ -41,6 +42,7 @@ export function OpenCodeDashboard() {
     retryLast,
     editAndResend,
     continueGeneration,
+    setActiveChatProject,
   } = store
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null
@@ -48,7 +50,19 @@ export function OpenCodeDashboard() {
     () => activeChat?.messages ?? [],
     [activeChat?.messages]
   )
-  const activeModel = models.find((m) => m.id === settings.defaultModel)
+  // TASK-OPENCODE-053: Status reflects the session's effective model.
+  const activeModel = models.find(
+    (m) => m.id === (activeChat?.model ?? settings.defaultModel)
+  )
+  // TASK-OPENCODE-053: Recent Projects fast track — existing project data only.
+  const { projects: allProjects } = useProjectStore()
+  const recentProjects = useMemo(
+    () =>
+      [...allProjects]
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, 5),
+    [allProjects]
+  )
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -68,7 +82,7 @@ export function OpenCodeDashboard() {
       <div data-layout='fixed' className='flex min-h-0 flex-1 flex-col overflow-hidden'>
         <div className='flex min-h-0 flex-1 overflow-hidden'>
         {/* Chat history sidebar */}
-        <aside className='hidden w-64 shrink-0 overflow-hidden border-e md:block'>
+        <aside className='hidden w-72 shrink-0 overflow-hidden border-e md:block'>
           <ChatSidebar
             chats={chats}
             activeChatId={activeChatId}
@@ -121,7 +135,17 @@ export function OpenCodeDashboard() {
           <ScrollArea ref={scrollRef} className='min-h-0 flex-1 px-4'>
             <div className='mx-auto max-w-3xl space-y-5 py-4'>
               {messages.length === 0 ? (
-                <EmptyState onPick={(t) => void sendMessage(t)} />
+                <EmptyState
+                  recentProjects={recentProjects}
+                  onPick={(t) => void sendMessage(t)}
+                  onPickProject={(p) =>
+                    setActiveChatProject({
+                      id: p.id,
+                      name: p.name,
+                      path: p.contextType === 'local' ? p.contextPath : p.contextLabel,
+                    })
+                  }
+                />
               ) : (
                 messages.map((m, i) => (
                   <ChatMessageView
@@ -163,7 +187,15 @@ const SUGGESTIONS = [
   'Summarize the OpenCode provider integration',
 ]
 
-function EmptyState({ onPick }: { onPick: (t: string) => void }) {
+function EmptyState({
+  recentProjects,
+  onPick,
+  onPickProject,
+}: {
+  recentProjects: Project[]
+  onPick: (t: string) => void
+  onPickProject: (p: Project) => void
+}) {
   return (
     <div className='flex flex-col items-center justify-center gap-4 py-16 text-center'>
       <div className='flex size-12 items-center justify-center rounded-2xl bg-muted'>
@@ -175,6 +207,33 @@ function EmptyState({ onPick }: { onPick: (t: string) => void }) {
           Start a conversation or pick a suggestion below.
         </p>
       </div>
+      {/* TASK-OPENCODE-053: Recent Projects fast track — project starts empty, the
+          user explicitly picks one to attach to this new session. */}
+      {recentProjects.length > 0 && (
+        <div className='w-full max-w-md space-y-1.5 text-start'>
+          <p className='text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+            Recent Projects
+          </p>
+          {recentProjects.map((p) => (
+            <button
+              key={p.id}
+              type='button'
+              onClick={() => onPickProject(p)}
+              className='flex w-full items-center gap-2 rounded-xl border bg-card px-4 py-2.5 text-start text-sm transition-colors hover:bg-accent'
+            >
+              <span className='min-w-0 flex-1'>
+                <span className='block truncate font-medium'>{p.name}</span>
+                <span className='block truncate text-xs text-muted-foreground'>
+                  {p.contextType === 'local' ? p.contextPath : p.contextLabel}
+                </span>
+              </span>
+              <span className='shrink-0 text-xs text-muted-foreground'>
+                Use project
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
       <div className='grid w-full max-w-md gap-2'>
         {SUGGESTIONS.map((s) => (
           <button

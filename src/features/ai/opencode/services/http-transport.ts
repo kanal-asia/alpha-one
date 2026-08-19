@@ -1,4 +1,5 @@
 import {
+  type ChatProjectContext,
   type CompactResult,
   type ModeInfo,
   type ModelInfo,
@@ -43,7 +44,9 @@ export interface OpenCodeTransport {
     signal?: AbortSignal,
     model?: RuntimeModel,
     references?: ReferenceAttachment[],
-    agent?: string
+    agent?: string,
+    variant?: string,
+    project?: ChatProjectContext
   ): Promise<void>
   listProviders(): Promise<ProviderSummary[]>
   connectProvider(providerId: string): Promise<OpenCodeAuthResult>
@@ -433,7 +436,8 @@ export class HTTPTransport implements OpenCodeTransport {
     model?: RuntimeModel,
     references?: ReferenceAttachment[],
     agent?: string,
-    variant?: string
+    variant?: string,
+    project?: ChatProjectContext
   ): Promise<void> {
     const modelId = model?.id ?? ''
     // TASK-AI-033: Only pass session ID to server if it looks like a real CLI session ID.
@@ -459,6 +463,12 @@ export class HTTPTransport implements OpenCodeTransport {
         references: refs,
         agent: agent ?? undefined,
         variant: variant || undefined,
+        // TASK-OPENCODE-055: Project execution context (path + type). The server
+        // turns a valid local path into the CLI execution root (cwd) and a Drive
+        // folder ID into a Drive execution boundary — never `settings.workspacePath`.
+        project: project
+          ? { type: project.type, path: project.path, name: project.name, label: project.label }
+          : undefined,
       }),
       signal,
     })

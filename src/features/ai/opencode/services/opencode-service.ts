@@ -1,4 +1,5 @@
 import {
+  type ChatProjectContext,
   type CompactResult,
   type ExecutionLogEntry,
   type ModeInfo,
@@ -92,9 +93,10 @@ export class OpenCodeService {
     model?: RuntimeModel,
     references?: ReferenceAttachment[],
     agent?: string,
-    variant?: string
+    variant?: string,
+    project?: ChatProjectContext
   ) {
-    return this.transport.sendPrompt(sessionId, prompt, onChunk, signal, model, references, agent, variant)
+    return this.transport.sendPrompt(sessionId, prompt, onChunk, signal, model, references, agent, variant, project)
   }
 
   async fetchStats(days?: number): Promise<UsageStats | null> {

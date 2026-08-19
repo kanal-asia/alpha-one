@@ -927,7 +927,12 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
         selectedModel,
         references,
         get().settings.defaultMode,
-        get().settings.defaultVariant || undefined
+        get().settings.defaultVariant || undefined,
+        // TASK-OPENCODE-055: The chat's own Project execution context. New Chat is
+        // project-empty (undefined → server uses its runtime workspace, no
+        // settings.workspacePath fallback). A valid Local Project Path becomes the
+        // CLI execution root; a Google Drive folder ID becomes the Drive boundary.
+        activeChat?.project
       )
     }
 

@@ -11,6 +11,8 @@ import {
 } from "./client";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { resolve as resolvePath, isAbsolute } from "node:path";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { RuntimeManager, detectWorkspace } from "./runtime";
 import { openCodeRuntimeProvider, toRuntimeModelAdapter } from "./runtime-model";
 import {
@@ -71,6 +73,77 @@ interface ChatRequestBody {
   agent?: string;
   /** TASK-OPENCODE-023: Model variant (reasoning effort) — passed to --variant. */
   variant?: string;
+  /** TASK-OPENCODE-055: Project execution context from the chat/session.
+   *  type=local → path is an absolute folder that becomes the CLI execution root.
+   *  type=google-drive → path is a Drive folder ID that becomes a Drive boundary
+   *  (never passed as a local cwd). */
+  project?: ProjectExecutionContext;
+}
+
+interface ProjectExecutionContext {
+  type?: "local" | "google-drive";
+  path?: string;
+  name?: string;
+  label?: string;
+}
+
+/**
+ * TASK-OPENCODE-055: Validate a user-supplied Local Project Path before it can
+ * become the agent execution root. The path must be absolute, must not contain
+ * NUL bytes or `..` traversal segments, must exist, must resolve (realpath,
+ * symlinks included) to an existing directory. The realpath result is returned
+ * so the caller executes against the canonical path, never a raw client string.
+ */
+function resolveValidLocalProjectPath(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const supplied = raw.trim();
+  if (supplied.includes("\0")) return null;
+  if (supplied.split(/[\\/]+/).includes("..")) return null;
+  if (!isAbsolute(supplied)) return null;
+  let real: string;
+  try {
+    real = realpathSync(supplied);
+  } catch {
+    return null;
+  }
+  if (!existsSync(real)) return null;
+  try {
+    if (!statSync(real).isDirectory()) return null;
+  } catch {
+    return null;
+  }
+  return resolvePath(real);
+}
+
+/** TASK-OPENCODE-055: Human-readable boundary hint injected into the agent
+ *  prompt. Local → absolute root; Google Drive → folder ID, never a cwd. */
+function buildProjectContextBlock(project: ProjectExecutionContext): string | null {
+  const name = project.name?.trim() ?? "selected project";
+  if (project.type === "google-drive" && project.path) {
+    return [
+      `[Project Execution Context — Google Drive]`,
+      `This conversation is scoped to Project "${name}".`,
+      `Google Drive folder ID: ${project.path}`,
+      project.label ? `Folder: ${project.label}` : null,
+      ``,
+      `All Google Drive operations must stay inside this folder.`,
+      `When using Drive references, the fileId belongs to this project folder.`,
+      `When using Google Sheets MCP tools, pass fileId="${project.path}"-scoped files (fileId IS the spreadsheetId for Drive files).`,
+      `Do NOT operate on files, folders, or Drive locations outside this Project folder.`,
+    ].filter(Boolean).join("\n");
+  }
+  if (project.type === "local" && project.path) {
+    const real = resolveValidLocalProjectPath(project.path);
+    return [
+      `[Project Execution Context — Local Folder]`,
+      `This conversation is scoped to Project "${name}".`,
+      `Project root: ${real ?? project.path}`,
+      ``,
+      `Read, create, modify, and execute commands ONLY within this project root.`,
+      `Do NOT access files or directories outside this project root (e.g. user home, other projects, or the application directory).`,
+    ].filter(Boolean).join("\n");
+  }
+  return null;
 }
 
 /**
@@ -110,7 +183,8 @@ function trace(
  */
 async function resolveRequestReferences(
   req: Request,
-  res: Response
+  res: Response,
+  allowedRoots: string[]
 ): Promise<string[] | null> {
   const body = req.body as ChatRequestBody;
   const references: ReferenceAttachment[] = Array.isArray(body.references)
@@ -118,7 +192,7 @@ async function resolveRequestReferences(
     : [];
 
   const { resolved, errors } = await resolveReferences(references, {
-    allowedRoots: [process.cwd()],
+    allowedRoots,
     userId: "local-user",
   });
 
@@ -158,6 +232,9 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
       message,
       sessionId: body.sessionId ?? null,
       agent: isExecutionMode(body.agent) ? body.agent : null,
+      project: body.project
+        ? { type: body.project.type ?? null, name: body.project.name ?? null, hasPath: Boolean(body.project.path) }
+        : null,
       references: (Array.isArray(body.references) ? body.references : [])
         .filter(isReferenceAttachment)
         .map((r) => ({
@@ -169,8 +246,28 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
     },
   });
 
+  // TASK-OPENCODE-055: Project execution context. A valid Local Project Path
+  // becomes the agent execution root (CLI cwd) and joins the reference
+  // allowed-roots. A Google Drive folder ID becomes a Drive boundary injected
+  // into the prompt — it is NEVER passed as a local cwd. An invalid/unreachable
+  // Local path fails the request explicitly (no silent fallback).
+  const project = body.project && body.project.type && body.project.path
+    ? body.project
+    : undefined;
+  let projectCwd: string | null = null;
+  if (project?.type === "local") {
+    projectCwd = resolveValidLocalProjectPath(project.path);
+    if (!projectCwd) {
+      return res.status(400).json({
+        error: `Project path is invalid, missing, or inaccessible: ${project.path}`,
+        projectError: "PROJECT_PATH_UNAVAILABLE",
+      });
+    }
+  }
+  const allowedRoots = projectCwd ? [projectCwd, process.cwd()] : [process.cwd()];
+
   // TASK-AIASSISTANT-005: references are resolved server-side on demand.
-  const files = await resolveRequestReferences(req, res);
+  const files = await resolveRequestReferences(req, res, allowedRoots);
   if (files === null) return;
 
   // TASK-OPENCODE-040/041/042: Include Google Drive reference metadata in the message
@@ -204,6 +301,15 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
       return `[Attached Reference: "${r.name}" — Google Drive File ID: ${r.fileId}, MIME type: ${r.mimeType ?? 'unknown'}]`;
     }).join('\n\n');
     enhancedMessage = `${refContext}\n\n${message}`;
+  }
+
+  // TASK-OPENCODE-055: Prepends the Project execution boundary so the agent
+  // always knows the project root / Drive folder it must operate within.
+  if (project) {
+    const projectBlock = buildProjectContextBlock(project);
+    if (projectBlock) {
+      enhancedMessage = `${projectBlock}\n\n${enhancedMessage}`;
+    }
   }
 
   const resolved = resolveOpenCode();
@@ -250,10 +356,14 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
       windowsHide: true,
       shell: false,
       detached: false,
+      // TASK-OPENCODE-055: When a Local Project Path is selected, the CLI runs
+      // with that folder as its working directory. No project → server cwd
+      // (existing behavior). settings.workspacePath is never used here.
+      cwd: projectCwd ?? undefined,
       env: { ...process.env, OPENCODE_NO_TUI: "1", CI: "1", NO_COLOR: "1" },
     });
     activeChild = child;
-    if (process.env.NODE_ENV !== "test") console.log('[API] PROCESS SPAWNED', { pid: child.pid });
+    if (process.env.NODE_ENV !== "test") console.log('[API] PROCESS SPAWNED', { pid: child.pid, cwd: projectCwd ?? process.cwd() });
   } catch (err) {
     runtimeManager.setBusy(false);
     sendEvent("error", { message: err instanceof Error ? err.message : "Failed to spawn OpenCode" });
@@ -457,6 +567,8 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
         windowsHide: true,
         shell: false,
         detached: false,
+        // TASK-OPENCODE-055: Continuation keeps the same project execution root.
+        cwd: projectCwd ?? undefined,
         env: { ...process.env, OPENCODE_NO_TUI: "1", CI: "1", NO_COLOR: "1" },
       });
       activeChild = continueChild;

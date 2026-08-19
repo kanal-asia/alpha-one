@@ -2,6 +2,9 @@ import { useEffect, useMemo } from 'react'
 import { FolderOpen, Plus, Settings2 } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import { useOpenCodeStore } from '../store/opencode-store'
+import type { ChatProjectContext } from '../types'
+import { ProjectSelector } from '@/features/ai-assistant/components/project-selector'
+import type { Project } from '@/features/ai-assistant/store/project-store'
 import { ModelSelector } from './model-selector'
 import { UsageIndicator } from './usage-indicator'
 import { Button } from '@/components/ui/button'
@@ -34,6 +37,32 @@ function resolveDefaultVariant(
   return available[0] ?? ''
 }
 
+/** TASK-OPENCODE-055: ChatProjectContext → Project (for the controlled
+ *  ProjectSelector). Drive folder ID is preserved as `contextPath`. */
+function toProject(ctx: ChatProjectContext): Project | null {
+  if (!ctx?.id && !ctx?.name) return null
+  return {
+    id: ctx.id ?? `ctx-${Date.now()}`,
+    name: ctx.name ?? 'Project',
+    contextType: ctx.type ?? 'local',
+    contextPath: ctx.path ?? '',
+    contextLabel: ctx.label ?? ctx.path ?? '',
+    createdAt: '',
+  }
+}
+
+/** TASK-OPENCODE-055: Project → ChatProjectContext. Local keeps the absolute
+ *  path; Google Drive keeps the folder ID as the execution reference. */
+function toContext(p: Project): ChatProjectContext {
+  return {
+    id: p.id,
+    name: p.name,
+    path: p.contextPath,
+    label: p.contextType === 'local' ? p.contextPath : p.contextLabel,
+    type: p.contextType,
+  }
+}
+
 export function OpenCodeToolbar() {
   const {
     settings,
@@ -48,6 +77,7 @@ export function OpenCodeToolbar() {
     modelsLoaded,
     newChat,
     setActiveChatModel,
+    setActiveChatProject,
   } = useOpenCodeStore()
 
   // TASK-OPENCODE-053: The toolbar model selector is session-scoped. The active
@@ -57,10 +87,9 @@ export function OpenCodeToolbar() {
   const effectiveModelId = activeChat?.model ?? settings.defaultModel
 
   // TASK-OPENCODE-023: Derive available variants for the selected model.
-  const selectedModel = useMemo(
-    () => models.find((m) => m.id === effectiveModelId),
-    [models, effectiveModelId]
-  )
+  // (Computed directly — the React Compiler memoizes this; an explicit useMemo
+  // can no longer be preserved once `activeChat` is also read in the JSX.)
+  const selectedModel = models.find((m) => m.id === effectiveModelId)
   const variantNames = useMemo(() => {
     const v = selectedModel?.variants
     return v ? Object.keys(v).sort() : []
@@ -81,6 +110,15 @@ export function OpenCodeToolbar() {
 
   return (
     <div className='flex flex-wrap items-center gap-2 border-b px-4 py-2'>
+      {/* TASK-OPENCODE-055: Project Path selection — reuses the existing
+          ProjectSelector (Local Folder / Google Drive pickers). Bound to the
+          active session so Project Path is per-session execution context, not
+          app-global state. */}
+      <ProjectSelector
+        project={activeChat?.project ? toProject(activeChat.project) : null}
+        onProjectChange={(p) => setActiveChatProject(p ? toContext(p) : undefined)}
+      />
+
       <Popover>
         <PopoverTrigger asChild>
           <Button variant='outline' size='sm' className='gap-1.5'>

@@ -23,7 +23,15 @@ import { cn } from '@/lib/utils'
 
 const DRIVE_PICKER_MESSAGE_SOURCE = 'alpha-gdrive-picker'
 
-export function ProjectSelector() {
+export function ProjectSelector({
+  project,
+  onProjectChange,
+}: {
+  /** Optional controlled value (bound to a session's ChatProjectContext). */
+  project?: Project | null
+  /** Called on explicit select/create/clear when controlled. */
+  onProjectChange?: (p: Project | null) => void
+}) {
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
@@ -35,6 +43,12 @@ export function ProjectSelector() {
 
   const { projects, activeProject, createProject, setActiveProject, deleteProject } =
     useProjectStore()
+
+  // TASK-OPENCODE-055: Controlled mode keeps this component reusable. When a
+  // `project` value is supplied, selection targets that session's project
+  // context instead of the app-global active project (assistant page usage).
+  const controlled = project !== undefined
+  const displayProject = controlled ? project : activeProject
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -66,7 +80,11 @@ export function ProjectSelector() {
         newContextLabel.trim() ||
         (newContextType === 'local' ? newContextPath.trim() : 'Google Drive folder'),
     })
-    setActiveProject(project.id)
+    if (controlled) {
+      onProjectChange?.(project)
+    } else {
+      setActiveProject(project.id)
+    }
     setNewName('')
     setNewContextPath('')
     setNewContextLabel('')
@@ -75,8 +93,29 @@ export function ProjectSelector() {
   }
 
   const handleSelect = (id: string) => {
-    setActiveProject(id)
+    const selected = projects.find((p) => p.id === id) ?? null
+    if (controlled) {
+      onProjectChange?.(selected)
+    } else {
+      setActiveProject(id)
+    }
     setOpen(false)
+  }
+
+  const handleClear = () => {
+    if (controlled) {
+      onProjectChange?.(null)
+    } else {
+      setActiveProject(null)
+    }
+    setOpen(false)
+  }
+
+  const handleDelete = (id: string) => {
+    deleteProject(id)
+    if (controlled && displayProject?.id === id) {
+      onProjectChange?.(null)
+    }
   }
 
   return (
@@ -85,7 +124,7 @@ export function ProjectSelector() {
         <Button variant='outline' size='sm' className='gap-1.5'>
           <FolderOpen className='size-4' />
           <span className='max-w-[160px] truncate'>
-            {activeProject?.name ?? 'No project'}
+            {displayProject?.name ?? 'No project'}
           </span>
           <ChevronDown className='size-3.5 opacity-50' />
         </Button>
@@ -236,24 +275,21 @@ export function ProjectSelector() {
                     <ProjectRow
                       key={project.id}
                       project={project}
-                      isActive={project.id === activeProject?.id}
+                      isActive={project.id === displayProject?.id}
                       onSelect={() => handleSelect(project.id)}
-                      onDelete={() => deleteProject(project.id)}
+                      onDelete={() => handleDelete(project.id)}
                     />
                   ))}
                 </ul>
               )}
             </ScrollArea>
-            {activeProject && (
+            {displayProject && (
               <div className='border-t p-2'>
                 <Button
                   variant='ghost'
                   size='sm'
                   className='h-7 w-full justify-start gap-1.5 text-xs text-muted-foreground'
-                  onClick={() => {
-                    setActiveProject(null)
-                    setOpen(false)
-                  }}
+                  onClick={handleClear}
                 >
                   <X className='size-3.5' />
                   Clear project

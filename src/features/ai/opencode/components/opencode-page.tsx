@@ -142,7 +142,11 @@ export function OpenCodeDashboard() {
                     setActiveChatProject({
                       id: p.id,
                       name: p.name,
-                      path: p.contextType === 'local' ? p.contextPath : p.contextLabel,
+                      // TASK-OPENCODE-055: `contextPath` IS the execution
+                      // reference (local path OR Google Drive folder ID).
+                      path: p.contextPath,
+                      label: p.contextType === 'local' ? p.contextPath : p.contextLabel,
+                      type: p.contextType,
                     })
                   }
                 />

@@ -263,7 +263,12 @@ export interface ChatUsage {
 export interface ChatProjectContext {
   id?: string
   name?: string
+  /** Local filesystem path (type='local') OR Google Drive folder ID (type='google-drive'). */
   path?: string
+  /** Human-readable path label (Drive folder name/breadcrumb; local path). */
+  label?: string
+  /** Local folder or Google Drive folder. */
+  type?: 'local' | 'google-drive'
 }
 
 export interface Chat {

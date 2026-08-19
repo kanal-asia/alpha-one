@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react'
-import { FolderOpen, Plus, Settings2 } from 'lucide-react'
+import { Plus, Settings2 } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import { useOpenCodeStore } from '../store/opencode-store'
 import type { ChatProjectContext } from '../types'
@@ -8,8 +8,6 @@ import type { Project } from '@/features/ai-assistant/store/project-store'
 import { ModelSelector } from './model-selector'
 import { UsageIndicator } from './usage-indicator'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -17,11 +15,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
 
 /**
  * TASK-OPENCODE-023R1: Resolve a valid default variant from the available list.
@@ -68,11 +61,9 @@ export function OpenCodeToolbar() {
     settings,
     models,
     modes,
-    workspaces,
     chats,
     activeChatId,
     updateSettings,
-    selectWorkspace,
     loadModels,
     modelsLoaded,
     newChat,
@@ -118,49 +109,6 @@ export function OpenCodeToolbar() {
         project={activeChat?.project ? toProject(activeChat.project) : null}
         onProjectChange={(p) => setActiveChatProject(p ? toContext(p) : undefined)}
       />
-
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant='outline' size='sm' className='gap-1.5'>
-            <FolderOpen className='size-4' />
-            <span className='max-w-[160px] truncate'>
-              {settings.workspacePath.split('\\').pop() || settings.workspacePath}
-            </span>
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent align='start' className='w-80'>
-          <div className='space-y-2'>
-            <Label htmlFor='ws'>Workspace Path</Label>
-            <Input
-              id='ws'
-              value={settings.workspacePath}
-              readOnly
-              className='text-muted-foreground'
-            />
-            <p className='text-xs text-muted-foreground'>
-              Runtime-detected. Cannot be overridden manually.
-            </p>
-            {workspaces.length > 0 && (
-              <ul className='space-y-1'>
-                {workspaces.map((ws) => (
-                  <li key={ws.path}>
-                    <button
-                      type='button'
-                      onClick={() => selectWorkspace(ws.path)}
-                      className='w-full rounded-md px-2 py-1.5 text-start text-sm hover:bg-accent'
-                    >
-                      <span className='font-medium'>{ws.name}</span>
-                      <span className='block truncate text-xs text-muted-foreground'>
-                        {ws.path}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </PopoverContent>
-      </Popover>
 
       <ModelSelector
         models={models}

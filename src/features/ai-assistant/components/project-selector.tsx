@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, Cloud, FolderOpen, FolderPlus, Trash2, X } from 'lucide-react'
 import { useProjectStore, type Project, type ProjectContextType } from '../store/project-store'
 import { LocalFolderPicker } from './local-folder-picker'
@@ -49,6 +49,18 @@ export function ProjectSelector({
   // context instead of the app-global active project (assistant page usage).
   const controlled = project !== undefined
   const displayProject = controlled ? project : activeProject
+
+  // TASK-OPENCODE-056-SCR1: Recent Projects fast-track inside the dropdown —
+  // existing project data only, same recency rule as the OpenCode page empty
+  // state (most-recent 5). No new persistence; the rest stay under All Projects.
+  const recentProjects = useMemo(
+    () => [...projects].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5),
+    [projects]
+  )
+  const otherProjects = useMemo(
+    () => [...projects].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(5),
+    [projects]
+  )
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -271,7 +283,14 @@ export function ProjectSelector({
                 </div>
               ) : (
                 <ul className='p-1'>
-                  {projects.map((project) => (
+                  {/* TASK-OPENCODE-056-SCR1: Recent Projects as a fast-track,
+                      selectable exactly like any other project row. */}
+                  {recentProjects.length > 0 && (
+                    <li className='px-2 pb-1 pt-1.5 text-xs font-medium text-muted-foreground'>
+                      Recent Projects
+                    </li>
+                  )}
+                  {recentProjects.map((project) => (
                     <ProjectRow
                       key={project.id}
                       project={project}
@@ -280,6 +299,22 @@ export function ProjectSelector({
                       onDelete={() => handleDelete(project.id)}
                     />
                   ))}
+                  {otherProjects.length > 0 && (
+                    <>
+                      <li className='mt-1 border-t px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground'>
+                        All Projects
+                      </li>
+                      {otherProjects.map((project) => (
+                        <ProjectRow
+                          key={project.id}
+                          project={project}
+                          isActive={project.id === displayProject?.id}
+                          onSelect={() => handleSelect(project.id)}
+                          onDelete={() => handleDelete(project.id)}
+                        />
+                      ))}
+                    </>
+                  )}
                 </ul>
               )}
             </ScrollArea>

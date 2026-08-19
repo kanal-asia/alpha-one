@@ -436,10 +436,6 @@ export function ChatMessageView({
           {!isStreaming && isTerminal && !message.content && message.executionState !== 'completed_no_text' && message.executionState !== 'error' && message.status !== 'cancelled' && (
             <p className='text-sm text-muted-foreground'>Empty response.</p>
           )}
-
-          {isStreaming && (
-            <span className='ms-1 inline-block h-3.5 w-1.5 animate-pulse bg-current align-middle' />
-          )}
         </div>
 
         {/* TASK-OPENCODE-033/050: Developer Mode diagnostics — live while streaming,

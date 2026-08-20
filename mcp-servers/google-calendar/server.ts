@@ -7,10 +7,11 @@
  *   mcp-servers/shared/google/mcp.ts   - MCP stdio JSON-RPC bootstrap
  *
  * Completes the Calendar MCP deferred during TASK-067, using the same local
- * credential model as the other custom Google MCPs. Read-only surface only:
- * calendar list, calendar metadata, and bounded event listing. No event
- * create/update/delete, no calendar mutation, no arbitrary REST passthrough,
- * no unbounded retrieval, no credential exposure.
+ * credential model as the other custom Google MCPs. Read surface: calendar
+ * list, calendar metadata, and bounded event listing. Constrained write
+ * surface (TASK-079): create/update/delete of single events on the user's
+ * primary calendar. No arbitrary REST passthrough, no unbounded retrieval,
+ * no credential exposure.
  */
 
 import { googleRequest, GoogleApiError } from '../shared/google/rest'
@@ -21,8 +22,10 @@ import { startMcpServer, type McpTool, type McpToolResult } from '../shared/goog
 // ---------------------------------------------------------------------------
 
 const MAX_CALENDAR_ID = 200
+const MAX_EVENT_ID = 500
 const MAX_PAGE_TOKEN = 2000
 const MAX_SUMMARY = 500
+const MAX_DESCRIPTION = 2000
 const MAX_TIME = 100
 const MAX_EVENTS = 250
 
@@ -42,6 +45,11 @@ function asString(v: unknown, label: string, maxLen: number, required = true): s
 
 function validateCalendarId(v: unknown, label = 'calendarId'): string {
   const id = asString(v, label, MAX_CALENDAR_ID)
+  return encodeURIComponent(id)
+}
+
+function validateEventId(v: unknown, label = 'eventId'): string {
+  const id = asString(v, label, MAX_EVENT_ID)
   return encodeURIComponent(id)
 }
 
@@ -229,6 +237,95 @@ async function listEvents(token: string, args: Record<string, unknown>): Promise
   })
 }
 
+async function createEvent(token: string, args: Record<string, unknown>): Promise<McpToolResult> {
+  const summary = asString(args.summary, 'summary', MAX_SUMMARY)
+  const start = asTimestamp(args.start, 'start')
+  const end = asTimestamp(args.end, 'end')
+  if (!start || !end) throw new Error('start and end are required.')
+  if (Date.parse(start) >= Date.parse(end)) {
+    throw new Error('start must be earlier than end.')
+  }
+  const description = asOptionalString(args.description, 'description', MAX_DESCRIPTION)
+  const calendarId = validateCalendarId(args.calendarId ?? 'primary')
+
+  const created = await googleRequest<{ id?: string; htmlLink?: string }>({
+    method: 'POST',
+    url: `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`,
+    body: {
+      summary,
+      ...(description !== undefined ? { description } : {}),
+      start: { dateTime: start },
+      end: { dateTime: end },
+    },
+    token,
+  })
+
+  return toTextResult({
+    eventId: created.id ?? null,
+    calendarId: (args.calendarId ?? 'primary') as string,
+    summary,
+    description: description ?? null,
+    start,
+    end,
+    htmlLink: created.htmlLink ?? null,
+    note: 'Verify persistence by reading the event back with calendar_list_events.',
+  })
+}
+
+async function updateEvent(token: string, args: Record<string, unknown>): Promise<McpToolResult> {
+  const calendarId = validateCalendarId(args.calendarId ?? 'primary')
+  const eventId = validateEventId(args.eventId)
+  const summary = asOptionalString(args.summary, 'summary', MAX_SUMMARY)
+  const description = asOptionalString(args.description, 'description', MAX_DESCRIPTION)
+  const start = asTimestamp(args.start, 'start')
+  const end = asTimestamp(args.end, 'end')
+  if (start && end && Date.parse(start) >= Date.parse(end)) {
+    throw new Error('start must be earlier than end.')
+  }
+
+  const body: Record<string, unknown> = {}
+  if (summary !== undefined) body.summary = summary
+  if (description !== undefined) body.description = description
+  if (start) body.start = { dateTime: start }
+  if (end) body.end = { dateTime: end }
+
+  const updated = await googleRequest<{ id?: string; htmlLink?: string }>({
+    method: 'PATCH',
+    url: `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${eventId}`,
+    body,
+    token,
+  })
+
+  return toTextResult({
+    eventId: updated.id ?? eventId,
+    calendarId: (args.calendarId ?? 'primary') as string,
+    summary: summary ?? null,
+    description: description ?? null,
+    start: start ?? null,
+    end: end ?? null,
+    htmlLink: updated.htmlLink ?? null,
+    note: 'Verify persistence by reading the event back with calendar_list_events.',
+  })
+}
+
+async function deleteEvent(token: string, args: Record<string, unknown>): Promise<McpToolResult> {
+  const calendarId = validateCalendarId(args.calendarId ?? 'primary')
+  const eventId = validateEventId(args.eventId)
+
+  await googleRequest<unknown>({
+    method: 'DELETE',
+    url: `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${eventId}`,
+    token,
+  })
+
+  return toTextResult({
+    eventId,
+    calendarId: (args.calendarId ?? 'primary') as string,
+    deleted: true,
+    note: 'Verify deletion by reading the event back (expected not found).',
+  })
+}
+
 // ---------------------------------------------------------------------------
 // MCP registration
 // ---------------------------------------------------------------------------
@@ -275,6 +372,52 @@ const TOOLS: McpTool[] = [
       required: ['calendarId'],
     },
   },
+  {
+    name: 'calendar_create_event',
+    description:
+      'Create a single event on a calendar (default primary). Accepts summary, start/end (RFC 3339), and an optional description. Returns the created event id and metadata.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string', maxLength: 200, description: 'Google Calendar ID (default primary).' },
+        summary: { type: 'string', maxLength: 500, description: 'Event title.' },
+        description: { type: 'string', maxLength: 2000, description: 'Optional event description.' },
+        start: { type: 'string', maxLength: 100, description: 'Start time (RFC 3339, e.g. 2026-08-20T09:00:00Z).' },
+        end: { type: 'string', maxLength: 100, description: 'End time (RFC 3339).' },
+      },
+      required: ['summary', 'start', 'end'],
+    },
+  },
+  {
+    name: 'calendar_update_event',
+    description:
+      'Update safe fields of a single calendar event (summary, description, start, end). Only provided fields are changed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string', maxLength: 200, description: 'Google Calendar ID (default primary).' },
+        eventId: { type: 'string', maxLength: 500, description: 'Google Calendar event ID.' },
+        summary: { type: 'string', maxLength: 500, description: 'New event title.' },
+        description: { type: 'string', maxLength: 2000, description: 'New event description.' },
+        start: { type: 'string', maxLength: 100, description: 'New start time (RFC 3339).' },
+        end: { type: 'string', maxLength: 100, description: 'New end time (RFC 3339).' },
+      },
+      required: ['eventId'],
+    },
+  },
+  {
+    name: 'calendar_delete_event',
+    description:
+      'Delete a single calendar event (default primary). Verify by reading the event back (expected not found).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string', maxLength: 200, description: 'Google Calendar ID (default primary).' },
+        eventId: { type: 'string', maxLength: 500, description: 'Google Calendar event ID.' },
+      },
+      required: ['eventId'],
+    },
+  },
 ]
 
 startMcpServer({
@@ -291,6 +434,12 @@ startMcpServer({
           return await getCalendar(token, args)
         case 'calendar_list_events':
           return await listEvents(token, args)
+        case 'calendar_create_event':
+          return await createEvent(token, args)
+        case 'calendar_update_event':
+          return await updateEvent(token, args)
+        case 'calendar_delete_event':
+          return await deleteEvent(token, args)
         default:
           return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true }
       }

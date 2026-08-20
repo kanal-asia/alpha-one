@@ -141,10 +141,16 @@ async function saveConnections(
 /**
  * Generate the Google OAuth authorization URL.
  * Returns the URL and the state parameter for CSRF protection.
+ *
+ * Optional incremental authorization (TASK-076):
+ * - `scopes`: additional scopes to request on top of the baseline set.
+ * - `includeGrantedScopes`: preserve every previously granted scope so the
+ *   consent is additive and never replaces existing authorization.
  */
 export async function generateAuthUrl(
   _userId: string,
-  returnTo?: string
+  returnTo?: string,
+  options?: { scopes?: string[]; includeGrantedScopes?: boolean }
 ): Promise<{
   url: string
   state: string
@@ -162,17 +168,23 @@ export async function generateAuthUrl(
 
   const codeChallenge = generateCodeChallenge(codeVerifier)
 
+  const scopes = [...GOOGLE_OAUTH_SCOPES, ...(options?.scopes ?? [])]
+
   const params = new URLSearchParams({
     client_id: config.clientId,
     redirect_uri: config.redirectUri,
     response_type: 'code',
-    scope: GOOGLE_OAUTH_SCOPES.join(' '),
+    scope: scopes.join(' '),
     state,
     access_type: 'offline',
     prompt: 'consent',
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
   })
+
+  if (options?.includeGrantedScopes) {
+    params.set('include_granted_scopes', 'true')
+  }
 
   return {
     url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,

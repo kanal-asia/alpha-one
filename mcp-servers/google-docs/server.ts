@@ -208,7 +208,11 @@ async function updateDocument(token: string, args: Record<string, unknown>): Pro
   }
 
   const location = mode === 'append' ? 'append' : 'prepend'
-  const index = mode === 'append' ? endIndex : 1
+  // Insertion index must be strictly less than the end index of the containing
+  // segment. Appending at `endIndex` fails on an empty document (segment ends
+  // at 2, so index 2 is out of range); inserting at `endIndex - 1` lands just
+  // before the trailing newline and is valid for both empty and populated docs.
+  const index = mode === 'append' ? Math.max(1, endIndex - 1) : 1
   const insertText = mode === 'append' ? `\n${text}` : `${text}\n`
 
   const res = await googleRequest<{ documentId: string; title?: string }>({

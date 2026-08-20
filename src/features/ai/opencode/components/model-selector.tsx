@@ -1,13 +1,18 @@
 import { useMemo, useState } from 'react'
 import {
+  AudioLines,
   BadgeCheck,
   Check,
   ChevronsUpDown,
+  FileText,
+  Image,
   Plug,
   RefreshCw,
   Search,
   Sparkles,
   Star,
+  Text,
+  Video,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -118,13 +123,13 @@ export function ModelSelector({
               {activeModel?.displayName ?? 'Select model'}
             </span>
             {activeModel && (
-              <ModelTierBadge free={activeModel.free} />
+              <ModelTierBadge free={activeModel.free} modelsDev={activeModel.modelsDev} />
             )}
           </span>
           <ChevronsUpDown className='size-3.5 shrink-0 opacity-50' />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align='start' className='w-[440px] max-w-[calc(100vw-2rem)] p-0'>
+      <PopoverContent align='start' className='w-[540px] max-w-[calc(100vw-2rem)] p-0'>
         <div className='flex items-center gap-2 border-b p-2'>
           <Search className='size-4 shrink-0 text-muted-foreground' />
           <Input
@@ -213,16 +218,79 @@ function SectionHeading({ title, count }: { title: string; count: number }) {
   )
 }
 
-function ModelTierBadge({ free }: { free: boolean }) {
+function formatPrice(value: number | null | undefined): string | null {
+  if (value == null || !Number.isFinite(value) || value <= 0) return null
+  return `$${value.toFixed(2)}`
+}
+
+function pricingLabel(modelsDev: ModelInfo['modelsDev']): string | null {
+  if (!modelsDev?.matched) return null
+  const input = formatPrice(modelsDev.inputPrice)
+  const output = formatPrice(modelsDev.outputPrice)
+  if (!input || !output) return null
+  return `${input} / ${output}`
+}
+
+const MODALITY_ICON: Record<string, { icon: typeof Text; label: string }> = {
+  text: { icon: Text, label: 'Text' },
+  image: { icon: Image, label: 'Image' },
+  video: { icon: Video, label: 'Video' },
+  audio: { icon: AudioLines, label: 'Audio' },
+  pdf: { icon: FileText, label: 'PDF/document' },
+}
+
+function ModalityIcons({ modalities }: { modalities: string[] | undefined }) {
+  if (!modalities || modalities.length === 0) return null
+  return (
+    <span className='flex items-center gap-1'>
+      {modalities.map((mod) => {
+        const entry = MODALITY_ICON[mod]
+        if (!entry) return null
+        const Icon = entry.icon
+        return (
+          <span
+            key={mod}
+            title={`${entry.label} input`}
+            className='text-muted-foreground/70'
+            aria-label={`${entry.label} input supported`}
+          >
+            <Icon className='size-3.5' />
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
+function ModelTierBadge({ free, modelsDev }: { free: boolean; modelsDev?: ModelInfo['modelsDev'] }) {
+  if (free) {
+    return (
+      <Badge
+        variant='outline'
+        className='shrink-0 border-transparent bg-emerald-500/10 px-1.5 py-0 text-[10px] font-medium text-emerald-600'
+      >
+        FREE
+      </Badge>
+    )
+  }
+  const price = pricingLabel(modelsDev)
+  if (price) {
+    return (
+      <Badge
+        variant='outline'
+        className='shrink-0 whitespace-nowrap border-transparent bg-amber-500/10 px-1.5 py-0 font-mono text-[10px] font-medium text-amber-600'
+        title='Input / Output price per 1M tokens (Models.dev)'
+      >
+        {price}
+      </Badge>
+    )
+  }
   return (
     <Badge
       variant='outline'
-      className={cn(
-        'shrink-0 border-transparent px-1.5 py-0 text-[10px] font-medium',
-        free ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'
-      )}
+      className='shrink-0 border-transparent bg-amber-500/10 px-1.5 py-0 text-[10px] font-medium text-amber-600'
     >
-      {free ? 'Free' : 'Paid'}
+      PAID
     </Badge>
   )
 }
@@ -274,13 +342,31 @@ function ModelRow({
           <Sparkles className='size-4 shrink-0 text-muted-foreground/60' />
         )}
         <span className='min-w-0 flex-1'>
-          <span className='block truncate'>{model.displayName}</span>
-          <span className='block truncate text-[11px] text-muted-foreground'>
-            {model.provider}
-            {model.lastUsed ? ' · last used' : ''}
+          <span className='flex items-center gap-2'>
+            <span className='truncate'>{model.displayName}</span>
+            {model.modelsDev?.matched && model.modelsDev.inputModalities.length > 0 && (
+              <ModalityIcons modalities={model.modelsDev.inputModalities} />
+            )}
+          </span>
+          <span className='flex items-center gap-2'>
+            <span className='block truncate text-[11px] text-muted-foreground'>
+              {model.provider}
+              {model.lastUsed ? ' · last used' : ''}
+            </span>
+            {model.modelsDev?.matched && (
+              <a
+                href={model.modelsDev.detailUrl}
+                target='_blank'
+                rel='noopener noreferrer'
+                onClick={(e) => e.stopPropagation()}
+                className='shrink-0 text-[11px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-primary'
+              >
+                Model details
+              </a>
+            )}
           </span>
         </span>
-        <ModelTierBadge free={model.free} />
+        <ModelTierBadge free={model.free} modelsDev={model.modelsDev} />
         {model.active && <Check className='size-4 shrink-0 text-primary' />}
       </button>
     </div>

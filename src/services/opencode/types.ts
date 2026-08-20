@@ -1,3 +1,31 @@
+/** Input modality kinds as represented by Models.dev. */
+export type ModelsDevInputModality = "text" | "image" | "video" | "audio" | "pdf";
+
+/**
+ * Models.dev enrichment for a single model (TASK-OPENCODE-084).
+ *
+ * This is OPTIONAL, additive metadata resolved from the local Models.dev
+ * catalog (OpenCode's models.dev snapshot). It is enrichment only — never the
+ * source of truth for provider/model availability. All fields are `null`/
+ * absent when Models.dev has no usable entry for the model.
+ */
+export interface ModelsDevEnrichment {
+  /** Provider id as it appears in Models.dev (e.g. "google-vertex"). */
+  providerId: string;
+  /** Resolved Models.dev model id (e.g. "gemini-2.5-flash"). */
+  modelId: string;
+  /** Models.dev model detail page URL. */
+  detailUrl: string;
+  /** Input price per 1M tokens (USD). Null when unknown. */
+  inputPrice: number | null;
+  /** Output price per 1M tokens (USD). Null when unknown. */
+  outputPrice: number | null;
+  /** Supported input modalities. Empty when unknown. */
+  inputModalities: ModelsDevInputModality[];
+  /** True when a valid Models.dev match was found. */
+  matched: boolean;
+}
+
 export type Capability = "reasoning" | "vision" | "coding" | "function-calling";
 
 export type ModelTag = "free" | "fast" | "reasoning" | "vision" | "coding" | "new" | "recommended";

@@ -5,6 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import type {
   ChatResult,
   HealthStatus,
+  ModelsDevEnrichment,
   ModelsResponse,
   OpenCodeChatEvent,
   OpenCodeRawModel,
@@ -13,6 +14,10 @@ import type {
   ProviderSummary,
 } from "./types";
 import { groupByProvider, normalizeModel } from "./normalize";
+import {
+  resolveModelsDevEnrichmentFromCatalog,
+  type ModelsDevCatalog,
+} from "./modelsdev";
 import { assertCanonicalModelId, type RuntimeModel } from "../../features/runtime/contract";
 
 export interface Resolved {
@@ -400,6 +405,76 @@ export function readModelsDevRegistry(force = false): ModelsDevRegistry {
   const value: ModelsDevRegistry = { providers, path };
   registryCache = { at: Date.now(), value };
   return value;
+}
+
+// ---------------------------------------------------------------------------
+// TASK-OPENCODE-084: Models.dev metadata enrichment (optional, additive).
+//
+// Models.dev is used ONLY as an enrichment source. Provider/model availability
+// stays authoritative from the runtime. This reads OpenCode's local models.dev
+// catalog snapshot (same file as readModelsDevRegistry) so there is no N+1
+// network storm and enrichment tolerates the catalog being unavailable.
+// ---------------------------------------------------------------------------
+
+const ENRICHMENT_CACHE_TTL_MS = 5 * 60_000;
+let enrichmentCatalogCache: {
+  at: number;
+  value: ModelsDevCatalog;
+  found: boolean;
+} | null = null;
+
+function readModelsDevCatalog(): { providers: ModelsDevCatalog; found: boolean } {
+  if (enrichmentCatalogCache && Date.now() - enrichmentCatalogCache.at < ENRICHMENT_CACHE_TTL_MS) {
+    return { providers: enrichmentCatalogCache.value, found: enrichmentCatalogCache.found };
+  }
+  const candidates = [
+    join(homedir(), ".cache", "opencode", "models.json"),
+    join(homedir(), ".config", "opencode", "models.json"),
+    join(homedir(), ".local", "share", "opencode", "models.json"),
+  ];
+  let parsed: ModelsDevCatalog = {};
+  let found = false;
+  for (const candidate of candidates) {
+    if (!fileExists(candidate)) continue;
+    try {
+      const json = JSON.parse(readFileSync(candidate, "utf8")) as ModelsDevCatalog;
+      if (json && typeof json === "object") {
+        parsed = json;
+        found = true;
+        break;
+      }
+    } catch {
+      parsed = {};
+      continue;
+    }
+  }
+  enrichmentCatalogCache = { at: Date.now(), value: parsed, found };
+  return { providers: parsed, found };
+}
+
+/**
+ * Resolve a single runtime model (provider + slug) against the local Models.dev
+ * catalog. Returns null when no usable match exists — enrichment is optional.
+ */
+export function resolveModelsDevEnrichment(provider: string, slug: string): ModelsDevEnrichment | null {
+  const { providers } = readModelsDevCatalog();
+  return resolveModelsDevEnrichmentFromCatalog(providers, provider, slug);
+}
+
+/**
+ * Resolve enrichment for a list of runtime models. Returns a map keyed by the
+ * canonical runtime model id (`provider/slug`). Fails-open: a Models.dev miss
+ * simply omits the model (runtime availability is unaffected).
+ */
+export function resolveModelsDevEnrichments(
+  models: Array<{ provider: string; slug: string }>,
+): Map<string, ModelsDevEnrichment> {
+  const map = new Map<string, ModelsDevEnrichment>();
+  for (const m of models) {
+    const e = resolveModelsDevEnrichment(m.provider, m.slug);
+    if (e) map.set(`${m.provider}/${m.slug}`, e);
+  }
+  return map;
 }
 
 export async function fetchModelsFromOpenCode(): Promise<ModelsResponse> {

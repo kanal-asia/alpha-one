@@ -8,6 +8,7 @@ import {
   isExecutionMode,
   fetchStats,
   compactSession,
+  resolveModelsDevEnrichment,
 } from "./client";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
@@ -822,12 +823,26 @@ app.get("/api/opencode/models", async (req: Request, res: Response) => {
     return a.displayName.localeCompare(b.displayName);
   });
   const filtered = freeOnly ? sorted.filter((m) => m.free) : sorted;
+
+  // TASK-OPENCODE-084: Attach optional Models.dev enrichment to each model.
+  // Enrichment fails open — a miss/error only omits metadata, never the model.
+  const enriched = filtered.map((m) => ({
+    ...m,
+    modelsDev: resolveModelsDevEnrichment(m.provider, m.slug) ?? undefined,
+  }));
+
+  const enrichmentCount = enriched.filter((m) => m.modelsDev?.matched).length;
   return res.json({
-    models: filtered,
+    models: enriched,
     providers: [...new Set(filtered.map((m) => m.provider))],
     fetchedAt: new Date().toISOString(),
     source: "opencode",
     warnings: [],
+    enrichment: {
+      matched: enrichmentCount,
+      total: enriched.length,
+      source: "models.dev",
+    },
   });
 });
 

@@ -49,6 +49,20 @@ export interface RuntimeModel {
   latency?: string
   /** TASK-OPENCODE-023: Available reasoning variants for this model (e.g. "low", "high"). */
   variants?: Record<string, Record<string, unknown>>
+  /**
+   * TASK-OPENCODE-084: Optional Models.dev metadata enrichment (pricing, input
+   * modalities, detail URL). Enrichment only — never a source of truth for
+   * provider/model availability. Absent when Models.dev has no usable match.
+   */
+  modelsDev?: {
+    providerId: string
+    modelId: string
+    detailUrl: string
+    inputPrice: number | null
+    outputPrice: number | null
+    inputModalities: string[]
+    matched: boolean
+  }
 }
 
 /**

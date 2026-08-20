@@ -312,6 +312,25 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
     }
   }
 
+  // TASK-OPENCODE-082: Canonical Google Custom MCP selection guidance. Always
+  // present (not Drive-attachment-only) so the agent routes every Google
+  // request to the correct service MCP and verifies persisted state.
+  const mcpGuidanceBlock = [
+    `GOOGLE MCP (TASK-OPENCODE-082): Choose the MCP by the resource/INTENT you operate, not by assuming every Google file is a Drive operation.`,
+    `- Google Sheets (google_sheets.*): spreadsheet data - list/read/write ranges, sheets, formulas.`,
+    `- Google Docs (docs_*): document create/read/update/append.`,
+    `- Google Slides (slides_*): presentation create/read/add-slide/insert-text.`,
+    `- Google Drive (drive_*): file discovery/search/metadata/content and file-level ops; use it to LOCATE resources, not to edit Doc/Slides/Sheet content.`,
+    `- Google Calendar (calendar_*): calendar/event create/read/update/delete.`,
+    `- Google Apps Script (apps_script_*): discover/read projects and run a known callable function via the Execution API.`,
+    `Cross-service requests: decompose into per-service operations and use MULTIPLE MCPs - never force one MCP to do another service's job.`,
+    `VERIFY: after every important write/execute, READ BACK the authoritative Google state (docs_get_document, slides_get_presentation, drive_get_file_metadata/content, calendar_get/list, read_range, apps_script_run DONE+SUCCESS) before claiming success.`,
+    `Never report "done/created/updated/executed" without that verification evidence. Classify outcomes PROVEN / UNPROVEN / UNKNOWN.`,
+    `If a capability is AUTHORIZATION_REQUIRED and not yet granted, use the existing progressive OAuth flow once (preserve granted scopes, same identity), then retry - do NOT blindly reconnect or loop.`,
+    `Apps Script Execution API can return a transient 404: treat it as retriable with bounded retry, verify DONE+SUCCESS, and never interpret it as an OAuth failure.`,
+  ].join('\n');
+  enhancedMessage = `${mcpGuidanceBlock}\n\n${enhancedMessage}`;
+
   const resolved = resolveOpenCode();
   if (!resolved) {
     return res.status(502).json({ error: "OpenCode CLI not found. Install with: npm i -g opencode-ai" });

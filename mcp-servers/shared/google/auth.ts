@@ -28,19 +28,28 @@ export interface GoogleConnection {
 const DEFAULT_CONNECTIONS_FILE = join(process.cwd(), '.alpha', 'google', 'connections.json')
 const DEFAULT_CONNECTION_KEY = 'local-user'
 
-function connectionsFile(): string {
+export function connectionsFilePath(): string {
   return process.env.GOOGLE_CONNECTIONS_FILE || DEFAULT_CONNECTIONS_FILE
 }
 
-function connectionKey(): string {
+export function connectionKeyName(): string {
   return process.env.GOOGLE_CONNECTION_KEY || DEFAULT_CONNECTION_KEY
+}
+
+/** Persist an updated connection for the active local key, preserving the file format. */
+export async function persistConnection(updated: GoogleConnection): Promise<void> {
+  const file = connectionsFilePath()
+  const allData = await readFile(file, 'utf-8')
+  const all = JSON.parse(allData) as Record<string, GoogleConnection>
+  all[connectionKeyName()] = updated
+  await writeFile(file, JSON.stringify(all, null, 2))
 }
 
 export async function loadGoogleConnection(): Promise<GoogleConnection | null> {
   try {
-    const data = await readFile(connectionsFile(), 'utf-8')
+    const data = await readFile(connectionsFilePath(), 'utf-8')
     const connections = JSON.parse(data) as Record<string, GoogleConnection>
-    return connections[connectionKey()] ?? null
+    return connections[connectionKeyName()] ?? null
   } catch {
     return null
   }
@@ -92,16 +101,15 @@ export async function getAccessToken(): Promise<string> {
   const tokens = (await resp.json()) as { access_token: string; expires_in: number }
 
   // Write back only the token fields, preserving the existing credential format.
-  const file = connectionsFile()
+  const file = connectionsFilePath()
   const allData = await readFile(file, 'utf-8')
   const all = JSON.parse(allData) as Record<string, GoogleConnection>
   const updated: GoogleConnection = {
-    ...all[connectionKey()],
+    ...all[connectionKeyName()],
     accessToken: tokens.access_token,
     tokenExpiry: Date.now() + tokens.expires_in * 1000,
   }
-  all[connectionKey()] = updated
-  await writeFile(file, JSON.stringify(all, null, 2))
+  await persistConnection(updated)
 
   return updated.accessToken
 }

@@ -63,13 +63,27 @@
 - Full 12-capability sweep: previously granted capabilities remain GRANTED (sheets.read, sheets.write, docs.read, slides.read, drive.read, calendar.read, appsscript.read). `google.docs.write` now GRANTED. Still correctly NOT granted (not requested): appsscript.execute, calendar.write, slides.write. No regression.
 
 ### Phase 9 — Evidence
-- Captured in this file / session: baseline grant list, consent URL (full, opaque), post-consent grant list, E2E transcript (create/read/update/read), restart-probe output, regression sweep output, connections.json snapshot (below), cleanup verification.
+- Consent URL (generated, full and opaque; redirect to running callback, state saved, PKCE S256, `include_granted_scopes=true`):
+  ```
+  https://accounts.google.com/o/oauth2/v2/auth?client_id=480048442203-stiuf8pf1o0kvb0vejpk8hfa85b6o4c4.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A3001%2Fapi%2Fgoogle%2Foauth%2Fcallback&response_type=code&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.readonly+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdocs.readonly+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fspreadsheets+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fpresentations.readonly+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fscript.projects+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar.readonly+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdocuments&state=d5301cc01d665faa81e495e52130a391ef22a22b03d1cd18c18c70876645296d&access_type=offline&prompt=consent&code_challenge=bgqwINo2oH9OoAIA_BXBDQXG27lvAP96ZNMsx9yv8i8&code_challenge_method=S256&include_granted_scopes=true
+  ```
+- Post-consent grant read (`inspectAuthorization`): `connected=true email=kanalconsultant.indonesia@gmail.com`, 12 granted scopes (listed in Phase 5), `docs.write -> CAPABILITY_GRANTED`.
+- Docs WRITE E2E transcript (custom Docs MCP stdio server):
+  - `docs_create_document` -> `documentId: 1u4XJL4HgyL3aPsfjwEhkfM0EapcVKk7UTdr2thLolp8` (title `TASK-076 Docs WRITE proof - 2026-08-20T08:05:31.491Z`).
+  - `docs_get_document` (read-back 1) -> 1 paragraph, `content: "\n"`.
+  - `docs_update_document` (append) -> `batchUpdate.insertText`, `insertedCharacters: 54`, `insertIndex: 1`.
+  - `docs_get_document` (read-back 2) -> 2 paragraphs, `characters: 55`, `content: "\nTask-076 write proof: hello from the custom Docs MCP.\n"` — update persisted.
+- Restart probe (fresh process): `docs_list_documents` -> `documents: []` (auth OK, no re-consent); `docs_get_document` on deleted doc -> `Google Docs API 404` (expected).
+- Regression sweep (12 capabilities): GRANTED = sheets.read, sheets.write, docs.read, **docs.write**, slides.read, drive.read, drive.write, calendar.read, appsscript.read; AUTHORIZATION_REQUIRED = appsscript.execute, calendar.write, slides.write (correctly not requested). No regression.
+- Cleanup verification: Drive DELETE succeeded for both created docs; subsequent Drive GET -> `File not found` for both `1u4XJL4HgyL3aPsfjwEhkfM0EapcVKk7UTdr2thLolp8` and `1w9OF3q1j5ItydQ423r5BQcuJNUMMIxH5Blhcq9uXjI4`.
+- Connections store: `.alpha/google/connections.json` holds the merged grant for key `local-user` (same identity, 12 scopes) — unchanged by restart.
 
 ### Phase 10 — Task file
 - This file (`mcp-servers/google-apps-script/TASK-076.md`).
 
 ### Phase 11 — Git discipline
-- Intended changes in this task: the task file, `src/services/google/oauth-service.ts` (incremental consent), `mcp-servers/google-docs/server.ts` (append-index fix). Pre-existing WIP (241 files) untouched. Temporary proof scripts were created outside the repo (OS temp dir) and removed.
+- Committed as `9731e04` on `task/gworkspace-002-r1-drive-access-rework` (3 files, +94/-3): this task file, `src/services/google/oauth-service.ts` (incremental consent), `mcp-servers/google-docs/server.ts` (append-index fix).
+- Pre-existing WIP (241 files) untouched; stray untracked files at repo root (`alpha-*.mjs`, `process_data.cjs`, `spint/as`, `.tanstack/`) are pre-existing and were not staged. Temporary proof scripts were created outside the repo (OS temp dir) and removed.
 
 ## Verdict
 - PASS — Google Docs WRITE enabled via real user consent, scopes preserved (superset), E2E proof of WRITE through the custom Docs MCP completed, persistence and regression verified, test artifacts cleaned up.

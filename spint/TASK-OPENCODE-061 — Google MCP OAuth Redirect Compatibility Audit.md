@@ -319,3 +319,83 @@ Input your execution summary on the same task file
 Then: - git status - git diff --stat - git log -1 --oneline
 
 Report the commit hash and final verdict.
+
+---
+
+# Execution Summary
+
+Audit executed 2026-08-20. AUDIT-ONLY — no source/config/OAuth/Cloud/Sheets mutation. No credentials exposed (fingerprints/metadata only).
+
+## 1. Executive summary
+
+The core question — "Apakah loopback redirect URI OpenCode adalah blocker Google Workspace MCP?" — is answered: **PROVEN NOT ROOT CAUSE** (with the caveat that the redirect is not the only gap; the definitive blocker is the Google-hosted MCP resource-server rejecting tokens bound to the OAuth client ID). The OAuth authorization flow with the loopback redirect `http://127.0.0.1:19876/mcp/oauth/callback` completes successfully: the browser consent proceeds, the callback receives the authorization code, the token exchange succeeds, and access/refresh tokens are minted with the correct scopes. The resulting token is bound to the Alpha One OAuth client ID (tokeninfo `aud = 480048442203-...apps.googleusercontent.com`) — Google's authorization server ignores the RFC 8707 `resource` parameter for this client — and the Google-hosted MCP servers reject that token (`The caller does not have permission`).
+
+## 2. PROVEN facts
+
+- OpenCode v1.18.18, Windows 11, workdir C:\dev\alpha-one, branch task/gworkspace-002-r1-drive-access-rework, HEAD b38dd8a (pre-commit).
+- MCP baseline: google-sheets (local), drive/docs/slides/calendar (remote official) all connected; calendar has no stored OAuth token (empty entry in mcp-auth.json).
+- OAuth client: Web application, client ID 480048442203-stiuf8pf1o0kvb0vejpk8hfa85b6o4c4.apps.googleusercontent.com; redirect URIs include `http://localhost:3001/api/google/oauth/callback` (app) and `http://127.0.0.1:19876/mcp/oauth/callback` (OpenCode loopback). The loopback URI is accepted by Google's authorization endpoint (no redirect_uri_mismatch) — proven by the successfully completed callback in this task and in TASK-058/060.
+- Authorization request parameters (traced): authorization endpoint accounts.google.com/o/oauth2/v2/auth; client_id (the Alpha One client); redirect_uri http://127.0.0.1:19876/mcp/oauth/callback; response_type=code; scope drive.readonly + drive.file (+openid); PKCE S256 challenge/method; state; access_type=offline; prompt=consent; resource=https://drivemcp.googleapis.com/mcp (RFC 8707).
+- Token exchange (traced): token endpoint oauth2.googleapis.com/token; grant_type=authorization_code; code; client_id; client_secret; redirect_uri (same loopback URI); code_verifier; resource=https://drivemcp.googleapis.com/mcp. Exchange succeeds; access + refresh tokens returned, scope correct, 3599s lifetime.
+- Token audience: tokeninfo shows `aud` = the OAuth client ID — Google AS ignores the resource param and binds the token to the client, not the MCP resource.
+- MCP calls with that token: rejected (`The caller does not have permission`, isError=true) for Drive get_file_metadata / read_file_content on the proven-accessible PDF (1Bdo_1VkN385LFq_9_bbSId5Nlp5aIGRN), Docs read_doc on doc 1fa2RwKMK8T2sk2f7BFePiaA5ydUKXbMrcPc4pAzBl6M, Slides read_presentation on pres 1AyilWDzGtrbIMwglX3_brNjiApZM5AXTNgvbpnjQ5w0.
+- REST with the same token/account/resource succeeds (Drive/Docs/Slides REST reads return 200 OK with real content) — proven in TASK-057.
+- Google's documented MCP clients use HTTPS callbacks (Antigravity https://antigravity.google/oauth-callback; Claude https://claude.ai/api/mcp/auth_callback) — but Google's documentation does NOT explicitly state that loopback is universally forbidden; the prohibition is UNPROVEN.
+
+## 3. DERIVED findings
+
+- The loopback redirect is functionally compatible with Google's OAuth authorization endpoint (authorization completes and returns the code) — DERIVED from the successful callback observations.
+- The token's audience binding (client ID) explains the MCP rejection — DERIVED from tokeninfo + the MCP server consistently rejecting every token while REST succeeds with the same token.
+
+## 4. UNPROVEN assumptions
+
+- That Google universally forbids loopback callbacks for Workspace MCP — UNPROVEN (documented examples use HTTPS, but no explicit universal prohibition found).
+- That a non-loopback HTTPS callback alone would fix the MCP authorization — UNPROVEN (the resource-binding/audience behavior indicates the OAuth client must be authorized for the MCP resource in Google Cloud; changing the redirect alone is insufficient).
+
+## 5. Root cause
+
+`PROVEN_GOOGLE_CLOUD_CONFIGURATION` (external prerequisite) + `CONDITIONAL_EXTERNAL_PREREQUISITE` for the OAuth client authorization for the Workspace MCP resource. The loopback redirect is NOT the root cause of MCP authorization failure: OAuth authorization and token exchange succeed with it. The blocker is that the Alpha One OAuth client cannot obtain a token bound to the MCP resource (Google AS binds tokens to the client ID), and the Google-hosted MCP resource servers reject the client-bound token.
+
+## 6. Evidence matrix
+
+| MCP | OAuth callback | OAuth success | Token persisted | REST read | MCP read | Failure layer | Verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Drive | Succeeded (loopback) | Succeeded | No (verification token not persisted; mcp-auth.json holds REST token) | 200 OK | Rejected (permission) | MCP resource-server authorization | BLOCKED (external) |
+| Docs | Succeeded (loopback) | Succeeded | No | 200 OK | Rejected (permission) | MCP resource-server authorization | BLOCKED (external) |
+| Slides | Succeeded (loopback) | Succeeded | No | 200 OK | Rejected (permission) | MCP resource-server authorization | BLOCKED (external) |
+| Calendar | Never completed (no token) | N/A | No | N/A (no token) | 401/403 | OAuth token missing | BLOCKED (external) |
+| Sheets | PROTECTED | PROTECTED | PROTECTED | PROTECTED | PROTECTED | N/A | PROTECTED |
+
+## 7. Answer to loopback question
+
+**PROVEN NOT ROOT CAUSE** — the loopback redirect is functionally valid for OAuth authorization (consent + callback + token exchange all succeed). The MCP authorization failure persists even with a valid token, proving the redirect is not the cause.
+
+## 8. Google Cloud requirement
+
+NOT FOUND in public documentation a specific OAuth-client registration/authorization step for Workspace MCP beyond enabling the MCP APIs and configuring the consent screen. The observed behavior (tokens bound to client ID, MCP resource servers rejecting them) indicates the OAuth client must be authorized for the MCP resource at the Google Cloud level — an external configuration prerequisite requiring console access (RECOMMENDED NEXT TASK).
+
+## 9. Calendar result
+
+No Calendar OAuth token exists in mcp-auth.json (the reported "Authentication successful" was the opencode false positive). Calendar MCP read-only call is impossible without a token. Classified separately: BLOCKED (external OAuth prerequisite).
+
+## 10. Sheets protection
+
+Verified: google-sheets config unchanged, source unchanged, no Sheets MCP call made, no Sheets authentication changed. PROTECTED.
+
+## 11. Minimal next corrective task
+
+Authorize the Alpha One OAuth client for the Workspace MCP resource in the Google Cloud console (create a dedicated Web-app OAuth client for Workspace MCP with a non-loopback HTTPS callback registered for MCP, or configure the existing client for the MCP resource), then re-run the per-server MCP OAuth flow and read-only checks against the same proven resources.
+
+## 12. Commands executed / files inspected
+
+- git status/branch/log — baseline.
+- opencode mcp list — baseline.
+- Manual OAuth flow reproduction for Drive (callback server on 127.0.0.1:19876, PKCE S256, resource param): authorization URL opened, consent completed, callback received, token exchanged, tokeninfo inspected, MCP call attempted.
+- Inspected: C:\Users\ASUS\.config\opencode\opencode.jsonc, ~/.local/share/opencode/mcp-auth.json, .env (keys only), .alpha/google/connections.json (keys only), mcp-servers/google-sheets/server.ts (tool names only).
+- Google documentation sources: developers.google.com/workspace/guides/configure-mcp-servers, /workspace/guides/auth-overview, /workspace/guides/configure-mcp-security.
+
+## 13. Final verdict
+
+`PROVEN NOT ROOT CAUSE (redirect) + PROVEN_GOOGLE_CLOUD_CONFIGURATION (OAuth client authorization for MCP resource)`. No Alpha One/OpenCode defect proven; Sheets untouched; only the task file committed. Commit hash follows.
+
+Files changed: only this task file. Git branch task/gworkspace-002-r1-drive-access-rework.

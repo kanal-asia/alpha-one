@@ -390,3 +390,78 @@ export async function getDriveFileThumbnail(
   const arrayBuffer = await response.arrayBuffer()
   return { data: Buffer.from(arrayBuffer), contentType }
 }
+
+const GOOGLE_NATIVE_MIME_PREFIX = 'application/vnd.google-apps.'
+
+export interface DriveFileMeta {
+  id: string
+  name: string
+  mimeType: string
+  size?: string
+  modifiedTime: string
+}
+
+/**
+ * Get metadata for an arbitrary Drive file (file or folder).
+ * Used by the Drive reference resolver for authoritative validation.
+ */
+export async function getDriveFileMeta(
+  userId: string,
+  fileId: string
+): Promise<DriveFileMeta> {
+  return driveFetch<DriveFileMeta>(userId, `/files/${fileId}`, {
+    fields: 'id,name,mimeType,size,modifiedTime',
+  })
+}
+
+/**
+ * Determine the export mime type for a Google-native document.
+ */
+function exportMimeFor(nativeMime: string): string {
+  if (nativeMime === 'application/vnd.google-apps.spreadsheet') return 'text/csv'
+  if (nativeMime === 'application/vnd.google-apps.presentation') return 'text/plain'
+  return 'text/plain'
+}
+
+/**
+ * Download a Drive file's content on demand (server-side auth).
+ * Google-native documents (Docs/Sheets/Slides) are exported to a text format.
+ */
+export async function downloadDriveFile(
+  userId: string,
+  fileId: string
+): Promise<{ data: Buffer; mimeType: string; name: string }> {
+  const token = await getValidAccessToken(userId)
+  if (!token) throw new Error('Google account not connected.')
+
+  const meta = await getDriveFileMeta(userId, fileId)
+  if (meta.mimeType === FOLDER_MIME) {
+    throw new Error('The selected item is a folder, not a file.')
+  }
+
+  let url: string
+  let headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+  }
+
+  if (meta.mimeType.startsWith(GOOGLE_NATIVE_MIME_PREFIX)) {
+    const exportMime = exportMimeFor(meta.mimeType)
+    url = `${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}/export`
+    url += `?mimeType=${encodeURIComponent(exportMime)}`
+    headers = { Authorization: `Bearer ${token}` }
+  } else {
+    url = `${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?alt=media`
+  }
+
+  const response = await fetch(url, { headers })
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('You do not have permission to access this file.')
+    }
+    throw new Error(`Failed to download file from Drive.`)
+  }
+
+  const contentType = response.headers.get('content-type') ?? meta.mimeType
+  const arrayBuffer = await response.arrayBuffer()
+  return { data: Buffer.from(arrayBuffer), mimeType: contentType, name: meta.name }
+}

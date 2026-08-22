@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { MessagesSquare, Settings2, Sparkles } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import { useOpenCodeStore } from '@/features/ai/opencode/store/opencode-store'
+import type { ChatProjectContext } from '@/features/ai/opencode/types'
 import { ChatSidebar } from '@/features/ai/opencode/components/chat-sidebar'
 import { ChatMessageView } from '@/features/ai/opencode/components/chat-message'
 import { ChatComposer } from '@/features/ai/opencode/components/chat-composer'
@@ -25,6 +26,31 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { ProjectSelector } from './project-selector'
+import type { Project } from '@/features/ai-assistant/store/project-store'
+
+/** ChatProjectContext → Project (for the controlled ProjectSelector). */
+function toProject(ctx: ChatProjectContext): Project | null {
+  if (!ctx?.id && !ctx?.name) return null
+  return {
+    id: ctx.id ?? `ctx-${Date.now()}`,
+    name: ctx.name ?? 'Project',
+    contextType: ctx.type ?? 'local',
+    contextPath: ctx.path ?? '',
+    contextLabel: ctx.label ?? ctx.path ?? '',
+    createdAt: '',
+  }
+}
+
+/** Project → ChatProjectContext. */
+function toContext(p: Project): ChatProjectContext {
+  return {
+    id: p.id,
+    name: p.name,
+    path: p.contextPath,
+    label: p.contextType === 'local' ? p.contextPath : p.contextLabel,
+    type: p.contextType,
+  }
+}
 
 export function AssistantChatPage() {
   const store = useOpenCodeStore()
@@ -51,6 +77,7 @@ export function AssistantChatPage() {
     editAndResend,
     continueGeneration,
     updateSettings,
+    setActiveChatProject,
   } = store
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null
@@ -94,7 +121,10 @@ export function AssistantChatPage() {
         <div className='flex min-w-0 min-h-0 flex-1 flex-col'>
           {/* Toolbar */}
           <div className='flex flex-wrap items-center gap-2 border-b px-4 py-2'>
-            <ProjectSelector />
+            <ProjectSelector
+              project={activeChat?.project ? toProject(activeChat.project) : null}
+              onProjectChange={(p) => setActiveChatProject(p ? toContext(p) : undefined)}
+            />
 
             <ModelSelector
               models={models}

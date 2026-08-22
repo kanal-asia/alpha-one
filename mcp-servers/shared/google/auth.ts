@@ -39,7 +39,8 @@ export function connectionKeyName(): string {
 /** Persist an updated connection for the active local key, preserving the file format. */
 export async function persistConnection(updated: GoogleConnection): Promise<void> {
   const file = connectionsFilePath()
-  const allData = await readFile(file, 'utf-8')
+  let allData = await readFile(file, 'utf-8')
+  if (allData.charCodeAt(0) === 0xFEFF) allData = allData.slice(1)
   const all = JSON.parse(allData) as Record<string, GoogleConnection>
   all[connectionKeyName()] = updated
   await writeFile(file, JSON.stringify(all, null, 2))
@@ -47,7 +48,9 @@ export async function persistConnection(updated: GoogleConnection): Promise<void
 
 export async function loadGoogleConnection(): Promise<GoogleConnection | null> {
   try {
-    const data = await readFile(connectionsFilePath(), 'utf-8')
+    let data = await readFile(connectionsFilePath(), 'utf-8')
+    // Strip UTF-8 BOM if present (Powerhell's Set-Content -Encoding UTF8 adds it)
+    if (data.charCodeAt(0) === 0xFEFF) data = data.slice(1)
     const connections = JSON.parse(data) as Record<string, GoogleConnection>
     return connections[connectionKeyName()] ?? null
   } catch {

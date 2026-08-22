@@ -10,6 +10,7 @@ import {
   Library,
   Server,
   Settings,
+  Tag,
   Terminal,
   Wrench,
 } from 'lucide-react'
@@ -49,6 +50,16 @@ export const sidebarData: SidebarData = {
           title: 'Drive',
           url: '/google/drive',
           icon: FolderOpen,
+        },
+      ],
+    },
+    {
+      title: 'Deals',
+      items: [
+        {
+          title: 'AI BIG Deals',
+          url: '/big-deals',
+          icon: Tag,
         },
       ],
     },

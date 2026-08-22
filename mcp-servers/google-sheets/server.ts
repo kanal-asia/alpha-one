@@ -50,7 +50,8 @@ interface GoogleConnection {
 
 async function loadConnection(): Promise<GoogleConnection | null> {
   try {
-    const data = await readFile(CONNECTIONS_FILE, 'utf-8')
+    let data = await readFile(CONNECTIONS_FILE, 'utf-8')
+    if (data.charCodeAt(0) === 0xFEFF) data = data.slice(1)
     const connections = JSON.parse(data) as Record<string, GoogleConnection>
     return connections[LOCAL_USER] ?? null
   } catch {

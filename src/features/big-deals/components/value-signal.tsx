@@ -33,7 +33,7 @@ export function ValueSignal({
           variant='outline'
           className='border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-sm font-semibold text-amber-700 dark:text-amber-400'
         >
-          {Math.round(usageValue / 10)}├ù Usage Value
+          {Math.round(usageValue / 10)}× Usage Value
         </Badge>
       </div>
     </div>

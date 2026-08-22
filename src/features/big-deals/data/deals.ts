@@ -1,13 +1,13 @@
 import type { Deal } from '../types'
 
 /**
- * Alpha One affiliate URL ΓÇö single source of truth.
+ * Alpha One affiliate URL — single source of truth.
  * This is Alpha One-owned data, NOT from the OpenCode source.
  */
 const AFFILIATE_URL = 'https://opencode.ai/go?ref=JHSS0FH9KT'
 
 /**
- * OpenCode Go deal ΓÇö Alpha One marketing configuration.
+ * OpenCode Go deal — Alpha One marketing configuration.
  *
  * Fields here are Alpha One-owned copy (affiliate URL, disclosure, CTA labels,
  * marketing explanation). They are NOT sourced from the OpenCode Go API.
@@ -17,7 +17,7 @@ const AFFILIATE_URL = 'https://opencode.ai/go?ref=JHSS0FH9KT'
  *
  * Pricing copy ($5 first month, $10/month, usage value) is Alpha One marketing
  * based on publicly documented OpenCode Go pricing. The /zen/go/v1/models
- * endpoint does not expose pricing ΓÇö these are editorial claims, not
+ * endpoint does not expose pricing — these are editorial claims, not
  * machine-sourced constants.
  */
 export const opencodeGoDeal: Deal = {

@@ -22,7 +22,7 @@ export function AffiliateCta({ url, label, className, size = 'lg' }: AffiliateCt
             })
           )
         } catch {
-          // analytics unavailable ΓÇö fail silently
+          // analytics unavailable — fail silently
         }
       }}
     >

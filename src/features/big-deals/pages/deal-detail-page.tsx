@@ -27,7 +27,7 @@ import { ValueSignal } from '../components/value-signal'
 import type { OpenCodeGoApiResponse, GoModel, GoModelEnrichment } from '../types'
 
 // ---------------------------------------------------------------------------
-// Modality icons ΓÇö same mapping as TASK-084 Model Picker
+// Modality icons — same mapping as TASK-084 Model Picker
 // ---------------------------------------------------------------------------
 
 const MODALITY_ICON: Record<string, { icon: typeof Text; label: string }> = {
@@ -62,7 +62,7 @@ function ModalityIcons({ modalities }: { modalities: string[] | undefined }) {
 }
 
 // ---------------------------------------------------------------------------
-// Pricing ΓÇö same logic as TASK-084 Model Picker
+// Pricing — same logic as TASK-084 Model Picker
 // ---------------------------------------------------------------------------
 
 function formatPrice(value: number | null | undefined): string | null {
@@ -139,7 +139,7 @@ function ModelsLoading() {
   return (
     <div className='flex items-center gap-2 py-6 text-sm text-muted-foreground'>
       <Loader2 className='size-4 animate-spin' />
-      Loading models from OpenCodeΓÇª
+      Loading models from OpenCode…
     </div>
   )
 }
@@ -162,7 +162,7 @@ function ModelsEmpty() {
 }
 
 // ---------------------------------------------------------------------------
-// Model row ΓÇö same visual language as TASK-084 Model Picker
+// Model row — same visual language as TASK-084 Model Picker
 // ---------------------------------------------------------------------------
 
 function ModelRow({ model }: { model: GoModel }) {
@@ -326,7 +326,7 @@ export function DealDetailPage() {
               </CardContent>
             </Card>
 
-            {/* Included Models ΓÇö dynamic from OpenCode Go source + Models.dev enrichment */}
+            {/* Included Models — dynamic from OpenCode Go source + Models.dev enrichment */}
             <Card>
               <CardHeader className='pb-2'>
                 <CardTitle className='text-base'>Included Models</CardTitle>
@@ -353,7 +353,7 @@ export function DealDetailPage() {
               <CardContent className='space-y-3'>
                 <div className='text-center'>
                   <div className='text-sm text-muted-foreground'>{deal.price}</div>
-                  <div className='my-1 text-lg'>Γåô</div>
+                  <div className='my-1 text-lg'>↓</div>
                   <div className='text-lg font-bold text-foreground'>{deal.usageValueLabel}</div>
                 </div>
                 <Separator />

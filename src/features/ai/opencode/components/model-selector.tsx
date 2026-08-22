@@ -355,7 +355,7 @@ function ModelRow({
             </span>
             {model.modelsDev?.matched && (
               <a
-                href={model.modelsDev.detailUrl}
+                href={model.modelsDev.canonicalUrl ?? model.modelsDev.detailUrl}
                 target='_blank'
                 rel='noopener noreferrer'
                 onClick={(e) => e.stopPropagation()}

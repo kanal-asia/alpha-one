@@ -31,7 +31,7 @@ export function DealCard({ deal, variant = 'featured' }: DealCardProps) {
         <CardContent className='space-y-3'>
           <div className='flex flex-wrap items-center gap-2 text-sm'>
             <span className='font-semibold text-foreground'>{deal.introductoryPrice}</span>
-            <span className='text-muted-foreground'>ΓåÆ</span>
+            <span className='text-muted-foreground'>→</span>
             <span className='text-muted-foreground'>{deal.price}</span>
           </div>
           <AffiliateCta url={deal.destinationUrl} label={deal.ctaLabel} size='sm' />
@@ -84,7 +84,7 @@ export function DealCard({ deal, variant = 'featured' }: DealCardProps) {
             params={{ dealId: deal.dealId }}
             className='text-sm text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground'
           >
-            View full details ΓåÆ
+            View full details →
           </Link>
         </div>
       </CardContent>

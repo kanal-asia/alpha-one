@@ -14,8 +14,10 @@ export interface ModelsDevEnrichment {
   providerId: string;
   /** Resolved Models.dev model id (e.g. "gemini-2.5-flash"). */
   modelId: string;
-  /** Models.dev model detail page URL. */
+  /** Models.dev model detail page URL (legacy format). */
   detailUrl: string;
+  /** Canonical Models.dev model detail URL (e.g. "https://models.dev/models/lab/model/"). */
+  canonicalUrl?: string;
   /** Input price per 1M tokens (USD). Null when unknown. */
   inputPrice: number | null;
   /** Output price per 1M tokens (USD). Null when unknown. */

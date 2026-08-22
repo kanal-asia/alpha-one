@@ -59,10 +59,9 @@ function normalizeInputModalities(raw: ModelsDevModelEntry): ModelsDevInputModal
 }
 
 function modelsDevDetailUrl(providerId: string, modelId: string): string {
-  // Models.dev model detail pages use the canonical provider/model identity.
   const safeProvider = encodeURIComponent(providerId);
   const safeModel = encodeURIComponent(modelId);
-  return `https://models.dev/#/${safeProvider}/${safeModel}`;
+  return `https://models.dev/models/${safeProvider}/${safeModel}/`;
 }
 
 /**

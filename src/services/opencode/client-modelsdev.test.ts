@@ -47,7 +47,7 @@ describe('Models.dev enrichment resolver (TASK-OPENCODE-084)', () => {
     expect(e!.inputPrice).toBe(0.3)
     expect(e!.outputPrice).toBe(2.5)
     expect(e!.inputModalities).toEqual(['text', 'image', 'video', 'audio', 'pdf'])
-    expect(e!.detailUrl).toBe('https://models.dev/#/google-vertex/gemini-2.5-flash')
+    expect(e!.detailUrl).toBe('https://models.dev/models/google-vertex/gemini-2.5-flash/')
   })
 
   it('matches date-suffixed Models.dev ids via prefix', () => {

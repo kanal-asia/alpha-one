@@ -1,4 +1,5 @@
-import { ShieldCheck, Sparkles, Wrench } from 'lucide-react'
+import { ShieldCheck, Info, Sparkles, Wrench } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Main } from '@/components/layout/main'
@@ -6,6 +7,7 @@ import { PageHeader } from '@/components/page-header'
 import { Switch } from '@/components/ui/switch'
 import { useDeveloperMode } from '@/context/developer-mode-provider'
 import { GoogleConnectionCard } from '@/features/google'
+import { APP_VERSION } from '@/lib/version'
 
 export function Settings() {
   const { developerMode, setDeveloperMode } = useDeveloperMode()
@@ -64,6 +66,34 @@ export function Settings() {
           <CardContent className='flex items-center gap-2 text-sm text-muted-foreground'>
             <Sparkles className='size-4' />
             Alpha Workspace runs locally. Your data and results stay on this device.
+          </CardContent>
+        </Card>
+
+        <Card className='mt-4'>
+          <CardHeader>
+            <CardTitle className='flex items-center gap-2'>
+              <Info className='size-4' />
+              About & Updates
+            </CardTitle>
+            <CardDescription>
+              Application information and software updates.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className='flex items-center justify-between'>
+              <div className='space-y-1'>
+                <p className='text-sm font-medium'>Alpha One</p>
+                <p className='text-sm text-muted-foreground'>
+                  Version {APP_VERSION}
+                </p>
+              </div>
+              <Link
+                to='/settings/about'
+                className='text-sm text-primary underline decoration-dotted underline-offset-2 hover:text-primary/80'
+              >
+                View details
+              </Link>
+            </div>
           </CardContent>
         </Card>
       </Main>

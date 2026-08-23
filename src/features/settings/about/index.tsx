@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ExternalLink, RefreshCw, CheckCircle, AlertCircle, Info } from 'lucide-react'
+import { ExternalLink, Mail, RefreshCw, CheckCircle, AlertCircle, Info } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -46,6 +46,27 @@ export function SettingsAbout() {
             <p className='text-xs text-muted-foreground'>
               Alpha One runs locally on your device. Your data and results stay on this device.
             </p>
+          </CardContent>
+        </Card>
+
+        {/* Support Contact */}
+        <Card>
+          <CardHeader>
+            <CardTitle className='flex items-center gap-2'>
+              <Mail className='size-4' />
+              Support
+            </CardTitle>
+            <CardDescription>
+              Need help? Contact the Alpha One support team.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <a
+              href='mailto:alphaone@kanal.asia'
+              className='text-sm text-primary underline decoration-dotted underline-offset-2 hover:text-primary/80'
+            >
+              alphaone@kanal.asia
+            </a>
           </CardContent>
         </Card>
 

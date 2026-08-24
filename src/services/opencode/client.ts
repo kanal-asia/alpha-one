@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { delimiter, join } from "node:path";
 import { accessSync, constants, readFileSync, realpathSync, openSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import { resolveBundledOpenCode } from "../../lib/bundled-opencode";
 import type {
   ChatResult,
   HealthStatus,
@@ -50,8 +51,9 @@ function pathDirs(): string[] {
  * Resolve the OpenCode CLI to something that can be launched WITHOUT a shell and
  * WITHOUT invoking a Windows .cmd batch shim (which allocates a console window).
  *
- * Priority on Windows:
- *   1. A real .exe on PATH            -> run directly.
+ * Resolution priority (TASK-095):
+ *   0. BUNDLED: opencode-ai npm package binary (production path)
+ *   1. A real .exe on PATH            -> run directly (development fallback).
  *   2. An npm .cmd shim               -> DO NOT run the .cmd. Read the target it
  *                                        launches (a sibling .exe or .js) and run
  *                                        it directly with Node when needed.
@@ -59,6 +61,11 @@ function pathDirs(): string[] {
  * On POSIX: run the resolved binary directly.
  */
 export function resolveOpenCode(): Resolved | null {
+  // TASK-095: Check bundled binary first (production path)
+  const bundled = resolveBundledOpenCode();
+  if (bundled) return { command: bundled, prefixArgs: [] };
+
+  // Development fallback: search PATH
   const isWin = process.platform === "win32";
 
   if (!isWin) {
@@ -254,7 +261,7 @@ export async function detectProviderStatus(force = false): Promise<ProviderStatu
       executablePath: null,
       resolvedCommand: null,
       probeMs: null,
-      error: "OpenCode CLI not found on PATH. Install with: npm i -g opencode-ai",
+      error: "OpenCode CLI not found. Bundled binary missing from node_modules/opencode-ai. Run: npm install",
       checkedAt: new Date().toISOString(),
     };
     return cachedStatus;
@@ -736,7 +743,7 @@ export async function runChat(opts: {
 
   const resolved = resolveOpenCode();
   if (!resolved) {
-    throw new Error("OpenCode CLI not found. Install with: npm i -g opencode-ai");
+    throw new Error("OpenCode CLI not found. Bundled binary missing. Run: npm install");
   }
 
   const tmpDir = tmpdir();

@@ -112,7 +112,7 @@ export function RuntimeStatusBar() {
 
         {displayConnection === 'cli_not_installed' && (
           <span className='hidden text-muted-foreground md:inline'>
-            Install with: npm i -g opencode-ai
+            OpenCode binary not found. Run: npm install
           </span>
         )}
 
@@ -167,7 +167,7 @@ export function RuntimeStatusBar() {
 
       {showInstallHint && (
         <div className='px-4 pb-2 text-[11px] text-destructive'>
-          OpenCode CLI not found on PATH. Run <code>npm i -g opencode-ai</code> and
+          OpenCode binary not found. Run <code>npm install</code> and
           restart the runtime.
         </div>
       )}

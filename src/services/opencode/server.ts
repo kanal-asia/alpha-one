@@ -340,7 +340,7 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
 
   const resolved = resolveOpenCode();
   if (!resolved) {
-    return res.status(502).json({ error: "OpenCode CLI not found. Install with: npm i -g opencode-ai" });
+    return res.status(502).json({ error: "OpenCode CLI not found. Bundled binary missing. Run: npm install" });
   }
 
   const args = ["run", enhancedMessage, "--model", model.id, "--format", "json"];

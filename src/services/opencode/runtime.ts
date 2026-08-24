@@ -324,7 +324,7 @@ export class RuntimeManager {
       this.setStage("error");
       this.error = status.error ?? "OpenCode CLI not installed.";
       this.log("checking_cli", "error", this.error);
-      this.log("checking_cli", "info", "Install with: npm i -g opencode-ai");
+      this.log("checking_cli", "info", "Ensure opencode-ai is installed: npm install");
       this.healthStatus = {
         state: "down",
         cliReachable: false,

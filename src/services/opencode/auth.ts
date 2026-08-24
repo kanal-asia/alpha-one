@@ -27,7 +27,7 @@ function runAuth(args: string[], timeoutMs: number): Promise<OpenCodeAuthResult>
     return Promise.resolve({
       ok: false,
       command,
-      output: "OpenCode CLI not found. Install with: npm i -g opencode-ai",
+      output: "OpenCode CLI not found. Bundled binary missing. Run: npm install",
       timedOut: false,
     });
   }

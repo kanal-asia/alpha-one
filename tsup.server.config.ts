@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/server/alpha-server.ts'],
+  entry: ['src/server/alpha-server.ts', 'src/server/alpha-infra-server.ts'],
   format: ['esm'],
   outDir: 'dist/server',
   target: 'node22',

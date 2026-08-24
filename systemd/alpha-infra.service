@@ -1,0 +1,16 @@
+[Unit]
+Description=Alpha One Infrastructure Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/alpha-one
+ExecStart=/usr/bin/node dist/server/alpha-infra-server.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+EnvironmentFile=/root/alpha-one/.env
+
+[Install]
+WantedBy=multi-user.target

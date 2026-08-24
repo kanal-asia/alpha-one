@@ -136,18 +136,18 @@ const TOOL_LABELS: Record<string, string> = {
   // TASK-OPENCODE-050: Actual MCP tool names use the `google-sheets_google_sheets_*`
   // convention (dash prefix). The keys above were never matched, so the UI fell
   // back to raw `Using google-sheets_...` labels. Map the real names here.
-  'google-sheets_google_sheets_list_sheets': 'Memeriksa struktur spreadsheet',
-  'google-sheets_google_sheets_get_spreadsheet': 'Membaca metadata spreadsheet',
-  'google-sheets_google_sheets_read_range': 'Membaca data',
-  'google-sheets_google_sheets_read_ranges': 'Membaca beberapa bagian data',
-  'google-sheets_google_sheets_write_range': 'Menulis data',
-  'google-sheets_google_sheets_write_ranges': 'Menambahkan hasil',
-  'google-sheets_google_sheets_write_formulas': 'Menambahkan rumus',
-  'google-sheets_google_sheets_append_rows': 'Menambahkan baris',
-  'google-sheets_google_sheets_create_sheet': 'Membuat sheet baru',
-  'google-sheets_google_sheets_insert_dimension': 'Mengubah ukuran sheet',
-  'google-sheets_google_sheets_update_spreadsheet': 'Memformat / mengatur sheet',
-  'google-sheets_google_sheets_get_spreadsheet_info': 'Membaca informasi spreadsheet',
+  'google-sheets_google_sheets_list_sheets': 'Checking spreadsheet structure',
+  'google-sheets_google_sheets_get_spreadsheet': 'Reading spreadsheet metadata',
+  'google-sheets_google_sheets_read_range': 'Reading data',
+  'google-sheets_google_sheets_read_ranges': 'Reading data ranges',
+  'google-sheets_google_sheets_write_range': 'Writing data',
+  'google-sheets_google_sheets_write_ranges': 'Writing data ranges',
+  'google-sheets_google_sheets_write_formulas': 'Adding formulas',
+  'google-sheets_google_sheets_append_rows': 'Adding rows',
+  'google-sheets_google_sheets_create_sheet': 'Creating new sheet',
+  'google-sheets_google_sheets_insert_dimension': 'Resizing sheet',
+  'google-sheets_google_sheets_update_spreadsheet': 'Formatting sheet',
+  'google-sheets_google_sheets_get_spreadsheet_info': 'Reading spreadsheet info',
 }
 
 function mapToolToLabel(tool: string, input?: Record<string, unknown>): string {
@@ -193,33 +193,33 @@ function mapToolToLabel(tool: string, input?: Record<string, unknown>): string {
     const ranges = Array.isArray(input?.ranges) ? (input.ranges as string[]) : undefined
     const sheetName = range?.split('!')[0] ?? ranges?.[0]?.split('!')[0]
     const safeSheet = sheetName && sheetName !== 'Sheet1' ? ` ${sheetName.replace(/'/g, '')}` : ''
-    if (tool.endsWith('read_range') || tool.endsWith('read_ranges')) return `Membaca data${safeSheet}`
-    if (tool.endsWith('write_range') || tool.endsWith('write_ranges')) return `Menulis data${safeSheet}`
-    if (tool.endsWith('write_formulas')) return `Menambahkan rumus${safeSheet}`
+    if (tool.endsWith('read_range') || tool.endsWith('read_ranges')) return `Reading data${safeSheet}`
+    if (tool.endsWith('write_range') || tool.endsWith('write_ranges')) return `Writing data${safeSheet}`
+    if (tool.endsWith('write_formulas')) return `Adding formulas${safeSheet}`
     if (tool.endsWith('create_sheet')) {
       const title = typeof input?.title === 'string' ? input.title : undefined
-      return title ? `Membuat sheet "${title}"` : 'Membuat sheet baru'
+      return title ? `Creating sheet "${title}"` : 'Creating new sheet'
     }
     if (tool.endsWith('update_spreadsheet')) {
       const op = typeof input?.operation === 'string' ? input.operation : undefined
       const opLabel: Record<string, string> = {
-        repeatCell: 'Memformat sel',
-        setDataValidation: 'Menambahkan validasi data',
-        setBasicFilter: 'Menambahkan filter',
-        addConditionalFormatRule: 'Menambahkan format kondisional',
-        updateSheetProperties: 'Mengatur properti sheet',
-        autoResizeDimensions: 'Menyesuaikan ukuran kolom/baris',
-        updateDimensionProperties: 'Mengatur ukuran baris/kolom',
-        addSheet: 'Menambahkan tab baru',
-        mergeCells: 'Menggabungkan sel',
-        addNamedRange: 'Menambahkan named range',
+        repeatCell: 'Formatting cells',
+        setDataValidation: 'Adding data validation',
+        setBasicFilter: 'Adding filter',
+        addConditionalFormatRule: 'Adding conditional format',
+        updateSheetProperties: 'Setting sheet properties',
+        autoResizeDimensions: 'Adjusting column/row size',
+        updateDimensionProperties: 'Setting row/column size',
+        addSheet: 'Adding new tab',
+        mergeCells: 'Merging cells',
+        addNamedRange: 'Adding named range',
       }
-      return opLabel[op ?? ''] ?? 'Mengatur sheet'
+      return opLabel[op ?? ''] ?? 'Formatting sheet'
     }
-    if (tool.endsWith('list_sheets')) return 'Memeriksa struktur spreadsheet'
-    if (tool.endsWith('get_spreadsheet')) return 'Membaca metadata spreadsheet'
-    if (tool.endsWith('append_rows')) return 'Menambahkan baris'
-    if (tool.endsWith('insert_dimension')) return 'Mengubah ukuran sheet'
+    if (tool.endsWith('list_sheets')) return 'Checking spreadsheet structure'
+    if (tool.endsWith('get_spreadsheet')) return 'Reading spreadsheet metadata'
+    if (tool.endsWith('append_rows')) return 'Adding rows'
+    if (tool.endsWith('insert_dimension')) return 'Resizing sheet'
   }
   return base
 }

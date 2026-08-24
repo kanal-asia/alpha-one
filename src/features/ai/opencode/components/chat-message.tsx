@@ -186,9 +186,9 @@ function LiveProgress({ toolEvents, plan, lifecycle }: { toolEvents: ToolEvent[]
   const runningStage = [...(lifecycle ?? [])].reverse().find((s) => s.status === 'running')
   let currentAction: string
   if (active?.label) currentAction = active.label
-  else if (runningStage?.kind === 'continuation') currentAction = 'Melanjutkan pekerjaan…'
+  else if (runningStage?.kind === 'continuation') currentAction = 'Continuing work…'
   else if (lastEvent?.label) currentAction = lastEvent.status === 'completed' ? `${lastEvent.label}…` : lastEvent.label
-  else if (runningStage?.kind === 'thinking') currentAction = 'Memproses permintaan…'
+  else if (runningStage?.kind === 'thinking') currentAction = 'Processing request…'
   else currentAction = 'Working…'
 
   return (
@@ -214,7 +214,7 @@ function LiveProgress({ toolEvents, plan, lifecycle }: { toolEvents: ToolEvent[]
           only while streaming (this component renders only when streaming). */}
       <div className='flex items-center gap-2'>
         <ActivityIndicator />
-        <span className='truncate'>Sedang bekerja...</span>
+        <span className='truncate'>Working...</span>
       </div>
     </div>
   )
@@ -230,7 +230,7 @@ function ProgressIndicator() {
   return (
     <div className='flex items-center gap-2 text-sm text-muted-foreground'>
       <ActivityIndicator />
-      <span>Sedang bekerja...</span>
+      <span>Working...</span>
     </div>
   )
 }
@@ -369,7 +369,7 @@ export function ChatMessageView({
               {isContinuing && (
                 <div className='mb-1 flex items-center gap-2 text-sm text-muted-foreground'>
                   <RotateCcw className='size-3.5 shrink-0 text-primary' />
-                  <span>Melanjutkan pekerjaan…</span>
+                  <span>Continuing work…</span>
                 </div>
               )}
               {message.content && <Markdown content={message.content} />}
@@ -396,7 +396,7 @@ export function ChatMessageView({
             <div className='space-y-2'>
               <p className='flex items-center gap-1.5 text-sm text-muted-foreground'>
                 <Square className='size-3.5 shrink-0' />
-                Eksekusi dihentikan
+                Execution stopped
               </p>
               {hasToolEvents && (
                 <ExecutionSummary toolEvents={message.toolEvents} exitCode={message.exitCode} />

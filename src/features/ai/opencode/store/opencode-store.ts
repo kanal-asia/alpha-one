@@ -663,7 +663,7 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                           ? {
                               ...m,
                               executionState: 'progress',
-                              lifecycle: appendOrUpdateStage(m.lifecycle, 'thinking', 'Memproses permintaan…', 'running'),
+                              lifecycle: appendOrUpdateStage(m.lifecycle, 'thinking', 'Processing request…', 'running'),
                             }
                           : m
                       ),
@@ -688,7 +688,7 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                               lifecycle: pushStage(
                                 m.lifecycle,
                                 'continuation',
-                                'Melanjutkan pekerjaan',
+                                'Continuing work',
                                 'running',
                                 sessionId ? `attempt ${attempt} · ${sessionId}` : `attempt ${attempt}`
                               ),
@@ -844,7 +844,7 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                             lifecycle: pushStage(
                               m.lifecycle,
                               execState === 'completed' ? 'completed' : 'failed',
-                              execState === 'completed' ? 'Selesai' : 'Eksekusi tidak selesai',
+                              execState === 'completed' ? 'Completed' : 'Execution incomplete',
                               execState === 'completed' ? 'completed' : 'error',
                               execState === 'completed' ? undefined : 'agent stopped without a final answer'
                             ),
@@ -908,7 +908,7 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                             lifecycle:
                               m.status === 'done'
                                 ? m.lifecycle
-                                : pushStage(m.lifecycle, 'failed', chunk.error || 'Eksekusi gagal', 'error'),
+                                : pushStage(m.lifecycle, 'failed', chunk.error || 'Execution failed', 'error'),
                           }
                         }
                         if (m.role === 'user' && chunk.referenceErrors?.length) {
@@ -977,7 +977,7 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                       status: 'cancelled',
                       // TASK-OPENCODE-050: Cancelled is a first-class lifecycle state.
                       executionState: 'cancelled',
-                      lifecycle: pushStage(m.lifecycle, 'interrupted', 'Eksekusi dihentikan', 'error'),
+                      lifecycle: pushStage(m.lifecycle, 'interrupted', 'Execution stopped', 'error'),
                     }
                   : m
               ),

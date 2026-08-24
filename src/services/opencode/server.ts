@@ -1059,25 +1059,3 @@ app.get("/api/runtime/workspace", (_req: Request, res: Response) => {
 });
 
 export { app, runtimeManager };
-
-// Start server if run directly
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const PORT = process.env.PORT || 3001;
-  const server = app.listen(PORT, () => {
-    if (process.env.NODE_ENV !== "test") console.log(`OpenCode API server running on http://localhost:${PORT}`);
-    void runtimeManager.start();
-  });
-
-  // TASK-OPENCODE-045-R2: Disable HTTP timeout for SSE long-running execution.
-  // Express default timeout (5s) closes idle SSE connections during long tool execution.
-  // OpenCode agents can take minutes to complete ΓÇö the connection must stay alive.
-  server.timeout = 0;
-  server.keepAliveTimeout = 0;
-
-  const shutdown = () => {
-    void runtimeManager.stop();
-    server.close(() => process.exit(0));
-  };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
-}

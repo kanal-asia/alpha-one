@@ -12,6 +12,7 @@ import {
   disconnectGoogle,
   isConfigured,
   getValidAccessToken,
+  saveConnection,
 } from './oauth-service'
 
 export function createGoogleOAuthRouter(): Router {
@@ -127,6 +128,112 @@ export function createGoogleOAuthRouter(): Router {
     } catch (err) {
       return res.status(500).json({
         error: err instanceof Error ? err.message : 'Failed to disconnect.',
+      })
+    }
+  })
+
+  /**
+   * POST /api/google/oauth/persist-production
+   * Persists the production OAuth result locally.
+   * Called by the client after production OAuth verification.
+   *
+   * SECURITY: Validates sessionId against production OAuth session.
+   * The local server calls the production /status endpoint to verify
+   * the session exists and is completed before persisting.
+   */
+  router.post('/persist-production', async (req: Request, res: Response) => {
+    try {
+      const { sessionId, identity, tokens } = req.body as {
+        sessionId?: string
+        identity?: {
+          provider: string
+          email: string
+          displayName: string
+          avatarUrl: string | null
+          createdAt: string
+          updatedAt: string
+        }
+        tokens?: {
+          accessToken: string
+          refreshToken: string | undefined
+          expiresAt: number
+        }
+      }
+
+      // Validate required fields
+      if (!sessionId || !identity || !tokens) {
+        return res.status(400).json({
+          error: 'sessionId, identity, and tokens are required',
+        })
+      }
+
+      // Validate identity structure
+      if (!identity.provider || !identity.email || !identity.displayName) {
+        return res.status(400).json({
+          error: 'Invalid identity: provider, email, and displayName are required',
+        })
+      }
+
+      // Validate tokens structure
+      if (!tokens.accessToken || typeof tokens.expiresAt !== 'number') {
+        return res.status(400).json({
+          error: 'Invalid tokens: accessToken and expiresAt are required',
+        })
+      }
+
+      // SECURITY: Validate sessionId against production OAuth session
+      // Call production /status endpoint to verify session exists and is completed
+      const productionBaseUrl = process.env.PRODUCTION_BASE_URL || 'https://alpha.kanal.asia'
+      try {
+        const statusResponse = await fetch(`${productionBaseUrl}/api/google/oauth/status/${sessionId}`, {
+          headers: { Accept: 'application/json' },
+        })
+
+        if (!statusResponse.ok) {
+          return res.status(403).json({
+            error: 'Invalid or expired OAuth session',
+          })
+        }
+
+        const statusData = await statusResponse.json() as { status: string; identity?: { email: string } }
+
+        // Verify session is completed
+        if (statusData.status !== 'completed') {
+          return res.status(403).json({
+            error: 'OAuth session not completed',
+          })
+        }
+
+        // Verify identity email matches (optional additional binding)
+        if (statusData.identity?.email !== identity.email) {
+          return res.status(403).json({
+            error: 'Identity does not match OAuth session',
+          })
+        }
+      } catch (err) {
+        // If production server is unreachable, reject the request
+        return res.status(503).json({
+          error: 'Unable to verify OAuth session with production server',
+        })
+      }
+
+      const userId = getUserId(req)
+
+      // Save connection using the existing local persistence
+      await saveConnection(userId, {
+        email: identity.email,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        tokenExpiry: tokens.expiresAt,
+        scopes: [],
+        connectedAt: identity.createdAt,
+        updatedAt: identity.updatedAt,
+      })
+
+      return res.json({ success: true })
+    } catch (err) {
+      return res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to persist connection.',
       })
     }
   })

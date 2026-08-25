@@ -32,6 +32,14 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
+import {
+  startProductionOAuth,
+  pollProductionOAuthStatus,
+  verifyProductionOAuth,
+  getStoredSessionId,
+  clearStoredSessionId,
+  type ProductionOAuthVerifyResult,
+} from '@/lib/production-oauth-client'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -198,21 +206,8 @@ export function GoogleDriveBrowser({
     setConnecting(true)
     setError(null)
     try {
-      const res = await fetch('/api/google/oauth/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ returnTo: '/google/drive' }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.error ?? 'Unable to start Google connection. Please try again.')
-        return
-      }
-      if (data.url) {
-        window.location.href = data.url
-      } else if (data.error) {
-        setError(data.error)
-      }
+      const result = await startProductionOAuth()
+      window.location.href = result.url
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Google Workspace service is unavailable.')
     } finally {
@@ -325,6 +320,34 @@ export function GoogleDriveBrowser({
 
     async function checkStatus() {
       try {
+        // Check if we have a stored session from OAuth redirect
+        const storedSessionId = getStoredSessionId()
+        if (storedSessionId) {
+          // Poll production OAuth status
+          try {
+            const result = await pollProductionOAuthStatus(storedSessionId, 60, 2000)
+
+            if (result.status === 'completed' && result.identity) {
+              // Verify and get tokens
+              const verifyResult: ProductionOAuthVerifyResult = await verifyProductionOAuth(storedSessionId)
+
+              // Persist tokens locally via local server (include sessionId for binding)
+              await fetch('/api/google/oauth/persist-production', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId: storedSessionId,
+                  identity: verifyResult.identity,
+                  tokens: verifyResult.tokens,
+                }),
+              })
+            }
+          } catch {
+            // Production OAuth completion failed, continue with local status check
+          }
+          clearStoredSessionId()
+        }
+
         const data = await apiFetch<DriveStatus>('/api/google/drive/status')
         if (!cancelled) {
           setStatus(data)

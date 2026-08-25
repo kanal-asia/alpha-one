@@ -1,8 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Cloud, CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import {
+  startProductionOAuth,
+  pollProductionOAuthStatus,
+  verifyProductionOAuth,
+  getStoredSessionId,
+  clearStoredSessionId,
+  type ProductionOAuthVerifyResult,
+} from '@/lib/production-oauth-client'
 
 interface GoogleStatus {
   connected: boolean
@@ -37,13 +45,62 @@ export function GoogleConnectionCard() {
   const [refreshKey] = useState(() =>
     getInitialState().shouldRefresh ? 1 : 0
   )
+  const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Poll production OAuth status after redirect
+  const pollOAuthStatus = useCallback(async (sessionId: string) => {
+    try {
+      const result = await pollProductionOAuthStatus(sessionId, 60, 2000)
+
+      if (result.status === 'completed' && result.identity) {
+        // Verify and get tokens
+        const verifyResult: ProductionOAuthVerifyResult = await verifyProductionOAuth(sessionId)
+
+        // Persist tokens locally via local server (include sessionId for binding)
+        await fetch('/api/google/oauth/persist-production', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            identity: verifyResult.identity,
+            tokens: verifyResult.tokens,
+          }),
+        })
+
+        // Clear session and refresh status
+        clearStoredSessionId()
+        setStatus({
+          connected: true,
+          configured: true,
+          email: verifyResult.identity.email,
+          scopes: [],
+          connectedAt: verifyResult.identity.createdAt,
+        })
+      } else if (result.status === 'failed') {
+        setError(result.error || 'OAuth failed')
+        clearStoredSessionId()
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to complete OAuth')
+      clearStoredSessionId()
+    }
+  }, [])
 
   // Fetch status on mount and when refreshKey changes
   useEffect(() => {
     let cancelled = false
+    const currentPollingRef = pollingRef.current
 
     async function loadStatus() {
       try {
+        // Check if we have a stored session from OAuth redirect
+        const storedSessionId = getStoredSessionId()
+        if (storedSessionId) {
+          // Poll production OAuth status
+          await pollOAuthStatus(storedSessionId)
+        }
+
+        // Fetch local connection status
         const res = await fetch('/api/google/oauth/status')
         const data = await res.json()
         if (!cancelled) {
@@ -64,20 +121,21 @@ export function GoogleConnectionCard() {
 
     return () => {
       cancelled = true
+      if (currentPollingRef) {
+        clearTimeout(currentPollingRef)
+      }
     }
-  }, [refreshKey])
+  }, [refreshKey, pollOAuthStatus])
 
   const handleConnect = async () => {
     setConnecting(true)
     setError(null)
     try {
-      const res = await fetch('/api/google/oauth/connect', { method: 'POST' })
-      const data = await res.json()
-      if (data.url) {
-        window.location.href = data.url
-      } else if (data.error) {
-        setError(data.error)
-      }
+      // Start production OAuth flow
+      const result = await startProductionOAuth()
+
+      // Redirect to Google authorization URL
+      window.location.href = result.url
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect.')
     } finally {

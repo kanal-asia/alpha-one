@@ -30,6 +30,7 @@ export interface OAuthSession {
   sessionId: string
   state: string
   codeVerifier: string
+  returnTo?: string
   status: 'pending' | 'completed' | 'failed'
   identity: GoogleIdentity | null
   tokens: {

@@ -55,10 +55,13 @@ function generateSessionId(): string {
 export async function startProductionOAuth(): Promise<ProductionOAuthStartResult> {
   const sessionId = generateSessionId()
 
+  // Capture the current page URL to return to after OAuth
+  const returnTo = window.location.href
+
   const response = await fetch(`${PRODUCTION_BASE_URL}/api/google/oauth/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId }),
+    body: JSON.stringify({ sessionId, returnTo }),
   })
 
   if (!response.ok) {

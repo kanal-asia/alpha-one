@@ -70,12 +70,32 @@ app.get('/health', (_req: Request, res: Response) => {
 app.post('/google/oauth/start', async (req: Request, res: Response) => {
   try {
     const config = getGoogleConfig()
-    const { sessionId } = req.body as {
+    const { sessionId, returnTo } = req.body as {
       sessionId?: string
+      returnTo?: string
     }
 
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId is required' })
+    }
+
+    // Validate returnTo URL to prevent open redirect attacks
+    // Only allow localhost URLs for local-first architecture
+    let validatedReturnTo: string | undefined
+    if (returnTo) {
+      try {
+        const returnUrl = new URL(returnTo)
+        // Only allow localhost URLs (http or https)
+        if (
+          returnUrl.hostname === 'localhost' ||
+          returnUrl.hostname === '127.0.0.1' ||
+          returnUrl.hostname === '::1'
+        ) {
+          validatedReturnTo = returnTo
+        }
+      } catch {
+        // Invalid URL, ignore
+      }
     }
 
     // Generate OAuth state
@@ -90,6 +110,7 @@ app.post('/google/oauth/start', async (req: Request, res: Response) => {
       sessionId,
       state,
       codeVerifier,
+      returnTo: validatedReturnTo,
       status: 'pending',
       identity: null,
       tokens: null,
@@ -257,7 +278,11 @@ app.get('/google/oauth/callback', async (req: Request, res: Response) => {
     })
 
     // Redirect to success page
-    return res.redirect(`${CLIENT_URL}/settings?google_connected=true`)
+    // Use returnTo from session if available, otherwise fallback to CLIENT_URL
+    const redirectUrl = sessionEntry.returnTo
+      ? `${sessionEntry.returnTo}?google_connected=true`
+      : `${CLIENT_URL}/settings?google_connected=true`
+    return res.redirect(redirectUrl)
   } catch (err) {
     const message = encodeURIComponent(
       err instanceof Error ? err.message : 'OAuth callback failed'

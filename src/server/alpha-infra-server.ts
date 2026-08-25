@@ -354,34 +354,15 @@ app.post('/google/oauth/verify', async (req: Request, res: Response) => {
       return res.json({ status: session.status, error: session.error })
     }
 
-    // Return tokens and identity, then delete session (one-time use)
-    const result = {
+    // Return tokens and identity
+    // NOTE: Session is NOT deleted here to avoid race condition with
+    // persist-production (which verifies against /status before persisting).
+    // Expired sessions are cleaned up by the 5-minute cleanup interval.
+    return res.json({
       status: 'completed',
       identity: session.identity,
       tokens: session.tokens,
-    }
-
-    // Delete session after verification
-    const sessions = await import('node:fs/promises').then(async (fs) => {
-      try {
-        const data = await fs.readFile(
-          `${process.cwd()}/.alpha/infra/sessions.json`,
-          'utf-8'
-        )
-        return JSON.parse(data) as Record<string, OAuthSession>
-      } catch {
-        return {} as Record<string, OAuthSession>
-      }
     })
-    delete sessions[sessionId]
-    await import('node:fs/promises').then((fs) =>
-      fs.writeFile(
-        `${process.cwd()}/.alpha/infra/sessions.json`,
-        JSON.stringify(sessions, null, 2)
-      )
-    )
-
-    return res.json(result)
   } catch (err) {
     return res.status(500).json({
       error: err instanceof Error ? err.message : 'Failed to verify session',

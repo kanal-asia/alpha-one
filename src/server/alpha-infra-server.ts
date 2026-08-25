@@ -130,6 +130,12 @@ app.post('/google/oauth/start', async (req: Request, res: Response) => {
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile',
       'https://www.googleapis.com/auth/calendar.readonly',
+      // People API profile enrichment scopes
+      'https://www.googleapis.com/auth/user.addresses.read',
+      'https://www.googleapis.com/auth/user.birthday.read',
+      'https://www.googleapis.com/auth/user.gender.read',
+      'https://www.googleapis.com/auth/user.organization.read',
+      'https://www.googleapis.com/auth/user.phonenumbers.read',
     ]
 
     const params = new URLSearchParams({
@@ -388,6 +394,86 @@ app.get('/releases/manifest.json', (_req: Request, res: Response) => {
 
   res.setHeader('Cache-Control', 'public, max-age=3600')
   res.json(manifest)
+})
+
+// ---------------------------------------------------------------------------
+// Google People API — Profile Extraction
+// ---------------------------------------------------------------------------
+
+app.get('/google/people/profile', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.query as { sessionId?: string }
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId is required' })
+    }
+
+    // Get the session to find the access token
+    const session = await getOAuthSession(sessionId)
+    if (!session || session.status !== 'completed' || !session.tokens) {
+      return res.status(404).json({ error: 'Session not found or not completed' })
+    }
+
+    const accessToken = session.tokens.accessToken
+
+    // Request full People API profile
+    const personFields = [
+      'addresses',
+      'ageRanges',
+      'biographies',
+      'birthdays',
+      'calendarUrls',
+      'clientData',
+      'coverPhotos',
+      'emailAddresses',
+      'events',
+      'externalIds',
+      'genders',
+      'imClients',
+      'interests',
+      'locales',
+      'locations',
+      'memberships',
+      'metadata',
+      'miscKeywords',
+      'names',
+      'nicknames',
+      'occupations',
+      'organizations',
+      'phoneNumbers',
+      'photos',
+      'relations',
+      'sipAddresses',
+      'skills',
+      'urls',
+      'userDefined',
+    ].join(',')
+
+    const response = await fetch(
+      `https://people.googleapis.com/v1/people/me?personFields=${personFields}`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    )
+
+    if (!response.ok) {
+      const error = await response.text()
+      return res.status(response.status).json({
+        error: `People API request failed: ${error}`,
+      })
+    }
+
+    const profile = await response.json()
+
+    // Remove any tokens from the response before returning
+    delete profile.tokens
+
+    return res.json(profile)
+  } catch (err) {
+    return res.status(500).json({
+      error: err instanceof Error ? err.message : 'Failed to fetch profile',
+    })
+  }
 })
 
 // ---------------------------------------------------------------------------

@@ -169,7 +169,7 @@ export function createGoogleOAuthRouter(): Router {
       }
 
       // Validate identity structure
-      if (!identity.provider || !identity.providerUserId || !identity.email || !identity.displayName) {
+      if (!identity.provider || !identity.providerUserId?.trim() || !identity.email || !identity.displayName) {
         return res.status(400).json({
           error: 'Invalid identity: provider, providerUserId, email, and displayName are required',
         })

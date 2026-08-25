@@ -7,6 +7,13 @@
 import { randomBytes, createHash } from 'node:crypto'
 import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
+import {
+  loadConnections as loadConnectionsSqlite,
+  saveConnections as saveConnectionsSqlite,
+  getConnection as getConnectionSqlite,
+  saveConnection as saveConnectionSqlite,
+  disconnectGoogle as disconnectGoogleSqlite,
+} from '../../lib/sqlite-persistence'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -63,9 +70,7 @@ export const GOOGLE_OAUTH_SCOPES = [
 // Configuration
 // ---------------------------------------------------------------------------
 
-const CONNECTIONS_DIR = join(process.cwd(), '.alpha', 'google')
-const CONNECTIONS_FILE = join(CONNECTIONS_DIR, 'connections.json')
-const STATES_DIR = join(CONNECTIONS_DIR, 'states')
+const STATES_DIR = join(process.cwd(), '.alpha', 'google', 'states')
 
 function getConfig(): GoogleOAuthConfig {
   const clientId = process.env.GOOGLE_CLIENT_ID
@@ -115,23 +120,17 @@ async function loadAndDeleteOAuthState(state: string): Promise<OAuthState | null
 }
 
 // ---------------------------------------------------------------------------
-// Connection Persistence
+// Connection Persistence (SQLite)
 // ---------------------------------------------------------------------------
 
 async function loadConnections(): Promise<Record<string, GoogleConnection>> {
-  try {
-    const data = await readFile(CONNECTIONS_FILE, 'utf-8')
-    return JSON.parse(data) as Record<string, GoogleConnection>
-  } catch {
-    return {}
-  }
+  return loadConnectionsSqlite()
 }
 
 async function saveConnections(
   connections: Record<string, GoogleConnection>
 ): Promise<void> {
-  await mkdir(CONNECTIONS_DIR, { recursive: true })
-  await writeFile(CONNECTIONS_FILE, JSON.stringify(connections, null, 2))
+  return saveConnectionsSqlite(connections)
 }
 
 // ---------------------------------------------------------------------------
@@ -316,17 +315,24 @@ export async function getValidAccessToken(userId: string): Promise<string | null
 export async function getConnection(
   userId: string
 ): Promise<GoogleConnection | null> {
-  const connections = await loadConnections()
-  return connections[userId] ?? null
+  return getConnectionSqlite(userId)
 }
 
 /**
  * Disconnect Google Workspace for a user.
  */
 export async function disconnectGoogle(userId: string): Promise<void> {
-  const connections = await loadConnections()
-  delete connections[userId]
-  await saveConnections(connections)
+  return disconnectGoogleSqlite(userId)
+}
+
+/**
+ * Save a connection for a user (used by production OAuth flow).
+ */
+export async function saveConnection(
+  userId: string,
+  connection: Omit<GoogleConnection, 'userId'>
+): Promise<void> {
+  return saveConnectionSqlite(userId, connection)
 }
 
 /**

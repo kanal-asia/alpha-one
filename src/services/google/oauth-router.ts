@@ -147,6 +147,7 @@ export function createGoogleOAuthRouter(): Router {
         sessionId?: string
         identity?: {
           provider: string
+          providerUserId: string
           email: string
           displayName: string
           avatarUrl: string | null
@@ -168,9 +169,9 @@ export function createGoogleOAuthRouter(): Router {
       }
 
       // Validate identity structure
-      if (!identity.provider || !identity.email || !identity.displayName) {
+      if (!identity.provider || !identity.providerUserId || !identity.email || !identity.displayName) {
         return res.status(400).json({
-          error: 'Invalid identity: provider, email, and displayName are required',
+          error: 'Invalid identity: provider, providerUserId, email, and displayName are required',
         })
       }
 
@@ -221,6 +222,7 @@ export function createGoogleOAuthRouter(): Router {
 
       // Save connection using the existing local persistence
       await saveConnection(userId, {
+        providerUserId: identity.providerUserId,
         email: identity.email,
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,

@@ -1,5 +1,5 @@
 /**
- * TASK-OPENCODE-107: Alpha One SQLite Database Foundation
+ * TASK-OPENCODE-107/109: Alpha One SQLite Database Foundation
  *
  * SQLite persistence for Google OAuth connections.
  * Replaces the JSON file-based persistence with SQLite.
@@ -15,6 +15,7 @@ import { join } from 'node:path'
 
 export interface GoogleConnection {
   userId: string
+  providerUserId?: string
   email: string
   accessToken: string
   refreshToken?: string
@@ -45,6 +46,7 @@ function getDb(): DatabaseSync {
     db.exec(`
       CREATE TABLE IF NOT EXISTS google_connections (
         user_id TEXT PRIMARY KEY,
+        provider_user_id TEXT,
         email TEXT NOT NULL,
         access_token TEXT NOT NULL,
         refresh_token TEXT,
@@ -67,6 +69,7 @@ export async function loadConnections(): Promise<Record<string, GoogleConnection
   const stmt = database.prepare('SELECT * FROM google_connections')
   const rows = stmt.all() as Array<{
     user_id: string
+    provider_user_id: string | null
     email: string
     access_token: string
     refresh_token: string | null
@@ -80,6 +83,7 @@ export async function loadConnections(): Promise<Record<string, GoogleConnection
   for (const row of rows) {
     connections[row.user_id] = {
       userId: row.user_id,
+      providerUserId: row.provider_user_id ?? undefined,
       email: row.email,
       accessToken: row.access_token,
       refreshToken: row.refresh_token ?? undefined,
@@ -102,13 +106,14 @@ export async function saveConnections(
 
   // Insert all connections
   const stmt = database.prepare(`
-    INSERT INTO google_connections (user_id, email, access_token, refresh_token, token_expiry, scopes, connected_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO google_connections (user_id, provider_user_id, email, access_token, refresh_token, token_expiry, scopes, connected_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   for (const [userId, connection] of Object.entries(connections)) {
     stmt.run(
       userId,
+      connection.providerUserId ?? null,
       connection.email,
       connection.accessToken,
       connection.refreshToken ?? null,
@@ -125,6 +130,7 @@ export async function getConnection(userId: string): Promise<GoogleConnection | 
   const stmt = database.prepare('SELECT * FROM google_connections WHERE user_id = ?')
   const row = stmt.all(userId)[0] as {
     user_id: string
+    provider_user_id: string | null
     email: string
     access_token: string
     refresh_token: string | null
@@ -138,6 +144,7 @@ export async function getConnection(userId: string): Promise<GoogleConnection | 
 
   return {
     userId: row.user_id,
+    providerUserId: row.provider_user_id ?? undefined,
     email: row.email,
     accessToken: row.access_token,
     refreshToken: row.refresh_token ?? undefined,
@@ -154,12 +161,13 @@ export async function saveConnection(
 ): Promise<void> {
   const database = getDb()
   const stmt = database.prepare(`
-    INSERT OR REPLACE INTO google_connections (user_id, email, access_token, refresh_token, token_expiry, scopes, connected_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO google_connections (user_id, provider_user_id, email, access_token, refresh_token, token_expiry, scopes, connected_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   stmt.run(
     userId,
+    connection.providerUserId ?? null,
     connection.email,
     connection.accessToken,
     connection.refreshToken ?? null,

@@ -35,6 +35,7 @@ export interface GoogleTokens {
 
 export interface GoogleConnection {
   userId: string
+  providerUserId?: string
   email: string
   accessToken: string
   refreshToken?: string

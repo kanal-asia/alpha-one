@@ -50,6 +50,7 @@ import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes
 import { Route as AuthenticatedSettingsDisplayRouteImport } from './routes/_authenticated/settings/display'
 import { Route as AuthenticatedSettingsAppearanceRouteImport } from './routes/_authenticated/settings/appearance'
 import { Route as AuthenticatedSettingsAccountRouteImport } from './routes/_authenticated/settings/account'
+import { Route as AuthenticatedSettingsAboutRouteImport } from './routes/_authenticated/settings/about'
 import { Route as AuthenticatedProductivitySpreadsheetRouteImport } from './routes/_authenticated/productivity/spreadsheet'
 import { Route as AuthenticatedProductivityDocumentsRouteImport } from './routes/_authenticated/productivity/documents'
 import { Route as AuthenticatedGoogleSlidesRouteImport } from './routes/_authenticated/google/slides'
@@ -308,6 +309,12 @@ const AuthenticatedSettingsAccountRoute =
   AuthenticatedSettingsAccountRouteImport.update({
     id: '/account',
     path: '/account',
+    getParentRoute: () => AuthenticatedSettingsRouteRoute,
+  } as any)
+const AuthenticatedSettingsAboutRoute =
+  AuthenticatedSettingsAboutRouteImport.update({
+    id: '/about',
+    path: '/about',
     getParentRoute: () => AuthenticatedSettingsRouteRoute,
   } as any)
 const AuthenticatedProductivitySpreadsheetRoute =
@@ -585,6 +592,7 @@ export interface FileRoutesByFullPath {
   '/google/slides': typeof AuthenticatedGoogleSlidesRoute
   '/productivity/documents': typeof AuthenticatedProductivityDocumentsRoute
   '/productivity/spreadsheet': typeof AuthenticatedProductivitySpreadsheetRoute
+  '/settings/about': typeof AuthenticatedSettingsAboutRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
@@ -662,6 +670,7 @@ export interface FileRoutesByTo {
   '/google/slides': typeof AuthenticatedGoogleSlidesRoute
   '/productivity/documents': typeof AuthenticatedProductivityDocumentsRoute
   '/productivity/spreadsheet': typeof AuthenticatedProductivitySpreadsheetRoute
+  '/settings/about': typeof AuthenticatedSettingsAboutRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
@@ -745,6 +754,7 @@ export interface FileRoutesById {
   '/_authenticated/google/slides': typeof AuthenticatedGoogleSlidesRoute
   '/_authenticated/productivity/documents': typeof AuthenticatedProductivityDocumentsRoute
   '/_authenticated/productivity/spreadsheet': typeof AuthenticatedProductivitySpreadsheetRoute
+  '/_authenticated/settings/about': typeof AuthenticatedSettingsAboutRoute
   '/_authenticated/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/_authenticated/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/_authenticated/settings/display': typeof AuthenticatedSettingsDisplayRoute
@@ -826,6 +836,7 @@ export interface FileRouteTypes {
     | '/google/slides'
     | '/productivity/documents'
     | '/productivity/spreadsheet'
+    | '/settings/about'
     | '/settings/account'
     | '/settings/appearance'
     | '/settings/display'
@@ -903,6 +914,7 @@ export interface FileRouteTypes {
     | '/google/slides'
     | '/productivity/documents'
     | '/productivity/spreadsheet'
+    | '/settings/about'
     | '/settings/account'
     | '/settings/appearance'
     | '/settings/display'
@@ -985,6 +997,7 @@ export interface FileRouteTypes {
     | '/_authenticated/google/slides'
     | '/_authenticated/productivity/documents'
     | '/_authenticated/productivity/spreadsheet'
+    | '/_authenticated/settings/about'
     | '/_authenticated/settings/account'
     | '/_authenticated/settings/appearance'
     | '/_authenticated/settings/display'
@@ -1326,6 +1339,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsAccountRouteImport
       parentRoute: typeof AuthenticatedSettingsRouteRoute
     }
+    '/_authenticated/settings/about': {
+      id: '/_authenticated/settings/about'
+      path: '/about'
+      fullPath: '/settings/about'
+      preLoaderRoute: typeof AuthenticatedSettingsAboutRouteImport
+      parentRoute: typeof AuthenticatedSettingsRouteRoute
+    }
     '/_authenticated/productivity/spreadsheet': {
       id: '/_authenticated/productivity/spreadsheet'
       path: '/productivity/spreadsheet'
@@ -1603,6 +1623,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedSettingsRouteRouteChildren {
+  AuthenticatedSettingsAboutRoute: typeof AuthenticatedSettingsAboutRoute
   AuthenticatedSettingsAccountRoute: typeof AuthenticatedSettingsAccountRoute
   AuthenticatedSettingsAppearanceRoute: typeof AuthenticatedSettingsAppearanceRoute
   AuthenticatedSettingsDisplayRoute: typeof AuthenticatedSettingsDisplayRoute
@@ -1612,6 +1633,7 @@ interface AuthenticatedSettingsRouteRouteChildren {
 
 const AuthenticatedSettingsRouteRouteChildren: AuthenticatedSettingsRouteRouteChildren =
   {
+    AuthenticatedSettingsAboutRoute: AuthenticatedSettingsAboutRoute,
     AuthenticatedSettingsAccountRoute: AuthenticatedSettingsAccountRoute,
     AuthenticatedSettingsAppearanceRoute: AuthenticatedSettingsAppearanceRoute,
     AuthenticatedSettingsDisplayRoute: AuthenticatedSettingsDisplayRoute,

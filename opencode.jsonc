@@ -1,0 +1,47 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "google-sheets": {
+      "type": "local",
+      "command": ["npx", "tsx", "mcp-servers/google-sheets/server.ts"],
+      "cwd": ".",
+      "enabled": true,
+      "timeout": 15000
+    },
+    "google-docs": {
+      "type": "local",
+      "command": ["npx", "tsx", "mcp-servers/google-docs/server.ts"],
+      "cwd": ".",
+      "enabled": true,
+      "timeout": 15000
+    },
+    "google-slides": {
+      "type": "local",
+      "command": ["npx", "tsx", "mcp-servers/google-slides/server.ts"],
+      "cwd": ".",
+      "enabled": true,
+      "timeout": 15000
+    },
+    "google-drive": {
+      "type": "local",
+      "command": ["npx", "tsx", "mcp-servers/google-drive/server.ts"],
+      "cwd": ".",
+      "enabled": true,
+      "timeout": 15000
+    },
+    "google-apps-script": {
+      "type": "local",
+      "command": ["npx", "tsx", "mcp-servers/google-apps-script/server.ts"],
+      "cwd": ".",
+      "enabled": true,
+      "timeout": 15000
+    },
+    "google-calendar": {
+      "type": "local",
+      "command": ["npx", "tsx", "mcp-servers/google-calendar/server.ts"],
+      "cwd": ".",
+      "enabled": true,
+      "timeout": 15000
+    }
+  }
+}

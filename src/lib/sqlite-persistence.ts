@@ -12,6 +12,7 @@ const _require = _createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as typeof import('node:sqlite')
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { DATA_ROOT } from './data-root'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,7 +37,7 @@ export interface GoogleConnection {
 // Database
 // ---------------------------------------------------------------------------
 
-const DATA_DIR = join(process.cwd(), 'data')
+const DATA_DIR = join(DATA_ROOT, 'data')
 const DB_PATH = join(DATA_DIR, 'alpha-one.sql')
 
 let db: DatabaseSync | null = null

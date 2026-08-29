@@ -26,20 +26,15 @@ import { Textarea } from '@/components/ui/textarea'
 
 const profileFormSchema = z.object({
   username: z
-    .string('Please enter your username.')
+    .string({ message: 'Please enter your username.' })
     .min(2, 'Username must be at least 2 characters.')
     .max(30, 'Username must not be longer than 30 characters.'),
-  email: z.email({
-    error: (iss) =>
-      iss.input === undefined
-        ? 'Please select an email to display.'
-        : undefined,
-  }),
+  email: z.string().email('Please select an email to display.'),
   bio: z.string().max(160).min(4),
   urls: z
     .array(
       z.object({
-        value: z.url('Please enter a valid URL.'),
+        value: z.string().url('Please enter a valid URL.'),
       })
     )
     .optional(),

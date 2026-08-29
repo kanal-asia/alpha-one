@@ -7,6 +7,7 @@
 import { randomBytes, createHash } from 'node:crypto'
 import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
+import { DATA_ROOT } from '../../lib/data-root'
 import {
   loadConnections as loadConnectionsSqlite,
   saveConnections as saveConnectionsSqlite,
@@ -71,7 +72,7 @@ export const GOOGLE_OAUTH_SCOPES = [
 // Configuration
 // ---------------------------------------------------------------------------
 
-const STATES_DIR = join(process.cwd(), '.alpha', 'google', 'states')
+const STATES_DIR = join(DATA_ROOT, '.alpha', 'google', 'states')
 
 function getConfig(): GoogleOAuthConfig {
   const clientId = process.env.GOOGLE_CLIENT_ID

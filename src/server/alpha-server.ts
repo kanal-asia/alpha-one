@@ -5,24 +5,47 @@
  * (the vertical slice: tasks, workflows, artifacts, history) on the same app.
  */
 import 'dotenv/config'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { join, dirname } from 'node:path'
+import { existsSync } from 'node:fs'
+import { pathToFileURL, fileURLToPath } from 'node:url'
+import express from 'express'
 import { app, runtimeManager } from '../services/opencode/server'
 import { bootstrapPlatform } from '../platform/server/bootstrap'
 import { createWorkspaceRouter } from '../platform/server/router'
 import { createWorkspaceService } from '../platform/workspace/service'
 import { createFsRouter } from '../services/fs/fs-router'
+import { DATA_ROOT } from '../lib/data-root'
 
 const workspaceRoot = process.cwd()
 const kernel = bootstrapPlatform({
   workspace: { id: 'local', name: 'Alpha One', path: workspaceRoot },
-  artifactsDir: join(workspaceRoot, '.alpha', 'artifacts'),
+  artifactsDir: join(DATA_ROOT, '.alpha', 'artifacts'),
   withOpenCode: true,
 })
 
 const service = createWorkspaceService(kernel)
 app.use('/api/ws', createWorkspaceRouter(service))
 app.use('/api/fs', createFsRouter())
+
+// ---------------------------------------------------------------------------
+// Production frontend serving — serve the built SPA from dist/.
+// Static middleware is registered AFTER API routes to avoid intercepting
+// /api/* requests. SPA fallback serves index.html for client-side routes.
+// ---------------------------------------------------------------------------
+// Derive distDir from the server file's own location, not process.cwd().
+// Dev:   <project>/dist/server/alpha-server.js → parent = <project>/dist
+// Prod:  resources/app.asar/dist/server/alpha-server.js → parent = resources/app.asar/dist
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+const distDir = join(__dirname, '..')
+if (existsSync(distDir)) {
+  app.use(express.static(distDir, { index: 'index.html' }))
+  // SPA fallback — serve index.html for non-API, non-file routes
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next()
+    res.sendFile(join(distDir, 'index.html'))
+  })
+}
 
 // ---------------------------------------------------------------------------
 // TASK-OPENCODE-024: Port collision detection + runtime reuse.
@@ -54,7 +77,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(0)
   }
 
-  const server = app.listen(PORT, () => {
+  const server = app.listen(PORT, '127.0.0.1', () => {
     if (process.env.NODE_ENV !== 'test') {
       // eslint-disable-next-line no-console
       console.log(`Alpha One API server running on http://localhost:${PORT}`)

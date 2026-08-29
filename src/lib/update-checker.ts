@@ -19,6 +19,8 @@ import {
   validateManifest,
 } from './release-manifest'
 
+export type { UpdateResult }
+
 /**
  * Default manifest URL for production distribution.
  * Overridable via VITE_UPDATE_MANIFEST_URL env var for development.

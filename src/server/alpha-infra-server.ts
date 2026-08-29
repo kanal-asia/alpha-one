@@ -15,6 +15,8 @@ import 'dotenv/config'
 import express, { type Request, type Response } from 'express'
 import cors from 'cors'
 import { randomBytes, createHash } from 'node:crypto'
+import { join } from 'node:path'
+import { DATA_ROOT } from '../lib/data-root'
 import {
   upsertIdentity,
   createOAuthSession,
@@ -271,7 +273,7 @@ app.get('/google/oauth/callback', async (req: Request, res: Response) => {
     const allSessions = await import('node:fs/promises').then(async (fs) => {
       try {
         const data = await fs.readFile(
-          `${process.cwd()}/.alpha/infra/sessions.json`,
+          join(DATA_ROOT, '.alpha', 'infra', 'sessions.json'),
           'utf-8'
         )
         return JSON.parse(data) as Record<string, OAuthSession>

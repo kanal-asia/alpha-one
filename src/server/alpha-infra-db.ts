@@ -11,6 +11,7 @@
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { DATA_ROOT } from '../lib/data-root'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,7 +48,7 @@ export interface OAuthSession {
 // Storage
 // ---------------------------------------------------------------------------
 
-const DATA_DIR = join(process.cwd(), '.alpha', 'infra')
+const DATA_DIR = join(DATA_ROOT, '.alpha', 'infra')
 const IDENTITIES_FILE = join(DATA_DIR, 'identities.json')
 const SESSIONS_FILE = join(DATA_DIR, 'sessions.json')
 

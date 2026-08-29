@@ -26,12 +26,15 @@ import {
   type OAuthSession,
 } from './alpha-infra-db'
 
+import { saveConnection, getConnection } from '../lib/sqlite-persistence'
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
 
 const PORT = Number(process.env.PORT) || 3002
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000'
+const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000 // 5 minutes safety buffer
 
 function getGoogleConfig() {
   const clientId = process.env.GOOGLE_CLIENT_ID
@@ -45,6 +48,90 @@ function getGoogleConfig() {
   }
 
   return { clientId, clientSecret, redirectUri }
+}
+
+// ---------------------------------------------------------------------------
+// TASK-MSI-027: VPS Token Refresh
+// ---------------------------------------------------------------------------
+
+/**
+ * Get a valid Google access token for the specified user.
+ *
+ * This function:
+ * 1. Loads the user's Google connection from VPS SQLite
+ * 2. Checks if the access token is still valid (with 5-minute safety buffer)
+ * 3. If valid, returns the existing access token
+ * 4. If expired and refresh_token exists, calls Google's token endpoint
+ * 5. On success, persists the new tokens and returns the new access token
+ * 6. On failure, returns null (connection preserved for retry)
+ *
+ * @param userId - The user ID (always 'local-user' in single-user architecture)
+ * @returns Valid access token, or null if unavailable/expired
+ */
+export async function getValidAccessToken(userId: string): Promise<string | null> {
+  // 1. Load connection from SQLite
+  const connection = await getConnection(userId)
+  if (!connection) {
+    return null
+  }
+
+  // 2. Check if token is still valid (with safety buffer)
+  if (Date.now() < connection.tokenExpiry - TOKEN_EXPIRY_BUFFER_MS) {
+    return connection.accessToken
+  }
+
+  // 3. No refresh token available - cannot refresh
+  if (!connection.refreshToken) {
+    return null
+  }
+
+  // 4. Attempt refresh via Google token endpoint
+  try {
+    const config = getGoogleConfig()
+
+    const refreshResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        refresh_token: connection.refreshToken,
+        grant_type: 'refresh_token',
+      }),
+    })
+
+    if (!refreshResponse.ok) {
+      // Refresh failed - connection preserved for retry
+      return null
+    }
+
+    const tokens = await refreshResponse.json() as {
+      access_token: string
+      refresh_token?: string
+      expires_in: number
+    }
+
+    // 5. Persist refreshed tokens
+    const now = new Date().toISOString()
+    await saveConnection(userId, {
+      provider: connection.provider ?? 'google',
+      providerUserId: connection.providerUserId,
+      email: connection.email,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token ?? connection.refreshToken, // Handle rotation
+      tokenExpiry: Date.now() + tokens.expires_in * 1000,
+      scopes: connection.scopes,
+      status: connection.status ?? 'active',
+      connectedAt: connection.connectedAt,
+      updatedAt: now,
+      lastRefreshAt: now,
+    })
+
+    return tokens.access_token
+  } catch {
+    // Network error - connection preserved for retry
+    return null
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +370,20 @@ app.get('/google/oauth/callback', async (req: Request, res: Response) => {
       expiresAt: Date.now() + tokens.expires_in * 1000,
     })
 
+    // TASK-MSI-026: Persist to SQLite for VPS-side connection storage
+    await saveConnection('local-user', {
+      provider: 'google',
+      providerUserId: userInfo.id,
+      email: userInfo.email,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      tokenExpiry: Date.now() + tokens.expires_in * 1000,
+      scopes: tokens.scope ? tokens.scope.split(' ') : [],
+      status: 'active',
+      connectedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+
     // Redirect to success page
     // Use returnTo from session if available, otherwise fallback to CLIENT_URL
     const redirectUrl = sessionEntry.returnTo
@@ -372,6 +473,60 @@ app.post('/google/oauth/verify', async (req: Request, res: Response) => {
   } catch (err) {
     return res.status(500).json({
       error: err instanceof Error ? err.message : 'Failed to verify session',
+    })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Google Connection — Stored Connection (SQLite read-back)
+// ---------------------------------------------------------------------------
+
+app.get('/google/connection', async (_req: Request, res: Response) => {
+  try {
+    const connection = await getConnection('local-user')
+
+    if (!connection) {
+      return res.status(404).json({ error: 'No Google connection found' })
+    }
+
+    // Return connection metadata (NOT tokens - security)
+    return res.json({
+      provider: connection.provider,
+      email: connection.email,
+      providerUserId: connection.providerUserId,
+      scopes: connection.scopes,
+      status: connection.status,
+      connectedAt: connection.connectedAt,
+      updatedAt: connection.updatedAt,
+      lastRefreshAt: connection.lastRefreshAt,
+    })
+  } catch (err) {
+    return res.status(500).json({
+      error: err instanceof Error ? err.message : 'Failed to read connection',
+    })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// TASK-MSI-027/028: Google Access Token (for VPS API proxying)
+// ---------------------------------------------------------------------------
+
+app.get('/google/access-token', async (_req: Request, res: Response) => {
+  try {
+    const accessToken = await getValidAccessToken('local-user')
+
+    if (!accessToken) {
+      return res.status(401).json({
+        error: 'Google account not connected or token refresh failed',
+      })
+    }
+
+    // Return access token for VPS-internal API proxying
+    // This endpoint is NOT exposed to external clients
+    return res.json({ accessToken })
+  } catch (err) {
+    return res.status(500).json({
+      error: err instanceof Error ? err.message : 'Failed to get access token',
     })
   }
 })
@@ -472,6 +627,247 @@ app.get('/google/people/profile', async (req: Request, res: Response) => {
   } catch (err) {
     return res.status(500).json({
       error: err instanceof Error ? err.message : 'Failed to fetch profile',
+    })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// TASK-MSI-028: Google Drive API Proxy
+// ---------------------------------------------------------------------------
+
+const GOOGLE_DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3'
+const GOOGLE_DRIVE_UPLOAD_API_BASE = 'https://www.googleapis.com/upload/drive/v3'
+
+const DRIVE_LIST_FIELDS = 'nextPageToken,files(id,name,mimeType,modifiedTime,size,iconLink,webViewLink,thumbnailLink,hasThumbnail,videoMediaMetadata,parents)'
+
+/**
+ * Authenticated fetch wrapper for Google Drive API.
+ * Uses VPS-side getValidAccessToken() for token management.
+ */
+async function driveProxyFetch<T>(
+  userId: string,
+  path: string,
+  params: Record<string, string> = {},
+  options: RequestInit = {}
+): Promise<T> {
+  const accessToken = await getValidAccessToken(userId)
+  if (!accessToken) {
+    throw new Error('Google account not connected or token refresh failed')
+  }
+
+  const url = new URL(path)
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value)
+  }
+
+  const response = await fetch(url.toString(), {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...options.headers,
+    },
+  })
+
+  if (!response.ok) {
+    const errorBody = await response.text()
+    const error = new Error(`Google Drive API error: ${response.status}`)
+    ;(error as any).status = response.status
+    ;(error as any).body = errorBody
+    throw error
+  }
+
+  return response.json() as Promise<T>
+}
+
+/**
+ * List files from Google Drive.
+ * GET /google/drive/files?q=...&pageSize=...&pageToken=...&orderBy=...&fields=...
+ */
+app.get('/google/drive/files', async (req: Request, res: Response) => {
+  try {
+    const userId = 'local-user'
+    const { q, pageSize, pageToken, orderBy, fields } = req.query as {
+      q?: string
+      pageSize?: string
+      pageToken?: string
+      orderBy?: string
+      fields?: string
+    }
+
+    const params: Record<string, string> = {
+      includeItemsFromAllDrives: 'true',
+      supportsAllDrives: 'true',
+    }
+
+    if (q) params.q = q
+    if (pageSize) params.pageSize = pageSize
+    if (pageToken) params.pageToken = pageToken
+    if (orderBy) params.orderBy = orderBy
+    params.fields = fields || DRIVE_LIST_FIELDS
+
+    const result = await driveProxyFetch<any>(
+      userId,
+      `${GOOGLE_DRIVE_API_BASE}/files`,
+      params
+    )
+
+    return res.json(result)
+  } catch (err: any) {
+    const status = err.status || 500
+    return res.status(status).json({
+      error: err.message || 'Failed to list Drive files',
+    })
+  }
+})
+
+/**
+ * Get file metadata from Google Drive.
+ * GET /google/drive/files/:fileId?fields=...
+ */
+app.get('/google/drive/files/:fileId', async (req: Request, res: Response) => {
+  try {
+    const userId = 'local-user'
+    const { fileId } = req.params
+    const { fields } = req.query as { fields?: string }
+
+    const params: Record<string, string> = {
+      supportsAllDrives: 'true',
+    }
+    if (fields) params.fields = fields
+
+    const result = await driveProxyFetch<any>(
+      userId,
+      `${GOOGLE_DRIVE_API_BASE}/files/${fileId}`,
+      params
+    )
+
+    return res.json(result)
+  } catch (err: any) {
+    const status = err.status || 500
+    return res.status(status).json({
+      error: err.message || 'Failed to get file metadata',
+    })
+  }
+})
+
+/**
+ * Download/export file content from Google Drive.
+ * GET /google/drive/files/:fileId/content?mimeType=...&alt=media
+ */
+app.get('/google/drive/files/:fileId/content', async (req: Request, res: Response) => {
+  try {
+    const userId = 'local-user'
+    const { fileId } = req.params
+    const { mimeType, alt } = req.query as { mimeType?: string; alt?: string }
+
+    const accessToken = await getValidAccessToken(userId)
+    if (!accessToken) {
+      return res.status(401).json({ error: 'Google account not connected or token refresh failed' })
+    }
+
+    // Determine if this is an export or media download
+    let url: string
+    if (mimeType && mimeType !== 'application/vnd.google-apps.script') {
+      // Export Google Workspace file
+      url = `${GOOGLE_DRIVE_API_BASE}/files/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`
+    } else {
+      // Download binary content
+      url = `${GOOGLE_DRIVE_API_BASE}/files/${fileId}?alt=media`
+    }
+
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+
+    if (!response.ok) {
+      const errorBody = await response.text()
+      const error = new Error(`Google Drive API error: ${response.status}`)
+      ;(error as any).status = response.status
+      ;(error as any).body = errorBody
+      throw error
+    }
+
+    // Stream the response
+    const contentType = response.headers.get('content-type') || 'application/octet-stream'
+    res.setHeader('Content-Type', contentType)
+
+    if (response.headers.get('content-length')) {
+      res.setHeader('Content-Length', response.headers.get('content-length')!)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      return res.status(500).json({ error: 'Failed to stream response' })
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      res.write(value)
+    }
+    res.end()
+  } catch (err: any) {
+    const status = err.status || 500
+    return res.status(status).json({
+      error: err.message || 'Failed to download file',
+    })
+  }
+})
+
+/**
+ * Proxy thumbnail image from Google Drive.
+ * GET /google/drive/files/:fileId/thumbnail
+ */
+app.get('/google/drive/files/:fileId/thumbnail', async (req: Request, res: Response) => {
+  try {
+    const userId = 'local-user'
+    const { fileId } = req.params
+
+    // First get the file metadata to find the thumbnail link
+    const metadata = await driveProxyFetch<any>(
+      userId,
+      `${GOOGLE_DRIVE_API_BASE}/files/${fileId}`,
+      { fields: 'thumbnailLink,hasThumbnail', supportsAllDrives: 'true' }
+    )
+
+    if (!metadata.thumbnailLink) {
+      return res.status(404).json({ error: 'No thumbnail available' })
+    }
+
+    // Fetch the thumbnail
+    const accessToken = await getValidAccessToken(userId)
+    if (!accessToken) {
+      return res.status(401).json({ error: 'Google account not connected' })
+    }
+
+    const response = await fetch(metadata.thumbnailLink, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+
+    if (!response.ok) {
+      return res.status(response.status).json({ error: 'Failed to fetch thumbnail' })
+    }
+
+    // Stream the thumbnail
+    const contentType = response.headers.get('content-type') || 'image/jpeg'
+    res.setHeader('Content-Type', contentType)
+    res.setHeader('Cache-Control', 'public, max-age=3600')
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      return res.status(500).json({ error: 'Failed to stream thumbnail' })
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      res.write(value)
+    }
+    res.end()
+  } catch (err: any) {
+    const status = err.status || 500
+    return res.status(status).json({
+      error: err.message || 'Failed to proxy thumbnail',
     })
   }
 })

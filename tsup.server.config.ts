@@ -14,6 +14,8 @@ export default defineConfig({
   external: [
     // OpenCode binary is resolved at runtime, not imported
     'opencode-ai',
+    // node:sqlite is experimental built-in, must not be bundled
+    'node:sqlite',
   ],
   banner: {
     js: `import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);`,

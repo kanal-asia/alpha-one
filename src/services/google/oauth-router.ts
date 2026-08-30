@@ -21,6 +21,11 @@ export function createGoogleOAuthRouter(): Router {
   /**
    * GET /api/google/oauth/status
    * Returns the connection status for the current user.
+   *
+   * NOTE: `configured` is always `true` because the VPS is authoritative
+   * for Google OAuth. The local server does not need Google credentials;
+   * the production OAuth flow is handled by the VPS. This endpoint
+   * reflects connection state only, not local configuration.
    */
   router.get('/status', async (req: Request, res: Response) => {
     try {
@@ -28,7 +33,7 @@ export function createGoogleOAuthRouter(): Router {
       const connection = await getConnection(userId)
 
       if (!connection) {
-        return res.json({ connected: false, configured: isConfigured() })
+        return res.json({ connected: false, configured: true })
       }
 
       // Check if token is still valid
@@ -36,7 +41,7 @@ export function createGoogleOAuthRouter(): Router {
 
       return res.json({
         connected: Boolean(token),
-        configured: isConfigured(),
+        configured: true,
         email: connection.email,
         scopes: connection.scopes,
         connectedAt: connection.connectedAt,

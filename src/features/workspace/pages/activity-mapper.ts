@@ -66,8 +66,8 @@ interface EventMapping {
   title: (entry: HistoryEntry) => string
   description: (entry: HistoryEntry) => string
   category: ActivityCategory
-  icon: LucideIcon
-  iconColor: string
+  icon: LucideIcon | ((entry: HistoryEntry) => LucideIcon)
+  iconColor: string | ((entry: HistoryEntry) => string)
 }
 
 const EVENT_MAPPINGS: Partial<Record<WorkspaceEventType, EventMapping>> = {
@@ -95,8 +95,8 @@ const EVENT_MAPPINGS: Partial<Record<WorkspaceEventType, EventMapping>> = {
       return status === 'completed' ? 'Finished successfully' : 'Encountered an error'
     },
     category: 'tasks',
-    icon: (e) => (e.detail.status === 'completed' ? CheckCircle2 : XCircle),
-    iconColor: (e) => (e.detail.status === 'completed' ? 'text-emerald-500' : 'text-red-500'),
+    icon: (e: HistoryEntry) => (e.detail.status === 'completed' ? CheckCircle2 : XCircle),
+    iconColor: (e: HistoryEntry) => (e.detail.status === 'completed' ? 'text-emerald-500' : 'text-red-500'),
   },
   'workflow.started': {
     title: () => 'Workflow started',
@@ -121,8 +121,8 @@ const EVENT_MAPPINGS: Partial<Record<WorkspaceEventType, EventMapping>> = {
       return `${completed}/${total} steps completed`
     },
     category: 'workflows',
-    icon: (e) => (e.detail.status === 'completed' ? CheckCircle2 : XCircle),
-    iconColor: (e) => (e.detail.status === 'completed' ? 'text-emerald-500' : 'text-red-500'),
+    icon: (e: HistoryEntry) => (e.detail.status === 'completed' ? CheckCircle2 : XCircle),
+    iconColor: (e: HistoryEntry) => (e.detail.status === 'completed' ? 'text-emerald-500' : 'text-red-500'),
   },
   'workflow.failed': {
     title: () => 'Workflow failed',
@@ -153,8 +153,8 @@ const EVENT_MAPPINGS: Partial<Record<WorkspaceEventType, EventMapping>> = {
       return ok ? `Succeeded${suffix}` : `Failed${suffix}`
     },
     category: 'operations',
-    icon: (e) => (e.detail.ok ? CheckCircle2 : XCircle),
-    iconColor: (e) => (e.detail.ok ? 'text-emerald-500' : 'text-red-500'),
+    icon: (e: HistoryEntry) => (e.detail.ok ? CheckCircle2 : XCircle),
+    iconColor: (e: HistoryEntry) => (e.detail.ok ? 'text-emerald-500' : 'text-red-500'),
   },
   'artifact.created': {
     title: () => 'File created',
@@ -195,8 +195,8 @@ const EVENT_MAPPINGS: Partial<Record<WorkspaceEventType, EventMapping>> = {
       return error ?? cap
     },
     category: 'runtime',
-    icon: (e) => (e.detail.ok ? CheckCircle2 : XCircle),
-    iconColor: (e) => (e.detail.ok ? 'text-emerald-500' : 'text-red-500'),
+    icon: (e: HistoryEntry) => (e.detail.ok ? CheckCircle2 : XCircle),
+    iconColor: (e: HistoryEntry) => (e.detail.ok ? 'text-emerald-500' : 'text-red-500'),
   },
   'runtime.failed': {
     title: () => 'Runtime failed',
@@ -222,8 +222,8 @@ const EVENT_MAPPINGS: Partial<Record<WorkspaceEventType, EventMapping>> = {
       return duration != null ? `Finished in ${formatDuration(duration)}` : 'Finished'
     },
     category: 'runtime',
-    icon: (e) => (e.detail.ok ? CheckCircle2 : XCircle),
-    iconColor: (e) => (e.detail.ok ? 'text-emerald-500' : 'text-red-500'),
+    icon: (e: HistoryEntry) => (e.detail.ok ? CheckCircle2 : XCircle),
+    iconColor: (e: HistoryEntry) => (e.detail.ok ? 'text-emerald-500' : 'text-red-500'),
   },
   'error.occurred': {
     title: () => 'Error occurred',
@@ -284,7 +284,7 @@ export function toActivityViewItem(entry: HistoryEntry): ActivityViewItem {
     }
   }
 
-  const resolvedIcon = typeof mapping.icon === 'function' ? mapping.icon(entry) : mapping.icon
+  const resolvedIcon = (typeof mapping.icon === 'function' ? mapping.icon(entry) : mapping.icon) as LucideIcon
   const resolvedIconColor =
     typeof mapping.iconColor === 'function' ? mapping.iconColor(entry) : mapping.iconColor
 

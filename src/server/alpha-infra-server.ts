@@ -638,7 +638,6 @@ app.get('/google/people/profile', async (req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 
 const GOOGLE_DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3'
-const GOOGLE_DRIVE_UPLOAD_API_BASE = 'https://www.googleapis.com/upload/drive/v3'
 
 const DRIVE_LIST_FIELDS = 'nextPageToken,files(id,name,mimeType,modifiedTime,size,iconLink,webViewLink,thumbnailLink,hasThumbnail,videoMediaMetadata,parents)'
 
@@ -760,7 +759,7 @@ app.get('/google/drive/files/:fileId/content', async (req: Request, res: Respons
   try {
     const userId = 'local-user'
     const { fileId } = req.params
-    const { mimeType, alt } = req.query as { mimeType?: string; alt?: string }
+    const { mimeType } = req.query as { mimeType?: string; alt?: string }
 
     const accessToken = await getValidAccessToken(userId)
     if (!accessToken) {

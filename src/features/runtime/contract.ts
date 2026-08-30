@@ -58,6 +58,7 @@ export interface RuntimeModel {
     providerId: string
     modelId: string
     detailUrl: string
+    canonicalUrl?: string
     inputPrice: number | null
     outputPrice: number | null
     inputModalities: string[]

@@ -5,9 +5,8 @@
  * on dynamically selected free ports, ensuring agent/test runtimes
  * never conflict with the primary developer runtime on port 3001.
  */
-import { createServer, type Server } from 'node:http'
+import { createServer } from 'node:http'
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
-import { app, runtimeManager } from '../services/opencode/server'
 
 // ---------------------------------------------------------------------------
 // Port Allocation

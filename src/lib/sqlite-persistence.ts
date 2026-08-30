@@ -40,9 +40,9 @@ export interface GoogleConnection {
 const DATA_DIR = join(DATA_ROOT, 'data')
 const DB_PATH = join(DATA_DIR, 'alpha-one.sql')
 
-let db: DatabaseSync | null = null
+let db: InstanceType<typeof DatabaseSync> | null = null
 
-function getDb(): DatabaseSync {
+function getDb(): InstanceType<typeof DatabaseSync> {
   if (!db) {
     // Ensure data directory exists
     mkdirSync(DATA_DIR, { recursive: true })
@@ -74,7 +74,7 @@ function getDb(): DatabaseSync {
   return db
 }
 
-function migrateDatabase(database: DatabaseSync): void {
+function migrateDatabase(database: InstanceType<typeof DatabaseSync>): void {
   // Check which columns exist
   const columns = database.prepare("PRAGMA table_info(google_connections)").all() as Array<{ name: string }>
   const columnNames = new Set(columns.map(c => c.name))

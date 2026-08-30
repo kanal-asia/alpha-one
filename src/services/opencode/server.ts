@@ -17,7 +17,6 @@ import {
   getOpenCodeGoData,
 } from "./opencode-go";
 import { spawn } from "node:child_process";
-import { pathToFileURL } from "node:url";
 import { resolve as resolvePath, isAbsolute } from "node:path";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { RuntimeManager, detectWorkspace } from "./runtime";
@@ -60,7 +59,7 @@ app.use("/api/google/sheets", createGoogleSheetsRouter());
 // Resource Library ΓÇö register agent-created resources as references.
 // ---------------------------------------------------------------------------
 app.post("/api/resources/register", (req: Request, res: Response) => {
-  const { provider, name, externalId, mimeType, url, path, size, lastModified, metadata } = req.body ?? {};
+  const { provider, name, externalId } = req.body ?? {};
   if (!provider || !name || !externalId) {
     return res.status(400).json({ error: "provider, name, and externalId are required." });
   }

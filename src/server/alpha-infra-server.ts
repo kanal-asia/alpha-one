@@ -221,7 +221,7 @@ app.post('/google/oauth/start', async (req: Request, res: Response) => {
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile',
       'https://www.googleapis.com/auth/calendar.readonly',
-      'https://www.googleapis.com/auth/calendar',
+      'https://www.googleapis.com/auth/calendar.events',
       // People API profile enrichment scopes
       'https://www.googleapis.com/auth/user.addresses.read',
       'https://www.googleapis.com/auth/user.birthday.read',

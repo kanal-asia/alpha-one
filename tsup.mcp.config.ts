@@ -7,6 +7,7 @@ const servers = [
   'google-drive',
   'google-apps-script',
   'google-calendar',
+  'gmail',
 ]
 
 export default defineConfig({

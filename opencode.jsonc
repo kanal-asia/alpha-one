@@ -42,6 +42,13 @@
       "cwd": ".",
       "enabled": true,
       "timeout": 15000
+    },
+    "gmail": {
+      "type": "local",
+      "command": ["node", "--experimental-strip-types", "mcp-servers/gmail/server.ts"],
+      "cwd": ".",
+      "enabled": true,
+      "timeout": 15000
     }
   }
 }

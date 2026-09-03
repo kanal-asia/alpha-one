@@ -62,9 +62,11 @@ export const SCOPES = {
   driveWriteFile: 'https://www.googleapis.com/auth/drive.file',
   driveWrite: 'https://www.googleapis.com/auth/drive',
   calendarRead: 'https://www.googleapis.com/auth/calendar.readonly',
-  calendarWrite: 'https://www.googleapis.com/auth/calendar',
+  calendarEvents: 'https://www.googleapis.com/auth/calendar.events',
   scriptProjects: 'https://www.googleapis.com/auth/script.projects',
   scriptExecute: 'https://www.googleapis.com/auth/script.scriptapp',
+  gmailRead: 'https://www.googleapis.com/auth/gmail.readonly',
+  gmailCompose: 'https://www.googleapis.com/auth/gmail.compose',
   sheets: 'https://www.googleapis.com/auth/spreadsheets',
   userinfoEmail: 'https://www.googleapis.com/auth/userinfo.email',
   userinfoProfile: 'https://www.googleapis.com/auth/userinfo.profile',
@@ -149,13 +151,6 @@ export const CAPABILITIES: CapabilityDef[] = [
     write: false,
   },
   {
-    capability: 'google.calendar.write',
-    service: 'google-calendar',
-    label: 'Google Calendar write',
-    requiredScopes: [SCOPES.calendarWrite],
-    write: true,
-  },
-  {
     capability: 'google.appsscript.read',
     service: 'google-apps-script',
     label: 'Google Apps Script project read',
@@ -168,6 +163,20 @@ export const CAPABILITIES: CapabilityDef[] = [
     label: 'Google Apps Script execution',
     requiredScopes: [SCOPES.scriptExecute],
     write: false,
+  },
+  {
+    capability: 'google.gmail.read',
+    service: 'google-gmail',
+    label: 'Google Gmail read',
+    requiredScopes: [SCOPES.gmailRead],
+    write: false,
+  },
+  {
+    capability: 'google.gmail.compose',
+    service: 'google-gmail',
+    label: 'Google Gmail compose',
+    requiredScopes: [SCOPES.gmailCompose],
+    write: true,
   },
 ]
 

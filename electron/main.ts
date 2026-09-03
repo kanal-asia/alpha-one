@@ -140,7 +140,7 @@ function ensureOpenCodeMcpConfig(): void {
   const mcpBase = join(process.resourcesPath, 'app', 'mcp-servers-dist')
   const nodeExe = join(process.resourcesPath, 'node.exe')
 
-  const servers = ['google-sheets', 'google-docs', 'google-slides', 'google-drive', 'google-apps-script', 'google-calendar']
+  const servers = ['google-sheets', 'google-docs', 'google-slides', 'google-drive', 'google-apps-script', 'google-calendar', 'gmail']
   const mcpEntries: Record<string, unknown> = {}
   for (const name of servers) {
     mcpEntries[name] = {

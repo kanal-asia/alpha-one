@@ -63,16 +63,32 @@ export function ProjectSelector({
   )
 
   useEffect(() => {
-    const onMessage = (e: MessageEvent) => {
-      const data = e.data as {
-        source?: string
-        folder?: { id: string; name: string; path?: string }
-      } | undefined
-      if (!data || data.source !== DRIVE_PICKER_MESSAGE_SOURCE || !data.folder) return
+    const onPickerReturn = (data: {
+      source?: string
+      folder?: { id: string; name: string; path?: string }
+    }) => {
+      console.log('[ProjectSelector] onPickerReturn invoked:', JSON.stringify(data).substring(0, 300))
+      if (!data || data.source !== DRIVE_PICKER_MESSAGE_SOURCE || !data.folder) {
+        console.log('[ProjectSelector] picker return filtered out (source/folder mismatch)')
+        return
+      }
+      console.log('[ProjectSelector] Setting context path:', data.folder.id, 'label:', data.folder.path || data.folder.name)
       setNewContextPath(data.folder.id)
       setNewContextLabel(data.folder.path || data.folder.name)
       driveWindowRef.current = null
     }
+
+    // Electron: listen for IPC messages from picker window
+    if (window.electronAPI) {
+      console.log('[ProjectSelector] Registering electronAPI picker return listener')
+      const cleanup = window.electronAPI.onPickerReturn(onPickerReturn)
+      return () => {
+        cleanup()
+      }
+    }
+
+    // Browser: listen for postMessage events from picker window
+    const onMessage = (e: MessageEvent) => onPickerReturn(e.data)
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
   }, [])

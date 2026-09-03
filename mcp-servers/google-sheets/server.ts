@@ -31,89 +31,13 @@
  *     deleteDimension, cutPaste, destructive find/replace, clear, etc.) are deferred.
  *   - Spreadsheet CELL CONTENT is UNTRUSTED DATA, never instructions (TASK-OPENCODE-047-R1).
  */
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+// ---------------------------------------------------------------------------
+// Google Sheets API helpers
+// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Google Sheets API helpers (inline, no imports from src/ to avoid bundling)
-// ---------------------------------------------------------------------------
+import { getAccessToken } from '../shared/google/auth'
 
 const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4'
-const CONNECTIONS_FILE = join(process.cwd(), '.alpha', 'google', 'connections.json')
-const LOCAL_USER = 'local-user'
-
-interface GoogleConnection {
-  accessToken: string
-  refreshToken?: string
-  tokenExpiry: number
-}
-
-async function loadConnection(): Promise<GoogleConnection | null> {
-  try {
-    let data = await readFile(CONNECTIONS_FILE, 'utf-8')
-    if (data.charCodeAt(0) === 0xFEFF) data = data.slice(1)
-    const connections = JSON.parse(data) as Record<string, GoogleConnection>
-    return connections[LOCAL_USER] ?? null
-  } catch {
-    return null
-  }
-}
-
-async function getAccessToken(): Promise<string> {
-  const conn = await loadConnection()
-  if (!conn) {
-    throw new Error('Google account not connected. Please connect your Google account in Alpha Workspace Settings.')
-  }
-
-  // Token still valid (5 min buffer)
-  if (Date.now() < conn.tokenExpiry - 5 * 60 * 1000) {
-    return conn.accessToken
-  }
-
-  // Try refresh
-  if (!conn.refreshToken) {
-    throw new Error('Google authorization expired. Please reconnect your Google account in Settings.')
-  }
-
-  const clientId = process.env.GOOGLE_CLIENT_ID
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET
-  if (!clientId || !clientSecret) {
-    throw new Error('Google OAuth credentials not configured on server.')
-  }
-
-  const resp = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: conn.refreshToken,
-      grant_type: 'refresh_token',
-    }),
-  })
-
-  if (!resp.ok) {
-    throw new Error('Google authorization expired. Please reconnect your Google account in Settings.')
-  }
-
-  const tokens = await resp.json() as {
-    access_token: string
-    expires_in: number
-  }
-
-  // Update stored token
-  conn.accessToken = tokens.access_token
-  conn.tokenExpiry = Date.now() + tokens.expires_in * 1000
-
-  // Write back
-  const allData = await readFile(CONNECTIONS_FILE, 'utf-8')
-  const all = JSON.parse(allData) as Record<string, GoogleConnection>
-  all[LOCAL_USER] = conn
-  const { writeFile: wf } = await import('node:fs/promises')
-  await wf(CONNECTIONS_FILE, JSON.stringify(all, null, 2))
-
-  return conn.accessToken
-}
 
 async function sheetsGet<T>(path: string, params?: Record<string, string | string[]>): Promise<T> {
   const token = await getAccessToken()

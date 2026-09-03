@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
   startProductionOAuth,
+  completeProductionOAuth,
   pollProductionOAuthStatus,
-  verifyProductionOAuth,
   getStoredSessionId,
   clearStoredSessionId,
   type ProductionOAuthVerifyResult,
@@ -42,9 +42,10 @@ export function GoogleConnectionCard() {
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [error, setError] = useState<string | null>(() => getInitialState().initialError)
-  const [refreshKey] = useState(() =>
-    getInitialState().shouldRefresh ? 1 : 0
-  )
+  const [refreshKey] = useState(() => {
+    const state = getInitialState()
+    return state.shouldRefresh ? 1 : 0
+  })
   const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Poll production OAuth status after redirect
@@ -131,13 +132,33 @@ export function GoogleConnectionCard() {
     setConnecting(true)
     setError(null)
     try {
-      // Start production OAuth flow
+      // Start production OAuth flow. This stores the sessionId in sessionStorage.
       const result = await startProductionOAuth()
+      const sessionId = getStoredSessionId()
 
-      // Redirect to Google authorization URL
-      window.location.href = result.url
+      // Open the Google authorization URL in the system browser instead of
+      // navigating the main window away. This preserves the SPA and its
+      // completion context so the post-Allow return no longer blanks the window.
+      window.open(result.url, '_blank')
+
+      if (!sessionId) {
+        throw new Error('OAuth session was not initialized.')
+      }
+
+      // Poll the production session to completion in the MAIN window, then
+      // verify + persist locally. This keeps the app usable after Allow.
+      const verifyResult = await completeProductionOAuth(sessionId)
+      clearStoredSessionId()
+      setStatus({
+        connected: true,
+        configured: true,
+        email: verifyResult.identity.email,
+        scopes: [],
+        connectedAt: verifyResult.identity.createdAt,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect.')
+      clearStoredSessionId()
     } finally {
       setConnecting(false)
     }

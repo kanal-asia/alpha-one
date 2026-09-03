@@ -32,20 +32,19 @@ app.use('/api/fs', createFsRouter())
 // Static middleware is registered AFTER API routes to avoid intercepting
 // /api/* requests. SPA fallback serves index.html for client-side routes.
 // ---------------------------------------------------------------------------
-// Derive distDir from the server file's own location, not process.cwd().
-// Dev:   <project>/dist/server/alpha-server.js → parent = <project>/dist
-// Prod:  resources/app.asar/dist/server/alpha-server.js → parent = resources/app.asar/dist
+// In Electron production, DIST_DIR env var points to extracted frontend dist
+// (extracted from ASAR to temp directory for HTTP serving).
+// In dev/standalone, derive distDir from the server file's own location.
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
-const distDir = join(__dirname, '..')
-if (existsSync(distDir)) {
-  app.use(express.static(distDir, { index: 'index.html' }))
-  // SPA fallback — serve index.html for non-API, non-file routes
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api/')) return next()
-    res.sendFile(join(distDir, 'index.html'))
-  })
-}
+const distDir = process.env.DIST_DIR || join(__dirname, '..')
+const indexHtml = join(distDir, 'index.html')
+app.use(express.static(distDir, { index: 'index.html' }))
+// SPA fallback — serve index.html for non-API, non-file routes
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/')) return next()
+  res.sendFile(indexHtml)
+})
 
 // ---------------------------------------------------------------------------
 // TASK-OPENCODE-024: Port collision detection + runtime reuse.

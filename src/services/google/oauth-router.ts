@@ -245,6 +245,46 @@ export function createGoogleOAuthRouter(): Router {
     }
   })
 
+  /**
+   * GET /api/google/mcp/token
+   * Returns a valid Google access token for MCP server use.
+   *
+   * MCP servers call this endpoint instead of reading credentials directly.
+   * The backend handles token validation, refresh (using server-side client
+   * credentials), and SQLite persistence — keeping GOOGLE_CLIENT_SECRET
+   * server-side only.
+   *
+   * Returns: { accessToken: string, email: string }
+   * Errors: 401 if not connected, 500 on failure
+   */
+  router.get('/mcp/token', async (_req: Request, res: Response) => {
+    try {
+      const userId = getUserId(_req)
+      const connection = await getConnection(userId)
+
+      if (!connection) {
+        return res.status(401).json({
+          error: 'Google account not connected. Please connect your Google account in Alpha Workspace Settings.',
+        })
+      }
+
+      // getValidAccessToken handles expiry check + refresh using server-side env vars
+      const token = await getValidAccessToken(userId)
+
+      if (!token) {
+        return res.status(401).json({
+          error: 'Google authorization expired. Please reconnect your Google account in Settings.',
+        })
+      }
+
+      return res.json({ accessToken: token, email: connection.email })
+    } catch (err) {
+      return res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to obtain access token.',
+      })
+    }
+  })
+
   return router
 }
 

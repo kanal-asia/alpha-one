@@ -24,6 +24,7 @@ export default defineConfig({
     'express',
     'cors',
     'dotenv',
+    'pptxgenjs',
   ],
   define: {
     'import.meta.url': 'import.meta.url',

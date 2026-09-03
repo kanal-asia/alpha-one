@@ -2,6 +2,8 @@
   "name": "alpha-one",
   "private": false,
   "version": "1.0.0",
+  "description": "Alpha One — AI-powered workspace",
+  "author": "Kanal Asia",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n web,runtime -c cyan,magenta \"npm:dev:web\" \"npm:dev:server\"",
@@ -10,6 +12,8 @@
     "dev:infra": "tsx src/server/alpha-infra-server.ts",
     "build": "tsc -b && vite build",
     "build:server": "tsup --config tsup.server.config.ts",
+    "build:electron": "npx tsup --config tsup.electron.config.ts",
+    "build:package": "npm run build:server && npm run build && npm run build:electron",
     "start:server": "node dist/server/alpha-server.js",
     "start:infra": "node dist/server/alpha-infra-server.js",
     "lint": "eslint .",
@@ -75,6 +79,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@electron/asar": "^4.3.0",
     "@eslint/js": "^10.0.1",
     "@tanstack/eslint-plugin-query": "^5.99.0",
     "@tanstack/react-query-devtools": "^5.99.0",
@@ -91,6 +96,7 @@
     "@vitest/coverage-v8": "^4.1.4",
     "@vitest/ui": "^4.1.4",
     "concurrently": "^9.0.1",
+    "electron": "^35.7.0",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
@@ -99,6 +105,7 @@
     "playwright": "1.59.1",
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.7.2",
+    "sharp": "^0.35.4",
     "tsup": "^8.5.1",
     "tsx": "^4.19.1",
     "typescript": "~6.0.3",

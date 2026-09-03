@@ -7,6 +7,7 @@ import {
   Search,
   ArrowLeft,
   Check,
+  CheckCircle2,
   AlertCircle,
   Loader2,
   FolderOpen,
@@ -34,6 +35,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import {
   startProductionOAuth,
+  completeProductionOAuth,
   pollProductionOAuthStatus,
   verifyProductionOAuth,
   getStoredSessionId,
@@ -206,10 +208,31 @@ export function GoogleDriveBrowser({
     setConnecting(true)
     setError(null)
     try {
+      // Start production OAuth flow. This stores the sessionId in sessionStorage.
       const result = await startProductionOAuth()
-      window.location.href = result.url
+      const sessionId = getStoredSessionId()
+
+      // Open the Google authorization URL in the system browser instead of
+      // navigating the main window away. This preserves the SPA and its
+      // completion context so the post-Allow return no longer blanks the window.
+      window.open(result.url, '_blank')
+
+      if (!sessionId) {
+        throw new Error('OAuth session was not initialized.')
+      }
+
+      // Poll the production session to completion in the MAIN window, then
+      // verify + persist locally and refresh Drive status.
+      const verifyResult = await completeProductionOAuth(sessionId)
+      clearStoredSessionId()
+      const data = await apiFetch<DriveStatus>('/api/google/drive/status')
+      setStatus(data)
+      if (data.connected) {
+        void loadTabFiles('my-drive')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Google Workspace service is unavailable.')
+      clearStoredSessionId()
     } finally {
       setConnecting(false)
     }
@@ -524,9 +547,13 @@ export function GoogleDriveBrowser({
                 <Cloud className='size-6' />
                 Google Drive
               </h1>
-              <p className='text-sm text-muted-foreground'>
+              <div className='flex flex-wrap items-center gap-2 text-sm text-muted-foreground'>
                 {status.email ? `Browsing as ${status.email}` : 'Browse your Google Drive files.'}
-              </p>
+                <span className='inline-flex items-center gap-1 rounded-full border border-green-500/40 bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600 dark:text-green-400'>
+                  <CheckCircle2 className='size-3.5' />
+                  Connected
+                </span>
+              </div>
             </div>
             <div className='flex items-center gap-2'>
               <div className='flex items-center gap-1 rounded-lg border p-1'>

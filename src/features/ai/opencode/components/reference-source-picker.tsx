@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Cloud, File as FileIcon, FileCode } from 'lucide-react'
 import type { ReferenceAttachment } from '@/features/ai/references/contract'
 import { openDriveFilePicker } from '@/features/google/components/drive-file-picker'
@@ -28,6 +28,8 @@ export function ReferenceSourcePicker({
   const [scriptProjects, setScriptProjects] = useState<ScriptProjectSummary[]>([])
   const [scriptLoading, setScriptLoading] = useState(false)
   const driveWindowRef = useRef<Window | null>(null)
+  const onAddRef = useRef(onAddReference)
+  onAddRef.current = onAddReference
 
   const fetchScriptProjects = async () => {
     setScriptLoading(true)
@@ -43,30 +45,30 @@ export function ReferenceSourcePicker({
   }
 
   useEffect(() => {
-    const onMessage = (e: MessageEvent) => {
-      const data = e.data as
-        | {
-            source?: string
-            file?: {
-              id: string
-              name: string
-              mimeType: string
-              size?: string
-              modifiedTime: string
-              path?: string
-            }
-          }
-        | undefined
+    const onPickerReturn = (data: {
+      source?: string
+      file?: {
+        id: string
+        name: string
+        mimeType: string
+        size?: string
+        modifiedTime: string
+        path?: string
+      }
+    }) => {
+      console.log('[RefSourcePicker] onPickerReturn invoked:', JSON.stringify(data).substring(0, 300))
       if (
         !data ||
         data.source !== DRIVE_FILE_PICKER_MESSAGE_SOURCE ||
         !data.file
       ) {
+        console.log('[RefSourcePicker] picker return filtered out (source/file mismatch)')
         return
       }
+      console.log('[RefSourcePicker] Received file:', data.file.name, 'id:', data.file.id)
       driveWindowRef.current = null
       const f = data.file
-      onAddReference({
+      onAddRef.current({
         provider: 'google_drive',
         name: f.name,
         fileId: f.id,
@@ -75,9 +77,21 @@ export function ReferenceSourcePicker({
         modifiedTime: f.modifiedTime,
       })
     }
+
+    // Electron: listen for IPC messages from picker window
+    if (window.electronAPI) {
+      console.log('[RefSourcePicker] Registering electronAPI picker return listener')
+      const cleanup = window.electronAPI.onPickerReturn(onPickerReturn)
+      return () => {
+        cleanup()
+      }
+    }
+
+    // Browser: listen for postMessage events from picker window
+    const onMessage = (e: MessageEvent) => onPickerReturn(e.data)
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [onAddReference])
+  }, [])
 
   const handleLocalSelect = (file: LocalFileSelection) => {
     onAddReference({

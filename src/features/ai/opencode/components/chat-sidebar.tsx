@@ -132,11 +132,17 @@ export function ChatSidebar({
                     <span className='block truncate text-xs text-muted-foreground'>
                       {chat.project?.name ?? 'No project'}
                     </span>
-                    {chat.project?.path && (
-                      <span className='block truncate text-[11px] text-muted-foreground/70'>
-                        {chat.project.path}
-                      </span>
-                    )}
+                    {chat.project?.type === 'google-drive'
+                      ? chat.project?.label && (
+                          <span className='block truncate text-[11px] text-muted-foreground/70'>
+                            {chat.project.label}
+                          </span>
+                        )
+                      : chat.project?.path && (
+                          <span className='block truncate text-[11px] text-muted-foreground/70'>
+                            {chat.project.path}
+                          </span>
+                        )}
                   </button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

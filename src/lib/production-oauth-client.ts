@@ -151,3 +151,39 @@ export function getStoredSessionId(): string | null {
 export function clearStoredSessionId(): void {
   sessionStorage.removeItem('alpha_oauth_session_id')
 }
+
+/**
+ * Poll the production OAuth session to completion, then verify and persist the
+ * resulting identity/tokens via the LOCAL backend (/api/google/oauth/persist-production).
+ *
+ * This is the local completion step that runs in the MAIN application window
+ * (which survives the external OAuth navigation). It does NOT redesign the VPS
+ * OAuth contract: it reuses start/poll/verify exactly as before, and only adds
+ * the local persistence call that the existing GoogleConnectionCard performed.
+ */
+export async function completeProductionOAuth(
+  sessionId: string
+): Promise<ProductionOAuthVerifyResult> {
+  const status = await pollProductionOAuthStatus(sessionId)
+
+  if (status.status === 'failed') {
+    throw new Error(status.error || 'OAuth failed')
+  }
+  if (status.status !== 'completed' || !status.identity) {
+    throw new Error('OAuth session did not complete')
+  }
+
+  const verifyResult = await verifyProductionOAuth(sessionId)
+
+  await fetch('/api/google/oauth/persist-production', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sessionId,
+      identity: verifyResult.identity,
+      tokens: verifyResult.tokens,
+    }),
+  })
+
+  return verifyResult
+}

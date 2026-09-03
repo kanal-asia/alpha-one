@@ -1,20 +1,16 @@
 /**
- * TASK-066: Shared local Google OAuth credential access.
+ * TASK-066 / MSI-054: Shared Google OAuth credential access.
  *
- * Reads the existing local credential file used by the proven Google Sheets MCP
- * (mcp-servers/google-sheets/server.ts) and returns a usable access token,
- * refreshing it locally when near expiry.
+ * Returns a usable access token by calling the Alpha One backend, which
+ * owns the SQLite credential state and server-side client credentials.
  *
  * Boundary:
- * - Credentials stay on the user's machine. This module never sends credentials
- *   anywhere except Google's OAuth token endpoint during refresh.
+ * - Credentials stay on the backend. This module never handles client
+ *   secrets — only the returned access token.
  * - It knows nothing about service scopes, tools, or API calls.
  * - It never decides which scopes a service needs (that belongs to each
  *   service's authorization layer).
  */
-
-import { readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
 
 export interface GoogleConnection {
   userId?: string
@@ -25,34 +21,53 @@ export interface GoogleConnection {
   scopes?: string[]
 }
 
-const DEFAULT_CONNECTIONS_FILE = join(process.cwd(), '.alpha', 'google', 'connections.json')
-const DEFAULT_CONNECTION_KEY = 'local-user'
-
-export function connectionsFilePath(): string {
-  return process.env.GOOGLE_CONNECTIONS_FILE || DEFAULT_CONNECTIONS_FILE
+/**
+ * Backend base URL. In the Electron MSI runtime the backend listens on
+ * 127.0.0.1:PORT where PORT is injected by the Electron main process.
+ * MCP servers inherit this via process.env from the spawned backend.
+ */
+function getBackendBaseUrl(): string {
+  const port = process.env.PORT || '3001'
+  return `http://127.0.0.1:${port}`
 }
 
-export function connectionKeyName(): string {
-  return process.env.GOOGLE_CONNECTION_KEY || DEFAULT_CONNECTION_KEY
+/**
+ * Fetch a valid access token from the Alpha One backend.
+ *
+ * The backend reads from SQLite (google_connections), validates token
+ * expiry, refreshes using server-side GOOGLE_CLIENT_ID/SECRET if needed,
+ * and returns the valid token. This keeps client secrets server-side only.
+ */
+export async function getAccessToken(): Promise<string> {
+  const baseUrl = getBackendBaseUrl()
+  const resp = await fetch(`${baseUrl}/api/google/oauth/mcp/token`)
+
+  if (resp.status === 401) {
+    const body = await resp.json().catch(() => ({}))
+    const msg = (body as { error?: string }).error || 'Google account not connected.'
+    throw new Error(msg)
+  }
+
+  if (!resp.ok) {
+    throw new Error(`Google auth backend unavailable (HTTP ${resp.status}). Is the Alpha One backend running?`)
+  }
+
+  const data = (await resp.json()) as { accessToken: string; email?: string }
+  return data.accessToken
 }
 
-/** Persist an updated connection for the active local key, preserving the file format. */
-export async function persistConnection(updated: GoogleConnection): Promise<void> {
-  const file = connectionsFilePath()
-  let allData = await readFile(file, 'utf-8')
-  if (allData.charCodeAt(0) === 0xFEFF) allData = allData.slice(1)
-  const all = JSON.parse(allData) as Record<string, GoogleConnection>
-  all[connectionKeyName()] = updated
-  await writeFile(file, JSON.stringify(all, null, 2))
-}
-
+/**
+ * Load the current Google connection metadata from the backend.
+ * Returns null if not connected.
+ */
 export async function loadGoogleConnection(): Promise<GoogleConnection | null> {
   try {
-    let data = await readFile(connectionsFilePath(), 'utf-8')
-    // Strip UTF-8 BOM if present (Powerhell's Set-Content -Encoding UTF8 adds it)
-    if (data.charCodeAt(0) === 0xFEFF) data = data.slice(1)
-    const connections = JSON.parse(data) as Record<string, GoogleConnection>
-    return connections[connectionKeyName()] ?? null
+    const baseUrl = getBackendBaseUrl()
+    const resp = await fetch(`${baseUrl}/api/google/oauth/status`)
+    if (!resp.ok) return null
+    const data = (await resp.json()) as { connected: boolean; email?: string; scopes?: string[] }
+    if (!data.connected) return null
+    return { email: data.email, accessToken: '', tokenExpiry: 0, scopes: data.scopes }
   } catch {
     return null
   }
@@ -60,59 +75,26 @@ export async function loadGoogleConnection(): Promise<GoogleConnection | null> {
 
 /** Expose the granted scopes stored in the local credentials (read-only view). */
 export async function getGrantedScopes(): Promise<string[] | undefined> {
-  const conn = await loadGoogleConnection()
-  return conn?.scopes
+  try {
+    const baseUrl = getBackendBaseUrl()
+    const resp = await fetch(`${baseUrl}/api/google/oauth/status`)
+    if (!resp.ok) return undefined
+    const data = (await resp.json()) as { connected: boolean; scopes?: string[] }
+    return data.scopes
+  } catch {
+    return undefined
+  }
 }
 
-export async function getAccessToken(): Promise<string> {
-  const conn = await loadGoogleConnection()
-  if (!conn) {
-    throw new Error('Google account not connected. Connect your Google account locally before using this MCP.')
-  }
-
-  // Token still valid (5 min buffer)
-  if (Date.now() < conn.tokenExpiry - 5 * 60 * 1000) {
-    return conn.accessToken
-  }
-
-  // Try refresh
-  if (!conn.refreshToken) {
-    throw new Error('Google authorization expired. Reconnect your Google account locally.')
-  }
-
-  const clientId = process.env.GOOGLE_CLIENT_ID
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET
-  if (!clientId || !clientSecret) {
-    throw new Error('Google OAuth credentials not configured (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).')
-  }
-
-  const resp = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: conn.refreshToken,
-      grant_type: 'refresh_token',
-    }),
-  })
-
-  if (!resp.ok) {
-    throw new Error('Google authorization expired. Reconnect your Google account locally.')
-  }
-
-  const tokens = (await resp.json()) as { access_token: string; expires_in: number }
-
-  // Write back only the token fields, preserving the existing credential format.
-  const file = connectionsFilePath()
-  const allData = await readFile(file, 'utf-8')
-  const all = JSON.parse(allData) as Record<string, GoogleConnection>
-  const updated: GoogleConnection = {
-    ...all[connectionKeyName()],
-    accessToken: tokens.access_token,
-    tokenExpiry: Date.now() + tokens.expires_in * 1000,
-  }
-  await persistConnection(updated)
-
-  return updated.accessToken
+/**
+ * Persist an updated connection. Used by progressive authorization
+ * (scope expansion) in capabilities.ts.
+ *
+ * NOTE: In the MSI production environment, this is a no-op because
+ * progressive authorization requires GOOGLE_CLIENT_ID/SECRET which
+ * are not available client-side. The main production OAuth flow handles
+ * full-scope authorization via the VPS.
+ */
+export async function persistConnection(_updated: GoogleConnection): Promise<void> {
+  console.warn('[Google Auth] persistConnection called — progressive authorization is not supported in MSI runtime. Use the production OAuth flow for scope changes.')
 }

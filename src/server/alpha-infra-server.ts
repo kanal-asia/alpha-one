@@ -212,13 +212,16 @@ app.post('/google/oauth/start', async (req: Request, res: Response) => {
     // Build Google OAuth URL
     const scopes = [
       'https://www.googleapis.com/auth/drive.readonly',
+      'https://www.googleapis.com/auth/drive.file',
       'https://www.googleapis.com/auth/docs.readonly',
+      'https://www.googleapis.com/auth/documents',
       'https://www.googleapis.com/auth/spreadsheets',
       'https://www.googleapis.com/auth/presentations.readonly',
       'https://www.googleapis.com/auth/script.projects',
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile',
       'https://www.googleapis.com/auth/calendar.readonly',
+      'https://www.googleapis.com/auth/calendar',
       // People API profile enrichment scopes
       'https://www.googleapis.com/auth/user.addresses.read',
       'https://www.googleapis.com/auth/user.birthday.read',

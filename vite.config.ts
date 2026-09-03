@@ -8,6 +8,7 @@ import { playwright } from '@vitest/browser-playwright'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: '/',
   plugins: [
     tanstackRouter({
       target: 'react',
@@ -31,6 +32,11 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  build: {
+    // TASK-MSI-041: Do not clean dist/ — the server bundle (dist/server/) is built
+    // first by tsup and must survive the frontend build.
+    emptyOutDir: false,
   },
   test: {
     silent: 'passed-only',

@@ -471,11 +471,19 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
   },
 
   setActiveChatProject: (project) => {
-    const id = get().activeChatId
-    if (!id) return
+    let { activeChatId, chats } = get()
+    if (!activeChatId) {
+      const chat = makeChat()
+      chat.project = project
+      chats = [chat, ...chats]
+      activeChatId = chat.id
+      set({ chats, activeChatId })
+      saveChats(chats)
+      return
+    }
     set((state) => ({
       chats: state.chats.map((c) =>
-        c.id === id ? { ...c, project, updatedAt: new Date().toISOString() } : c
+        c.id === activeChatId ? { ...c, project, updatedAt: new Date().toISOString() } : c
       ),
     }))
     saveChats(get().chats)

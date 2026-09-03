@@ -1,0 +1,51 @@
+{
+    "appId":  "com.kanalasia.alpha-one",
+    "productName":  "Alpha One",
+    "copyright":  "Copyright © 2026 Kanal Asia",
+    "directories":  {
+                        "output":  "release"
+                    },
+    "files":  [
+                  "electron/dist/**/*",
+                  "dist/**/*",
+                  "!**/node_modules/**"
+              ],
+    "extraMetadata":  {
+                          "main":  "electron/dist/main.cjs"
+                      },
+    "extraResources":  [
+                           {
+                               "from":  "dist/server",
+                               "to":  "app/dist/server"
+                           },
+                           {
+                               "from":  "dist/images",
+                               "to":  "app/dist/images"
+                           },
+                           {
+                               "from":  "mcp-servers-dist",
+                               "to":  "app/mcp-servers-dist"
+                           },
+                           {
+                               "from":  "mcp-servers",
+                               "to":  "app/mcp-servers"
+                           },
+                           {
+                               "from":  "build-installer/runtime/node.exe",
+                               "to":  "node.exe"
+                           },
+                           {
+                               "from":  "build-installer/runtime/opencode.exe",
+                               "to":  "opencode.exe"
+                           }
+                       ],
+    "win":  {
+                "target":  "nsis",
+                "icon":  "dist/images/favicon.ico",
+                "signExecutable":  false
+            },
+    "nsis":  {
+                 "oneClick":  false,
+                 "allowToChangeInstallationDirectory":  true
+             }
+}

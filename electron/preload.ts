@@ -1,4 +1,14 @@
-// Minimal preload script — no Node.js APIs exposed to renderer
-// The frontend runs purely in the browser context via HTTP
+import { contextBridge, ipcRenderer } from 'electron'
 
-console.log('[Alpha One] Preload loaded')
+contextBridge.exposeInMainWorld('electronAPI', {
+  pickerReturn: (data: unknown) => {
+    ipcRenderer.send('picker:select', data)
+  },
+  onPickerReturn: (callback: (data: unknown) => void) => {
+    const handler = (_event: unknown, data: unknown) => callback(data)
+    ipcRenderer.on('picker:return', handler)
+    return () => {
+      ipcRenderer.removeListener('picker:return', handler)
+    }
+  },
+})

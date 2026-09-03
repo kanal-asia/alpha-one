@@ -1,17 +1,62 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, screen } from 'electron'
 import { join } from 'node:path'
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, cpSync, mkdtempSync, appendFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 
 const isDev = !app.isPackaged
 const PORT = 3001
 const HEALTH_URL = `http://127.0.0.1:${PORT}/api/opencode/health`
+
+// ---------------------------------------------------------------------------
+// Temporary file logger for MSI-061R2 runtime trace (user-writable location)
+// ---------------------------------------------------------------------------
+function getTraceLogPath(): string {
+  const appData = process.env.APPDATA || join(require('os').homedir(), 'AppData', 'Roaming')
+  return join(appData, 'Alpha One', 'oauth-trace.log')
+}
+function traceLog(msg: string) {
+  const ts = new Date().toISOString()
+  const line = `[${ts}] ${msg}\n`
+  try { appendFileSync(getTraceLogPath(), line) } catch { /* ignore */ }
+}
+// Clear log on fresh start
+try { writeFileSync(getTraceLogPath(), `=== Alpha One OAuth Trace ===\nStarted at ${new Date().toISOString()}\n`) } catch { /* ignore */ }
 const FRONTEND_URL = `http://127.0.0.1:${PORT}/`
 
 let mainWindow: BrowserWindow | null = null
 let serverProcess: ChildProcess | null = null
 let isQuitting = false
+
+// ---------------------------------------------------------------------------
+// IPC: Drive picker return path
+// ---------------------------------------------------------------------------
+ipcMain.on('picker:select', (event, data) => {
+  // Forward the picker selection to all other windows, then close the picker child.
+  // The child must NOT call window.close() itself — that races IPC delivery.
+  const senderWebContentsId = event.sender.id
+  const allWindows = BrowserWindow.getAllWindows()
+  console.log(`[Alpha One] picker:select received from wcId=${senderWebContentsId}, broadcasting to ${allWindows.length - 1} window(s)`)
+  console.log(`[Alpha One] picker:select data: ${JSON.stringify(data).substring(0, 200)}`)
+  let broadcastCount = 0
+  allWindows.forEach((win) => {
+    if (win.webContents.id !== senderWebContentsId && !win.isDestroyed()) {
+      const title = win.getTitle()
+      const url = win.webContents.getURL()
+      console.log(`[Alpha One] picker:return -> wcId=${win.webContents.id} title="${title}" url="${url.substring(0, 80)}"`)
+      win.webContents.send('picker:return', data)
+      broadcastCount++
+    }
+  })
+  console.log(`[Alpha One] picker:return broadcast to ${broadcastCount} window(s)`)
+  // Close the picker child window AFTER forwarding the result
+  const pickerWin = BrowserWindow.fromWebContents(event.sender)
+  if (pickerWin && !pickerWin.isDestroyed()) {
+    console.log(`[Alpha One] Closing picker child wcId=${senderWebContentsId}`)
+    pickerWin.close()
+  }
+})
 
 // ---------------------------------------------------------------------------
 // Working directory resolution
@@ -31,11 +76,108 @@ function resolveServerScript(): string {
   return join(process.resourcesPath, 'app', 'dist', 'server', 'alpha-server.js')
 }
 
+function resolvePreloadScript(): string {
+  // Both dev and packaged: preload.cjs is a sibling of main.cjs in electron/dist/
+  return join(__dirname, 'preload.cjs')
+}
+
+// Resolved once at module load so all child-window creation paths share it.
+const PRELOAD_PATH = resolvePreloadScript()
+
+// ---------------------------------------------------------------------------
+// Adaptive OAuth child-window sizing — fits inside the display work area
+// ---------------------------------------------------------------------------
+function resolveOauthChildBounds(): { width: number; height: number } {
+  const OAUTH_WIDTH = 1000
+  const MAX_HEIGHT = 800
+  const HEIGHT_RATIO = 0.85
+
+  // Get the display containing the main window (or fallback to primary)
+  let workAreaHeight = 800
+  let workAreaWidth = 1200
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const bounds = mainWindow.getBounds()
+    const display = screen.getDisplayMatching(bounds)
+    workAreaHeight = display.workArea.height
+    workAreaWidth = display.workArea.width
+  } else {
+    const display = screen.getPrimaryDisplay()
+    workAreaHeight = display.workArea.height
+    workAreaWidth = display.workArea.width
+  }
+
+  const height = Math.min(Math.round(workAreaHeight * HEIGHT_RATIO), MAX_HEIGHT)
+  const width = Math.min(OAUTH_WIDTH, workAreaWidth)
+
+  return { width, height }
+}
+
 function resolveInstallDirectory(): string {
   if (isDev) {
     return resolveWorkingDirectory()
   }
   return join(process.resourcesPath, '..')
+}
+
+// ---------------------------------------------------------------------------
+// Ensure OpenCode MCP config exists in user config directory.
+// The installed MSI may not have opencode.jsonc at the project root, so the
+// CLI falls back to ~/.config/opencode/opencode.jsonc. If that file has wrong
+// commands (npx tsx) or hardcoded cwd paths, MCP servers fail to spawn.
+// This function writes the correct config on first run.
+// ---------------------------------------------------------------------------
+function ensureOpenCodeMcpConfig(): void {
+  const { homedir } = require('os')
+  const userConfigDir = join(homedir(), '.config', 'opencode')
+  const userConfigPath = join(userConfigDir, 'opencode.jsonc')
+
+  // In dev mode, the project-level opencode.jsonc takes precedence.
+  // Only write user config in production.
+  if (isDev) return
+
+  // Determine MCP server base path and node command
+  // In production: MCP servers at <resources>/app/mcp-servers-dist/ (compiled JS), node at <resources>/node.exe
+  const mcpBase = join(process.resourcesPath, 'app', 'mcp-servers-dist')
+  const nodeExe = join(process.resourcesPath, 'node.exe')
+
+  const servers = ['google-sheets', 'google-docs', 'google-slides', 'google-drive', 'google-apps-script', 'google-calendar']
+  const mcpEntries: Record<string, unknown> = {}
+  for (const name of servers) {
+    mcpEntries[name] = {
+      type: 'local',
+      command: [nodeExe, join(mcpBase, `${name}.js`)],
+      enabled: true,
+      timeout: 15000,
+    }
+  }
+
+  const config = {
+    '$schema': 'https://opencode.ai/config.json',
+    'mcp': mcpEntries,
+  }
+
+  try {
+    const { existsSync, mkdirSync, writeFileSync, readFileSync } = require('fs')
+
+    // Check if existing config already has correct MCP entries
+    if (existsSync(userConfigPath)) {
+      try {
+        const raw = readFileSync(userConfigPath, 'utf8')
+        const parsed = JSON.parse(raw)
+        // Verify paths point to current resources/app/mcp-servers-dist (not old install root)
+        const sheetsCmd = parsed?.mcp?.['google-sheets']?.command
+        if (sheetsCmd?.[0]?.includes('node.exe') && sheetsCmd?.[1]?.includes('resources') && sheetsCmd?.[1]?.includes('mcp-servers-dist') && sheetsCmd?.[1]?.includes('.js')) {
+          return
+        }
+      } catch { /* config corrupted, overwrite */ }
+    }
+
+    mkdirSync(userConfigDir, { recursive: true })
+    writeFileSync(userConfigPath, JSON.stringify(config, null, 2) + '\n', 'utf8')
+    console.log('[Alpha One] Wrote MCP config to', userConfigPath)
+  } catch (err) {
+    console.error('[Alpha One] Failed to write MCP config:', err)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +195,47 @@ function resolveDataDir(): string {
   }
   // Fallback
   return join(require('os').homedir(), '.alpha-one')
+}
+
+// ---------------------------------------------------------------------------
+// Extract frontend dist from ASAR to temp directory for HTTP serving
+// Express static middleware cannot serve files from inside ASAR archives.
+// Node.js patches fs to work with ASAR paths, so we use fs.readFileSync
+// to read files and fs.readdirSync to list directories.
+// ---------------------------------------------------------------------------
+function extractFrontendDist(): string | null {
+  if (isDev) return null
+  try {
+    const fs = require('fs')
+    const asarPath = join(process.resourcesPath, 'app.asar')
+    const distDir = join(asarPath, 'dist')
+    // Use Node.js patched fs to read ASAR directory
+    const items = fs.readdirSync(distDir)
+    const tempDir = mkdtempSync(join(tmpdir(), 'alpha-one-'))
+    const extractedDist = join(tempDir, 'dist')
+    mkdirSync(extractedDist, { recursive: true })
+    function copyDir(src: string, dest: string) {
+      const entries = fs.readdirSync(src, { withFileTypes: true })
+      for (const entry of entries) {
+        const srcPath = join(src, entry.name)
+        const destPath = join(dest, entry.name)
+        if (entry.isDirectory()) {
+          mkdirSync(destPath, { recursive: true })
+          copyDir(srcPath, destPath)
+        } else {
+          const content = fs.readFileSync(srcPath)
+          fs.writeFileSync(destPath, content)
+        }
+      }
+    }
+    copyDir(distDir, extractedDist)
+    const fileCount = fs.readdirSync(extractedDist).length
+    console.log(`[Alpha One] Extracted ${fileCount} frontend items to: ${extractedDist}`)
+    return extractedDist
+  } catch (err) {
+    console.error('[Alpha One] Failed to extract frontend dist:', err)
+    return null
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +447,9 @@ function startBackend(): Promise<void> {
     mkdirSync(dataDir, { recursive: true })
     console.log(`[Alpha One] Data dir: ${dataDir}`)
 
+    // Extract frontend dist from ASAR for HTTP serving
+    const extractedDist = extractFrontendDist()
+
     serverProcess = spawn(nodeExe, [serverScript], {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -272,6 +458,7 @@ function startBackend(): Promise<void> {
         PORT: String(PORT),
         NODE_ENV: 'production',
         ALPHA_DATA_DIR: dataDir,
+        ...(extractedDist ? { DIST_DIR: extractedDist } : {}),
       },
     })
 
@@ -405,19 +592,25 @@ function showErrorWindow(message: string, diagnostic: string): void {
 // Window creation
 // ---------------------------------------------------------------------------
 function createMainWindow(): BrowserWindow {
+  const preload = resolvePreloadScript()
+  console.log(`[Alpha One] Preload script: ${preload}`)
+
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 800,
     minHeight: 600,
     title: 'Alpha One',
-    icon: existsSync(join(__dirname, '..', 'dist', 'images', 'favicon.png'))
-      ? join(__dirname, '..', 'dist', 'images', 'favicon.png')
-      : undefined,
+    icon: existsSync(join(__dirname, '..', 'dist', 'images', 'favicon.ico'))
+      ? join(__dirname, '..', 'dist', 'images', 'favicon.ico')
+      : existsSync(join(__dirname, '..', 'dist', 'images', 'favicon.png'))
+        ? join(__dirname, '..', 'dist', 'images', 'favicon.png')
+        : undefined,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload,
     },
     show: false,
   })
@@ -427,11 +620,40 @@ function createMainWindow(): BrowserWindow {
   })
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    // Allow internal navigation (local server URLs) to open in Electron
-    if (url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:')) {
-      return { action: 'allow' }
+    const childOptions = (width: number, height: number) => ({
+      action: 'allow' as const,
+      overrideBrowserWindowOptions: {
+        parent: win,
+        show: true,
+        width,
+        height,
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          preload: PRELOAD_PATH,
+        },
+      },
+    })
+
+    // OAuth provider URLs → open as an Alpha One/Electron child window
+    // (NOT the system browser). The child returns to the local app on
+    // completion, at which point it auto-closes and primary regains focus.
+    if (
+      url.includes('accounts.google.com') ||
+      url.includes('alpha.kanal.asia')
+    ) {
+      const { width, height } = resolveOauthChildBounds()
+      return childOptions(width, height)
     }
-    // External URLs open in system browser
+
+    // Internal navigation (local server URLs) → Electron child window,
+    // properly parented + shown so picker UIs render instead of a blank frame.
+    if (url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:')) {
+      return childOptions(1100, 800)
+    }
+
+    // Other external URLs open in system browser
     shell.openExternal(url)
     return { action: 'deny' }
   })
@@ -489,6 +711,79 @@ if (!gotTheLock) {
     }
   })
 
+  // -------------------------------------------------------------------------
+  // OAuth child auto-close: when an OAuth child window (opened against the
+  // external Google/VPS provider) finishes and navigates back to the local
+  // app, close it and return focus to the primary window.
+  // -------------------------------------------------------------------------
+  app.on('web-contents-created', (_event, contents) => {
+    let sawExternalOAuth = false
+    let isOAuthChild = false
+    const wcId = contents.id
+
+    contents.on('did-start-navigation', (_e, url) => {
+      traceLog(`did-start-navigation wc=${wcId} url=${url}`)
+      if (url.includes('accounts.google.com') || url.includes('alpha.kanal.asia')) {
+        sawExternalOAuth = true
+        isOAuthChild = true
+        traceLog(`sawExternalOAuth=true wc=${wcId}`)
+      }
+    })
+
+    // Helper: close OAuth child if it landed on localhost after OAuth
+    const tryCloseOauthChild = (url: string, source: string) => {
+      if (!sawExternalOAuth) return
+      const isLocalReturn = url.startsWith(`http://127.0.0.1:${PORT}/`) ||
+        url.startsWith(`http://localhost:${PORT}/`)
+      if (!isLocalReturn) return
+
+      // Fresh reference — contents.browserWindow may be stale
+      const freshWin = BrowserWindow.fromWebContents(contents)
+      const allWindows = BrowserWindow.getAllWindows()
+      const childWin = freshWin && freshWin !== mainWindow && !freshWin.isDestroyed()
+        ? freshWin
+        : allWindows.find(w => w !== mainWindow && !w.isDestroyed() && w.webContents.id === wcId)
+
+      traceLog(`tryClose source=${source} wc=${wcId} freshWinId=${freshWin?.id} childWinId=${childWin?.id} url=${url} predicate=true`)
+
+      if (!childWin) {
+        traceLog(`tryClose ABORT: no valid child window found`)
+        return
+      }
+
+      traceLog(`CLOSING window id=${childWin.id} wc=${wcId}`)
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus()
+      childWin.destroy()
+      traceLog(`destroy() called, isDestroyed=${childWin.isDestroyed()}`)
+    }
+
+    contents.on('did-navigate', (_e, url) => {
+      traceLog(`did-navigate wc=${wcId} url=${url}`)
+      tryCloseOauthChild(url, 'did-navigate')
+    })
+
+    contents.on('did-navigate-in-page', (_e, url) => {
+      traceLog(`did-navigate-in-page wc=${wcId} url=${url}`)
+      tryCloseOauthChild(url, 'did-navigate-in-page')
+    })
+
+    contents.on('did-finish-load', () => {
+      if (!isOAuthChild) return
+      const url = contents.getURL()
+      traceLog(`did-finish-load wc=${wcId} url=${url}`)
+      tryCloseOauthChild(url, 'did-finish-load')
+    })
+
+    contents.on('did-fail-load', (_e, code, desc) => {
+      if (!isOAuthChild) return
+      traceLog(`did-fail-load wc=${wcId} code=${code} desc=${desc}`)
+    })
+
+    contents.on('closed', () => {
+      traceLog(`closed wc=${wcId}`)
+    })
+  })
+
   // ---------------------------------------------------------------------------
   // App lifecycle
   // ---------------------------------------------------------------------------
@@ -517,6 +812,9 @@ if (!gotTheLock) {
         return
       }
 
+      // Ensure MCP config is correct before spawning backend
+      ensureOpenCodeMcpConfig()
+
       // Start backend
       await startBackend()
 
@@ -532,7 +830,15 @@ if (!gotTheLock) {
 
       // Create window and load frontend
       mainWindow = createMainWindow()
-      mainWindow.loadURL(FRONTEND_URL)
+      if (isDev) {
+        mainWindow.loadURL(FRONTEND_URL)
+      } else {
+        // Production: load from backend HTTP server.
+        // Express static middleware cannot serve files from ASAR, so we extract
+        // the frontend dist to a temp directory and serve via HTTP.
+        // This provides a proper HTTP origin for routing, API calls, and OAuth.
+        mainWindow.loadURL(FRONTEND_URL)
+      }
 
       console.log('[Alpha One] Application ready')
     } catch (err) {

@@ -49,3 +49,14 @@ spint/mliestone/
 
 # Internal engineering tasks / execution artifacts
 spint/
+
+# Alpha One release / packaging artifacts
+/release/
+/mcp-servers-dist/
+*.asar
+*.blockmap
+*.exe
+*.msi
+
+# Installer runtime binaries generated/copied locally
+/build-installer/runtime/

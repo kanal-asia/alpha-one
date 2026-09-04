@@ -6,7 +6,7 @@ import {
   QueryClient,
   QueryClientProvider,
 } from '@tanstack/react-query'
-import { RouterProvider, createRouter } from '@tanstack/react-router'
+import { RouterProvider } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import { handleServerError } from '@/lib/handle-server-error'
 import { DirectionProvider } from './context/direction-provider'
@@ -14,7 +14,8 @@ import { FontProvider } from './context/font-provider'
 import { ThemeProvider } from './context/theme-provider'
 import { DeveloperModeProvider } from './context/developer-mode-provider'
 // Generated Routes
-import { routeTree } from './routeTree.gen'
+import { createAppRouter } from './lib/app-router'
+import { initDesktopCommandListener } from './lib/desktop-command-handler'
 // Styles
 import './styles/index.css'
 
@@ -59,20 +60,12 @@ const queryClient = new QueryClient({
   }),
 })
 
-// Create a new router instance
-const router = createRouter({
-  routeTree,
-  context: { queryClient },
-  defaultPreload: 'intent',
-  defaultPreloadStaleTime: 0,
-})
+// Create a new router instance (module lives in lib/app-router so
+// non-component code can navigate without importing this bootstrap)
+const router = createAppRouter(queryClient)
 
-// Register the router instance for type safety
-declare module '@tanstack/react-router' {
-  interface Register {
-    router: typeof router
-  }
-}
+// MSI-067: desktop menu/shortcut commands from the Electron host.
+initDesktopCommandListener(router)
 
 // Render the app
 const rootElement = document.getElementById('root')!

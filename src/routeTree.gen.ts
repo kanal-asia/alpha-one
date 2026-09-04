@@ -57,6 +57,8 @@ import { Route as AuthenticatedGoogleGmailRouteImport } from './routes/_authenti
 import { Route as AuthenticatedGoogleSheetsRouteImport } from './routes/_authenticated/google/sheets'
 import { Route as AuthenticatedGoogleSlidesRouteImport } from './routes/_authenticated/google/slides'
 import { Route as AuthenticatedHelpCenterIndexRouteImport } from './routes/_authenticated/help-center/index'
+import { Route as AuthenticatedHelpCenterDocsRouteImport } from './routes/_authenticated/help-center/docs'
+import { Route as AuthenticatedHelpCenterShortcutsRouteImport } from './routes/_authenticated/help-center/shortcuts'
 import { Route as AuthenticatedProductivityDocumentsRouteImport } from './routes/_authenticated/productivity/documents'
 import { Route as AuthenticatedProductivitySpreadsheetRouteImport } from './routes/_authenticated/productivity/spreadsheet'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
@@ -355,6 +357,18 @@ const AuthenticatedHelpCenterIndexRoute =
     path: '/help-center/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedHelpCenterDocsRoute =
+  AuthenticatedHelpCenterDocsRouteImport.update({
+    id: '/help-center/docs',
+    path: '/help-center/docs',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedHelpCenterShortcutsRoute =
+  AuthenticatedHelpCenterShortcutsRouteImport.update({
+    id: '/help-center/shortcuts',
+    path: '/help-center/shortcuts',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedProductivityDocumentsRoute =
   AuthenticatedProductivityDocumentsRouteImport.update({
     id: '/productivity/documents',
@@ -590,6 +604,8 @@ export interface FileRoutesByFullPath {
   '/google/gmail': typeof AuthenticatedGoogleGmailRoute
   '/google/sheets': typeof AuthenticatedGoogleSheetsRoute
   '/google/slides': typeof AuthenticatedGoogleSlidesRoute
+  '/help-center/docs': typeof AuthenticatedHelpCenterDocsRoute
+  '/help-center/shortcuts': typeof AuthenticatedHelpCenterShortcutsRoute
   '/productivity/documents': typeof AuthenticatedProductivityDocumentsRoute
   '/productivity/spreadsheet': typeof AuthenticatedProductivitySpreadsheetRoute
   '/settings/about': typeof AuthenticatedSettingsAboutRoute
@@ -668,6 +684,8 @@ export interface FileRoutesByTo {
   '/google/gmail': typeof AuthenticatedGoogleGmailRoute
   '/google/sheets': typeof AuthenticatedGoogleSheetsRoute
   '/google/slides': typeof AuthenticatedGoogleSlidesRoute
+  '/help-center/docs': typeof AuthenticatedHelpCenterDocsRoute
+  '/help-center/shortcuts': typeof AuthenticatedHelpCenterShortcutsRoute
   '/productivity/documents': typeof AuthenticatedProductivityDocumentsRoute
   '/productivity/spreadsheet': typeof AuthenticatedProductivitySpreadsheetRoute
   '/settings/about': typeof AuthenticatedSettingsAboutRoute
@@ -752,6 +770,8 @@ export interface FileRoutesById {
   '/_authenticated/google/gmail': typeof AuthenticatedGoogleGmailRoute
   '/_authenticated/google/sheets': typeof AuthenticatedGoogleSheetsRoute
   '/_authenticated/google/slides': typeof AuthenticatedGoogleSlidesRoute
+  '/_authenticated/help-center/docs': typeof AuthenticatedHelpCenterDocsRoute
+  '/_authenticated/help-center/shortcuts': typeof AuthenticatedHelpCenterShortcutsRoute
   '/_authenticated/productivity/documents': typeof AuthenticatedProductivityDocumentsRoute
   '/_authenticated/productivity/spreadsheet': typeof AuthenticatedProductivitySpreadsheetRoute
   '/_authenticated/settings/about': typeof AuthenticatedSettingsAboutRoute
@@ -834,6 +854,8 @@ export interface FileRouteTypes {
     | '/google/gmail'
     | '/google/sheets'
     | '/google/slides'
+    | '/help-center/docs'
+    | '/help-center/shortcuts'
     | '/productivity/documents'
     | '/productivity/spreadsheet'
     | '/settings/about'
@@ -912,6 +934,8 @@ export interface FileRouteTypes {
     | '/google/gmail'
     | '/google/sheets'
     | '/google/slides'
+    | '/help-center/docs'
+    | '/help-center/shortcuts'
     | '/productivity/documents'
     | '/productivity/spreadsheet'
     | '/settings/about'
@@ -995,6 +1019,8 @@ export interface FileRouteTypes {
     | '/_authenticated/google/gmail'
     | '/_authenticated/google/sheets'
     | '/_authenticated/google/slides'
+    | '/_authenticated/help-center/docs'
+    | '/_authenticated/help-center/shortcuts'
     | '/_authenticated/productivity/documents'
     | '/_authenticated/productivity/spreadsheet'
     | '/_authenticated/settings/about'
@@ -1388,6 +1414,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedHelpCenterIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/help-center/docs': {
+      id: '/_authenticated/help-center/docs'
+      path: '/help-center/docs'
+      fullPath: '/help-center/docs'
+      preLoaderRoute: typeof AuthenticatedHelpCenterDocsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/help-center/shortcuts': {
+      id: '/_authenticated/help-center/shortcuts'
+      path: '/help-center/shortcuts'
+      fullPath: '/help-center/shortcuts'
+      preLoaderRoute: typeof AuthenticatedHelpCenterShortcutsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/productivity/documents': {
       id: '/_authenticated/productivity/documents'
       path: '/productivity/documents'
@@ -1708,6 +1748,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedGoogleGmailRoute: typeof AuthenticatedGoogleGmailRoute
   AuthenticatedGoogleSheetsRoute: typeof AuthenticatedGoogleSheetsRoute
   AuthenticatedGoogleSlidesRoute: typeof AuthenticatedGoogleSlidesRoute
+  AuthenticatedHelpCenterDocsRoute: typeof AuthenticatedHelpCenterDocsRoute
+  AuthenticatedHelpCenterShortcutsRoute: typeof AuthenticatedHelpCenterShortcutsRoute
   AuthenticatedProductivityDocumentsRoute: typeof AuthenticatedProductivityDocumentsRoute
   AuthenticatedProductivitySpreadsheetRoute: typeof AuthenticatedProductivitySpreadsheetRoute
   AuthenticatedWorkspaceAssistantRoute: typeof AuthenticatedWorkspaceAssistantRoute
@@ -1768,6 +1810,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedGoogleGmailRoute: AuthenticatedGoogleGmailRoute,
   AuthenticatedGoogleSheetsRoute: AuthenticatedGoogleSheetsRoute,
   AuthenticatedGoogleSlidesRoute: AuthenticatedGoogleSlidesRoute,
+  AuthenticatedHelpCenterDocsRoute: AuthenticatedHelpCenterDocsRoute,
+  AuthenticatedHelpCenterShortcutsRoute: AuthenticatedHelpCenterShortcutsRoute,
   AuthenticatedProductivityDocumentsRoute:
     AuthenticatedProductivityDocumentsRoute,
   AuthenticatedProductivitySpreadsheetRoute:

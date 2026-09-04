@@ -1,4 +1,5 @@
-import { app, BrowserWindow, shell, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, screen, Menu, dialog } from 'electron'
+import { commandMeta } from '../src/lib/desktop-command-ids'
 import { join } from 'node:path'
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, cpSync, mkdtempSync, appendFileSync, writeFileSync } from 'node:fs'
@@ -165,8 +166,12 @@ function ensureOpenCodeMcpConfig(): void {
         const raw = readFileSync(userConfigPath, 'utf8')
         const parsed = JSON.parse(raw)
         // Verify paths point to current resources/app/mcp-servers-dist (not old install root)
+        // AND verify all expected servers are registered (count check catches stale configs)
+        // AND verify node.exe path matches current process.resourcesPath (catches path divergence)
         const sheetsCmd = parsed?.mcp?.['google-sheets']?.command
-        if (sheetsCmd?.[0]?.includes('node.exe') && sheetsCmd?.[1]?.includes('resources') && sheetsCmd?.[1]?.includes('mcp-servers-dist') && sheetsCmd?.[1]?.includes('.js')) {
+        const hasAllServers = servers.every(name => parsed?.mcp?.[name])
+        const nodePathMatches = sheetsCmd?.[0] === nodeExe
+        if (hasAllServers && nodePathMatches && sheetsCmd?.[1]?.includes('mcp-servers-dist') && sheetsCmd?.[1]?.endsWith('.js')) {
           return
         }
       } catch { /* config corrupted, overwrite */ }
@@ -178,6 +183,368 @@ function ensureOpenCodeMcpConfig(): void {
   } catch (err) {
     console.error('[Alpha One] Failed to write MCP config:', err)
   }
+}
+
+// ---------------------------------------------------------------------------
+// MSI-065R1 closure: remove the proven-stale legacy per-user Start Menu shortcut.
+// The retired runtime launched `%LOCALAPPDATA%\AlphaOne\node.exe
+// dist\server\alpha-server.js`; the canonical shortcut targets the installed
+// `Alpha One.exe` under Program Files and is never touched.
+// Only the exact known-obsolete file is removed, and only when its content
+// references the retired layout — a user-owned shortcut pointing elsewhere is
+// always preserved. Never throws.
+// ---------------------------------------------------------------------------
+function removeStaleLegacyShortcut(): void {
+  try {
+    const { homedir } = require('os')
+    const { existsSync, readFileSync, unlinkSync } = require('fs')
+    const appData = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming')
+    const stalePath = join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Alpha One', 'Alpha One.lnk')
+    if (!existsSync(stalePath)) return
+    const raw = readFileSync(stalePath).toString('latin1').replace(/\0/g, '')
+    const isRetiredLayout = raw.includes('AlphaOne') && raw.includes('alpha-server.js')
+    const isCanonical = raw.includes('Program Files')
+    if (isRetiredLayout && !isCanonical) {
+      unlinkSync(stalePath)
+      console.log('[Alpha One] Removed stale legacy shortcut:', stalePath)
+    } else {
+      console.log('[Alpha One] Kept Start Menu shortcut (not retired layout):', stalePath)
+    }
+  } catch (err) {
+    console.error('[Alpha One] Legacy shortcut cleanup skipped:', err)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// MSI-067: Desktop Command Layer (main side) + native application menu.
+// Semantic commands from `src/lib/desktop-command-ids.ts` (single source of
+// truth shared with the renderer shortcut reference). Renderer-bound commands
+// travel via `alpha-one:command` IPC; native commands execute here.
+// ---------------------------------------------------------------------------
+
+/** WebContents ids of live OAuth child windows (navigation context owners). */
+const oauthChildWebContents = new Set<number>()
+
+let appMenu: Electron.Menu | null = null
+
+function sendDesktopCommand(payload: { id: string; path?: string }): void {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('alpha-one:command', payload)
+    }
+  } catch { /* ignore */ }
+}
+
+/**
+ * Resolve the active navigation context: the focused OAuth child when one is
+ * focused, otherwise the main window. Non-OAuth aux windows own no navigation
+ * context and yield null (Back/Forward stay disabled, never ambiguous).
+ */
+function activeNavContents(): Electron.WebContents | null {
+  try {
+    const focused = BrowserWindow.getFocusedWindow()
+    if (focused && focused !== mainWindow && !focused.isDestroyed()) {
+      if (oauthChildWebContents.has(focused.webContents.id)) {
+        return focused.webContents
+      }
+      return null
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      return mainWindow.webContents
+    }
+  } catch { /* ignore */ }
+  return null
+}
+
+/** Shared `navigation.back` semantic: menu, accelerator, and context menu. */
+function goBackActiveContext(source: string): void {
+  const target = activeNavContents()
+  if (!target) return
+  try {
+    if (!target.isDestroyed() && target.canGoBack()) {
+      target.goBack()
+      traceLog(`nav-back source=${source}`)
+    }
+  } catch { /* ignore */ }
+}
+
+/** Shared `navigation.forward` semantic. */
+function goForwardActiveContext(source: string): void {
+  const target = activeNavContents()
+  if (!target) return
+  try {
+    if (!target.isDestroyed() && target.canGoForward()) {
+      target.goForward()
+      traceLog(`nav-forward source=${source}`)
+    }
+  } catch { /* ignore */ }
+}
+
+async function openLocalFolderDialog(): Promise<void> {
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const res = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory'],
+    })
+    if (!res.canceled && res.filePaths.length > 0) {
+      sendDesktopCommand({ id: 'project.openLocalFolder', path: res.filePaths[0] })
+    }
+  } catch { /* ignore */ }
+}
+
+function showAboutDialog(): void {
+  // Product identity is Alpha One / Kanal — runtime infrastructure is never
+  // presented as the application.
+  const detail = `One workspace. One assistant. All your work.\n\nVersion ${app.getVersion()}\nCopyright © 2026 Kanal Asia`
+  const options: Electron.MessageBoxOptions = {
+    type: 'info',
+    title: 'About Alpha One',
+    message: 'Alpha One',
+    detail,
+    buttons: ['OK'],
+    defaultId: 0,
+  }
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      void dialog.showMessageBox(mainWindow, options)
+    } else {
+      void dialog.showMessageBox(options)
+    }
+  } catch { /* ignore */ }
+}
+
+async function openLogDirectory(): Promise<void> {
+  // Local-first diagnostics: opens the Alpha One data directory (contains
+  // oauth-trace.log) in Explorer. No network, no secrets transmitted.
+  try {
+    const err = await shell.openPath(resolveDataDir())
+    if (err) console.error('[Alpha One] Failed to open log directory:', err)
+  } catch (err) {
+    console.error('[Alpha One] Failed to open log directory:', err)
+  }
+}
+
+/** Trusted, fixed support destination (never renderer-controlled input). */
+const REPORT_ISSUE_URL =
+  'mailto:alphaone@kanal.asia?subject=' +
+  encodeURIComponent('Alpha One issue report')
+
+function buildApplicationMenu(): void {
+  const back = commandMeta('navigation.back')
+  const fwd = commandMeta('navigation.forward')
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: commandMeta('app.newChat').label,
+          accelerator: commandMeta('app.newChat').accelerator,
+          click: () => sendDesktopCommand({ id: 'app.newChat' }),
+        },
+        {
+          label: commandMeta('project.open').label,
+          click: () => sendDesktopCommand({ id: 'project.open' }),
+        },
+        {
+          label: commandMeta('project.openLocalFolder').label,
+          click: () => void openLocalFolderDialog(),
+        },
+        { type: 'separator' },
+        {
+          label: commandMeta('reference.attach').label,
+          click: () => sendDesktopCommand({ id: 'reference.attach' }),
+        },
+        {
+          label: commandMeta('reference.connect').label,
+          click: () => sendDesktopCommand({ id: 'reference.connect' }),
+        },
+        { type: 'separator' },
+        {
+          label: commandMeta('settings.open').label,
+          accelerator: commandMeta('settings.open').accelerator,
+          click: () => sendDesktopCommand({ id: 'settings.open' }),
+        },
+        { type: 'separator' },
+        {
+          label: commandMeta('app.exit').label,
+          click: () => void shutdown(),
+        },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { type: 'separator' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+        // Development-only surface: gated by build environment, never in
+        // production UX.
+        ...(isDev
+          ? [
+              { type: 'separator' } as Electron.MenuItemConstructorOptions,
+              {
+                label: 'Development',
+                submenu: [
+                  { role: 'forceReload' },
+                  { role: 'toggleDevTools' },
+                ],
+              } as Electron.MenuItemConstructorOptions,
+            ]
+          : []),
+      ],
+    },
+    {
+      label: 'Navigate',
+      submenu: [
+        {
+          id: 'nav-back',
+          label: back.label,
+          accelerator: back.accelerator,
+          enabled: false,
+          click: () => goBackActiveContext('menu'),
+        },
+        {
+          id: 'nav-forward',
+          label: fwd.label,
+          accelerator: fwd.accelerator,
+          enabled: false,
+          click: () => goForwardActiveContext('menu'),
+        },
+        { type: 'separator' },
+        {
+          label: commandMeta('navigation.workspace').label,
+          accelerator: commandMeta('navigation.workspace').accelerator,
+          click: () => sendDesktopCommand({ id: 'navigation.workspace' }),
+        },
+        {
+          label: commandMeta('navigation.projects').label,
+          accelerator: commandMeta('navigation.projects').accelerator,
+          click: () => sendDesktopCommand({ id: 'navigation.projects' }),
+        },
+        {
+          label: commandMeta('navigation.references').label,
+          accelerator: commandMeta('navigation.references').accelerator,
+          click: () => sendDesktopCommand({ id: 'navigation.references' }),
+        },
+        {
+          label: commandMeta('navigation.history').label,
+          accelerator: commandMeta('navigation.history').accelerator,
+          click: () => sendDesktopCommand({ id: 'navigation.history' }),
+        },
+        {
+          label: commandMeta('settings.open').label,
+          accelerator: commandMeta('settings.open').accelerator,
+          click: () => sendDesktopCommand({ id: 'settings.open' }),
+        },
+        { type: 'separator' },
+        {
+          // No accelerator by design: the palette already toggles on Ctrl+K;
+          // registering one here would double-toggle. Ctrl+K stays documented
+          // in Help → Keyboard Shortcuts as the canonical app shortcut.
+          label: commandMeta('navigation.search').label,
+          click: () => sendDesktopCommand({ id: 'navigation.search' }),
+        },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        {
+          id: 'window-max-restore',
+          label: 'Maximize',
+          click: () => {
+            try {
+              if (!mainWindow || mainWindow.isDestroyed()) return
+              if (mainWindow.isMaximized()) mainWindow.restore()
+              else mainWindow.maximize()
+            } catch { /* ignore */ }
+          },
+        },
+        { role: 'close' },
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: commandMeta('help.gettingStarted').label,
+          click: () => sendDesktopCommand({ id: 'help.gettingStarted' }),
+        },
+        {
+          label: commandMeta('help.keyboardShortcuts').label,
+          click: () => sendDesktopCommand({ id: 'help.keyboardShortcuts' }),
+        },
+        {
+          label: commandMeta('help.documentation').label,
+          click: () => sendDesktopCommand({ id: 'help.documentation' }),
+        },
+        { type: 'separator' },
+        {
+          label: commandMeta('help.reportIssue').label,
+          click: () => {
+            // Fixed trusted destination only.
+            void shell.openExternal(REPORT_ISSUE_URL)
+          },
+        },
+        {
+          label: commandMeta('help.viewLogs').label,
+          click: () => void openLogDirectory(),
+        },
+        { type: 'separator' },
+        {
+          label: commandMeta('help.about').label,
+          click: () => showAboutDialog(),
+        },
+      ],
+    },
+  ]
+  appMenu = Menu.buildFromTemplate(template)
+  Menu.setApplicationMenu(appMenu)
+  refreshMenuState()
+}
+
+/** Sync context-aware items (Back/Forward availability, Maximize label). */
+function refreshMenuState(): void {
+  try {
+    if (!appMenu) return
+    const target = activeNavContents()
+    let canBack = false
+    let canFwd = false
+    if (target) {
+      try {
+        canBack = !target.isDestroyed() && target.canGoBack()
+        canFwd = !target.isDestroyed() && target.canGoForward()
+      } catch { /* ignore */ }
+    }
+    const backItem = appMenu.getMenuItemById('nav-back')
+    const fwdItem = appMenu.getMenuItemById('nav-forward')
+    if (backItem) backItem.enabled = canBack
+    if (fwdItem) fwdItem.enabled = canFwd
+    const maxItem = appMenu.getMenuItemById('window-max-restore')
+    if (maxItem) {
+      const maximized =
+        !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isMaximized()
+      maxItem.label = maximized ? 'Restore' : 'Maximize'
+    }
+  } catch { /* ignore */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +826,10 @@ function startBackend(): Promise<void> {
         NODE_ENV: 'production',
         ALPHA_DATA_DIR: dataDir,
         ...(extractedDist ? { DIST_DIR: extractedDist } : {}),
+        // MSI-065R1: pass packaged resources root to the backend (plain node has
+        // no process.resourcesPath) so resolveBundledOpenCode() selects
+        // resources\opencode.exe deterministically in packaged production.
+        ...(isDev ? {} : { ALPHA_ONE_RESOURCES_PATH: process.resourcesPath }),
       },
     })
 
@@ -615,7 +986,12 @@ function createMainWindow(): BrowserWindow {
     show: false,
   })
 
+  // MSI-066: main workspace window launches maximized by default (not
+  // fullscreen — taskbar and window controls stay available). Applied once at
+  // initial show only; the user can restore/unmaximize freely afterwards.
+  // Child windows (OAuth, pickers) are unaffected.
   win.once('ready-to-show', () => {
+    win.maximize()
     win.show()
   })
 
@@ -726,7 +1102,9 @@ if (!gotTheLock) {
       if (url.includes('accounts.google.com') || url.includes('alpha.kanal.asia')) {
         sawExternalOAuth = true
         isOAuthChild = true
+        oauthChildWebContents.add(wcId)
         traceLog(`sawExternalOAuth=true wc=${wcId}`)
+        refreshMenuState()
       }
     })
 
@@ -760,11 +1138,13 @@ if (!gotTheLock) {
     contents.on('did-navigate', (_e, url) => {
       traceLog(`did-navigate wc=${wcId} url=${url}`)
       tryCloseOauthChild(url, 'did-navigate')
+      refreshMenuState()
     })
 
     contents.on('did-navigate-in-page', (_e, url) => {
       traceLog(`did-navigate-in-page wc=${wcId} url=${url}`)
       tryCloseOauthChild(url, 'did-navigate-in-page')
+      refreshMenuState()
     })
 
     contents.on('did-finish-load', () => {
@@ -772,6 +1152,7 @@ if (!gotTheLock) {
       const url = contents.getURL()
       traceLog(`did-finish-load wc=${wcId} url=${url}`)
       tryCloseOauthChild(url, 'did-finish-load')
+      refreshMenuState()
     })
 
     contents.on('did-fail-load', (_e, code, desc) => {
@@ -779,8 +1160,53 @@ if (!gotTheLock) {
       traceLog(`did-fail-load wc=${wcId} code=${code} desc=${desc}`)
     })
 
+    // MSI-067: OAuth child context menu — Back (history-gated) + Reload.
+    // Routes through the shared navigation.back semantic (active context).
+    // Google's page is never modified. Main window unaffected.
+    contents.on('context-menu', () => {
+      if (!isOAuthChild) return
+      let canBack = false
+      let canFwd = false
+      try {
+        canBack = !contents.isDestroyed() && contents.canGoBack()
+        canFwd = !contents.isDestroyed() && contents.canGoForward()
+      } catch { /* ignore */ }
+      const menu = Menu.buildFromTemplate([
+        {
+          label: commandMeta('navigation.back').label,
+          accelerator: commandMeta('navigation.back').accelerator,
+          enabled: canBack,
+          click: () => goBackActiveContext('context-menu'),
+        },
+        {
+          label: commandMeta('navigation.forward').label,
+          accelerator: commandMeta('navigation.forward').accelerator,
+          enabled: canFwd,
+          click: () => goForwardActiveContext('context-menu'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Reload',
+          click: () => {
+            try {
+              if (!contents.isDestroyed()) contents.reload()
+            } catch { /* ignore */ }
+          },
+        },
+      ])
+      try {
+        menu.popup()
+      } catch { /* ignore */ }
+    })
+
     contents.on('closed', () => {
       traceLog(`closed wc=${wcId}`)
+      oauthChildWebContents.delete(wcId)
+      refreshMenuState()
+    })
+    contents.on('destroyed', () => {
+      oauthChildWebContents.delete(wcId)
+      refreshMenuState()
     })
   })
 
@@ -815,6 +1241,10 @@ if (!gotTheLock) {
       // Ensure MCP config is correct before spawning backend
       ensureOpenCodeMcpConfig()
 
+      // MSI-065R1 closure: clean up the proven-stale legacy per-user shortcut
+      // for existing users upgrading from the retired runtime.
+      removeStaleLegacyShortcut()
+
       // Start backend
       await startBackend()
 
@@ -839,6 +1269,16 @@ if (!gotTheLock) {
         // This provides a proper HTTP origin for routing, API calls, and OAuth.
         mainWindow.loadURL(FRONTEND_URL)
       }
+
+      // MSI-067: native application menu + context-aware state sync.
+      buildApplicationMenu()
+      try {
+        mainWindow.on('maximize', () => refreshMenuState())
+        mainWindow.on('unmaximize', () => refreshMenuState())
+      } catch { /* ignore */ }
+      try {
+        app.on('browser-window-focus', () => refreshMenuState())
+      } catch { /* ignore */ }
 
       console.log('[Alpha One] Application ready')
     } catch (err) {

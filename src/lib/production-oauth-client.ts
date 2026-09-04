@@ -81,15 +81,36 @@ export async function startProductionOAuth(): Promise<ProductionOAuthStartResult
 }
 
 /**
+ * Thrown when the user cancels an in-flight OAuth attempt (manual child close
+ * or Cancel action). Callers must distinguish this from real OAuth failures so
+ * cancellation returns the UI to idle instead of showing an error.
+ */
+export class OAuthCancelledError extends Error {
+  constructor() {
+    super('OAuth cancelled')
+    this.name = 'OAuthCancelledError'
+  }
+}
+
+/**
  * Poll the production OAuth status until completion or failure.
  * Returns the status result.
+ *
+ * MSI-066: optional `shouldAbort` hook lets the UI cancel a stuck poll
+ * (e.g. user closed the OAuth child manually). The wait between attempts is
+ * sliced so cancellation takes effect promptly (within ~250ms).
  */
 export async function pollProductionOAuthStatus(
   sessionId: string,
   maxAttempts = 60,
-  intervalMs = 2000
+  intervalMs = 2000,
+  shouldAbort?: () => boolean
 ): Promise<ProductionOAuthStatusResult> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (shouldAbort?.()) {
+      throw new OAuthCancelledError()
+    }
+
     const response = await fetch(
       `${PRODUCTION_BASE_URL}/api/google/oauth/status/${sessionId}`,
       {
@@ -110,8 +131,14 @@ export async function pollProductionOAuthStatus(
       return data
     }
 
-    // Wait before next poll
-    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    // Wait before next poll, checking for cancellation in small slices
+    const slices = Math.max(1, Math.ceil(intervalMs / 250))
+    for (let i = 0; i < slices; i++) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs / slices))
+      if (shouldAbort?.()) {
+        throw new OAuthCancelledError()
+      }
+    }
   }
 
   return { status: 'failed', error: 'OAuth polling timed out' }
@@ -162,9 +189,10 @@ export function clearStoredSessionId(): void {
  * the local persistence call that the existing GoogleConnectionCard performed.
  */
 export async function completeProductionOAuth(
-  sessionId: string
+  sessionId: string,
+  shouldAbort?: () => boolean
 ): Promise<ProductionOAuthVerifyResult> {
-  const status = await pollProductionOAuthStatus(sessionId)
+  const status = await pollProductionOAuthStatus(sessionId, 60, 2000, shouldAbort)
 
   if (status.status === 'failed') {
     throw new Error(status.error || 'OAuth failed')

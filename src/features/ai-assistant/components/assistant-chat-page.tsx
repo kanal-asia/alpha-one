@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router'
 import { useOpenCodeStore } from '@/features/ai/opencode/store/opencode-store'
 import type { ChatProjectContext } from '@/features/ai/opencode/types'
 import { ChatSidebar } from '@/features/ai/opencode/components/chat-sidebar'
+import { useChatScrollToBottom } from '@/features/ai/opencode/components/chat-scroll'
 import { ChatMessageView } from '@/features/ai/opencode/components/chat-message'
 import { ChatComposer } from '@/features/ai/opencode/components/chat-composer'
 import { DeveloperPanel } from '@/features/ai/opencode/components/developer-panel'
@@ -95,9 +96,10 @@ export function AssistantChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [messages, isStreaming])
+  // MSI-066R1: restore-to-bottom via the shared viewport-targeted hook. The
+  // previous inline scrollTo hit the ScrollArea root (no scrollable overflow)
+  // so restored chats opened at the top.
+  useChatScrollToBottom(scrollRef, activeChatId, messages, isStreaming)
 
   return (
     <>

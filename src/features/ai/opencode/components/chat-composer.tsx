@@ -24,6 +24,18 @@ export function ChatComposer({
   const [value, setValue] = useState('')
   const [attachments, setAttachments] = useState<ReferenceAttachment[]>([])
   const ref = useRef<HTMLTextAreaElement>(null)
+  const attachBtnRef = useRef<HTMLButtonElement>(null)
+
+  // MSI-067: desktop File → Attach Reference command reuses this composer's
+  // existing reference picker by activating its trigger button.
+  useEffect(() => {
+    const onMenuAttach = () => {
+      attachBtnRef.current?.click()
+    }
+    window.addEventListener('alpha-one:attach-reference', onMenuAttach)
+    return () =>
+      window.removeEventListener('alpha-one:attach-reference', onMenuAttach)
+  }, [])
 
   // Slash command palette state
   const [slashOpen, setSlashOpen] = useState(false)
@@ -124,6 +136,7 @@ export function ChatComposer({
           >
             {({ open }) => (
               <Button
+                ref={attachBtnRef}
                 variant='ghost'
                 size='icon'
                 className='size-8'

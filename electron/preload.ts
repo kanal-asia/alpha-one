@@ -11,4 +11,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('picker:return', handler)
     }
   },
+  // MSI-067: Electron host → renderer desktop commands (menu/shortcuts).
+  onDesktopCommand: (callback: (cmd: { id: string; path?: string }) => void) => {
+    const handler = (_event: unknown, cmd: { id: string; path?: string }) =>
+      callback(cmd)
+    ipcRenderer.on('alpha-one:command', handler)
+    return () => {
+      ipcRenderer.removeListener('alpha-one:command', handler)
+    }
+  },
 })

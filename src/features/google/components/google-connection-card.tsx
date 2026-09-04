@@ -9,6 +9,7 @@ import {
   pollProductionOAuthStatus,
   getStoredSessionId,
   clearStoredSessionId,
+  OAuthCancelledError,
   type ProductionOAuthVerifyResult,
 } from '@/lib/production-oauth-client'
 
@@ -47,6 +48,13 @@ export function GoogleConnectionCard() {
     return state.shouldRefresh ? 1 : 0
   })
   const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // MSI-066: cancellation state for the in-flight OAuth attempt. `cancelledRef`
+  // aborts the status poll; `settledRef` guards the child-closed watcher against
+  // racing a just-completed success; `childRef` holds the OAuth child window so
+  // manual child close and the Cancel action both terminate the attempt.
+  const cancelledRef = useRef(false)
+  const settledRef = useRef(false)
+  const childRef = useRef<Window | null>(null)
 
   // Poll production OAuth status after redirect
   const pollOAuthStatus = useCallback(async (sessionId: string) => {
@@ -128,9 +136,43 @@ export function GoogleConnectionCard() {
     }
   }, [refreshKey, pollOAuthStatus])
 
+  // MSI-066: cancel the in-flight OAuth attempt. Closes the child (if still
+  // open), aborts the status poll, and returns the UI to the idle
+  // disconnected state WITHOUT an error banner. Safe to call repeatedly.
+  const handleCancel = useCallback(() => {
+    cancelledRef.current = true
+    try {
+      childRef.current?.close()
+    } catch {
+      /* child already gone */
+    }
+    childRef.current = null
+    clearStoredSessionId()
+    setConnecting(false)
+    setError(null)
+  }, [])
+
+  // MSI-066: watch the OAuth child — a manual child close cancels the attempt
+  // automatically instead of leaving the parent stuck at `Connecting...`.
+  // `Window.closed` is readable cross-origin. The watcher only runs while an
+  // attempt is active and never fires after the attempt settled.
+  useEffect(() => {
+    if (!connecting) return
+    const timer = setInterval(() => {
+      const child = childRef.current
+      if (child && child.closed && !settledRef.current) {
+        handleCancel()
+      }
+    }, 500)
+    return () => clearInterval(timer)
+  }, [connecting, handleCancel])
+
   const handleConnect = async () => {
     setConnecting(true)
     setError(null)
+    cancelledRef.current = false
+    settledRef.current = false
+    childRef.current = null
     try {
       // Start production OAuth flow. This stores the sessionId in sessionStorage.
       const result = await startProductionOAuth()
@@ -139,7 +181,12 @@ export function GoogleConnectionCard() {
       // Open the Google authorization URL in the system browser instead of
       // navigating the main window away. This preserves the SPA and its
       // completion context so the post-Allow return no longer blanks the window.
-      window.open(result.url, '_blank')
+      // The child handle is kept so manual close / Cancel can end the attempt.
+      try {
+        childRef.current = window.open(result.url, '_blank')
+      } catch {
+        childRef.current = null
+      }
 
       if (!sessionId) {
         throw new Error('OAuth session was not initialized.')
@@ -147,7 +194,13 @@ export function GoogleConnectionCard() {
 
       // Poll the production session to completion in the MAIN window, then
       // verify + persist locally. This keeps the app usable after Allow.
-      const verifyResult = await completeProductionOAuth(sessionId)
+      // The abort hook ends the poll promptly on manual child close / Cancel.
+      const verifyResult = await completeProductionOAuth(
+        sessionId,
+        () => cancelledRef.current
+      )
+      settledRef.current = true
+      childRef.current = null
       clearStoredSessionId()
       setStatus({
         connected: true,
@@ -157,8 +210,16 @@ export function GoogleConnectionCard() {
         connectedAt: verifyResult.identity.createdAt,
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to connect.')
-      clearStoredSessionId()
+      settledRef.current = true
+      childRef.current = null
+      if (err instanceof OAuthCancelledError || cancelledRef.current) {
+        // User-cancelled: clean return to idle, no error banner.
+        clearStoredSessionId()
+        setError(null)
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to connect.')
+        clearStoredSessionId()
+      }
     } finally {
       setConnecting(false)
     }
@@ -281,10 +342,17 @@ export function GoogleConnectionCard() {
                 {error}
               </div>
             )}
-            <Button onClick={handleConnect} disabled={connecting}>
-              <ExternalLink className='size-4' />
-              {connecting ? 'Connecting...' : 'Connect Google Account'}
-            </Button>
+            <div className='flex items-center gap-2'>
+              <Button onClick={handleConnect} disabled={connecting}>
+                <ExternalLink className='size-4' />
+                {connecting ? 'Connecting...' : 'Connect Google Account'}
+              </Button>
+              {connecting && (
+                <Button variant='outline' size='sm' onClick={handleCancel}>
+                  Cancel
+                </Button>
+              )}
+            </div>
           </div>
         )}
       </CardContent>

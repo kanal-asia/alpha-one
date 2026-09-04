@@ -6,11 +6,13 @@
  * package, which includes platform-specific binaries.
  *
  * Resolution priority:
- *   1. BUNDLED: node_modules/opencode-ai/bin/opencode[.exe]
- *   2. PROJECT: local project node_modules (development fallback)
- *   3. GLOBAL: PATH-based resolution (development fallback only)
+ *   1. PACKAGED: ALPHA_ONE_RESOURCES_PATH/opencode[.exe] (backend in production)
+ *   2. PACKAGED: Electron process.resourcesPath/opencode[.exe] (production)
+ *   3. BUNDLED: node_modules/opencode-ai/bin/opencode[.exe]
+ *   4. PROJECT: local project node_modules (development fallback)
+ *   5. GLOBAL: PATH-based resolution (development fallback only)
  *
- * Production Alpha One MUST use the bundled binary.
+ * Production Alpha One MUST use the packaged binary.
  * The global fallback exists ONLY for development convenience.
  */
 
@@ -37,16 +39,33 @@ function fileExists(p: string): boolean {
  * Resolve the bundled OpenCode executable from the opencode-ai npm package.
  *
  * This searches in order:
- *   1. Relative to the current module (ESM import.meta.url)
- *   2. Relative to the process CWD
- *   3. Relative to the app root (two levels up from this file)
+ *   1. Packaged: ALPHA_ONE_RESOURCES_PATH/opencode[.exe] (backend in production)
+ *   2. Packaged: Electron process.resourcesPath/opencode[.exe] (production)
+ *   3. Relative to the current module (ESM import.meta.url)
+ *   4. Relative to the process CWD
+ *   5. Relative to the app root (two levels up from this file)
  *
  * Returns the absolute path to the executable, or null if not found.
  */
 export function resolveBundledOpenCode(): string | null {
   const candidates: string[] = []
 
-  // 1. Relative to this module's location:
+  // 1. PACKAGED PRODUCTION (backend): Electron main passes the packaged
+  //    resources root via ALPHA_ONE_RESOURCES_PATH because plain node has no
+  //    process.resourcesPath.
+  const envResources = process.env.ALPHA_ONE_RESOURCES_PATH
+  if (typeof envResources === "string" && envResources) {
+    candidates.push(join(envResources, binaryName))
+  }
+
+  // 2. PACKAGED PRODUCTION: Electron bundles opencode.exe at resourcesPath.
+  //    process.resourcesPath is only available in packaged Electron context;
+  //    in development it is undefined or points elsewhere.
+  if (typeof process.resourcesPath === "string" && process.resourcesPath) {
+    candidates.push(join(process.resourcesPath, binaryName))
+  }
+
+  // 3. Relative to this module's location:
   //    src/lib/bundled-opencode.ts → ../../node_modules/opencode-ai/bin/opencode[.exe]
   try {
     const __filename = fileURLToPath(import.meta.url)
@@ -58,17 +77,17 @@ export function resolveBundledOpenCode(): string | null {
     // import.meta.url may fail in some contexts
   }
 
-  // 2. Relative to CWD
+  // 4. Relative to CWD
   candidates.push(
     join(process.cwd(), "node_modules", "opencode-ai", "bin", binaryName),
   )
 
-  // 3. Relative to app root (two levels up from src/lib/)
+  // 5. Relative to app root (two levels up from src/lib/)
   candidates.push(
     join(resolve(process.cwd()), "node_modules", "opencode-ai", "bin", binaryName),
   )
 
-  // 4. Check if opencode-ai is resolvable from CWD (npm/pnpm hoisting)
+  // 6. Check if opencode-ai is resolvable from CWD (npm/pnpm hoisting)
   try {
     const pkgPath = require.resolve("opencode-ai/package.json", {
       paths: [process.cwd()],

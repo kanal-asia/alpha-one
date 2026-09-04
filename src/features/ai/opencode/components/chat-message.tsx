@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { AlertTriangle, Check, Copy, Pencil, RefreshCw, CornerDownRight, ChevronDown, ChevronRight, Loader2, RotateCcw, Square } from 'lucide-react'
+import { useState, useLayoutEffect, useRef } from 'react'
+import { AlertTriangle, Check, Copy, Pencil, RefreshCw, CornerDownRight, ChevronDown, ChevronRight, ChevronUp, Loader2, RotateCcw, Square } from 'lucide-react'
 import { type ChatMessage, type ToolEvent, type LifecycleStage } from '../types'
 import type { ReferenceAttachment } from '@/features/ai/references/contract'
 import { Markdown } from './markdown'
@@ -236,6 +236,75 @@ function ProgressIndicator() {
 }
 
 // ---------------------------------------------------------------------------
+// MSI-066R1: Collapsible long USER messages (presentation-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Collapsed presentation height for long user messages. Chosen against the
+ * chat bubble layout (`max-w-2xl`, `text-sm`): 160px shows roughly the first
+ * 7-8 lines — enough to recognize the prompt — instead of a full viewport of
+ * history. Short content never reaches this bound, so it renders unchanged.
+ */
+const USER_MESSAGE_COLLAPSED_MAX_PX = 160
+
+function CollapsibleUserContent({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const [overflows, setOverflows] = useState(false)
+  const bodyRef = useRef<HTMLDivElement>(null)
+
+  // True overflow detection (rendered heights, not character counts): the
+  // container always carries the collapsed bound while unexpanded, so
+  // `scrollHeight > clientHeight` means real clipping is happening. Content
+  // shorter than the bound measures equal heights and stays untouched.
+  // Canonical `content` is rendered verbatim in every state — copy, edit,
+  // persistence, and token accounting all keep using the identical string.
+  useLayoutEffect(() => {
+    if (expanded) return
+    const el = bodyRef.current
+    if (!el) return
+    const check = () => {
+      setOverflows(el.scrollHeight > el.clientHeight + 1)
+    }
+    check()
+    // Re-check after fonts/layout settle and on viewport resize.
+    const t = window.setTimeout(check, 300)
+    window.addEventListener('resize', check)
+    return () => {
+      window.clearTimeout(t)
+      window.removeEventListener('resize', check)
+    }
+  }, [content, expanded])
+
+  return (
+    <div>
+      <div
+        ref={bodyRef}
+        className='relative overflow-hidden whitespace-pre-wrap'
+        style={!expanded ? { maxHeight: USER_MESSAGE_COLLAPSED_MAX_PX } : undefined}
+      >
+        {content}
+        {overflows && !expanded && (
+          <div
+            aria-hidden='true'
+            className='pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-primary to-transparent'
+          />
+        )}
+      </div>
+      {overflows && (
+        <button
+          type='button'
+          onClick={() => setExpanded((v) => !v)}
+          className='mt-1 flex items-center gap-1 text-xs font-medium text-primary-foreground/80 transition-colors hover:text-primary-foreground'
+        >
+          {expanded ? <ChevronUp className='size-3.5' /> : <ChevronDown className='size-3.5' />}
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -290,7 +359,7 @@ export function ChatMessageView({
           </div>
         ) : (
           <div className='max-w-2xl rounded-2xl bg-primary px-4 py-2.5 text-sm text-primary-foreground'>
-            <p className='whitespace-pre-wrap'>{message.content}</p>
+            <CollapsibleUserContent content={message.content} />
             {message.references && message.references.length > 0 && (
               <div className='mt-2'>
                 <ReferenceChips references={message.references} className='[&>span]:bg-primary-foreground/10 [&>span]:text-primary-foreground [&>span]:border-primary-foreground/20' />

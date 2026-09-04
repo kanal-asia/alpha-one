@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   Cloud,
   ChevronRight,
@@ -40,6 +40,7 @@ import {
   verifyProductionOAuth,
   getStoredSessionId,
   clearStoredSessionId,
+  OAuthCancelledError,
   type ProductionOAuthVerifyResult,
 } from '@/lib/production-oauth-client'
 
@@ -204,9 +205,44 @@ export function GoogleDriveBrowser({
 
   const [viewMode, setViewMode] = useState<ViewMode>('list')
 
+  // MSI-066: cancellation state for the in-flight OAuth attempt (see
+  // google-connection-card.tsx for the shared pattern).
+  const cancelledRef = useRef(false)
+  const settledRef = useRef(false)
+  const childRef = useRef<Window | null>(null)
+
+  const handleCancelConnect = useCallback(() => {
+    cancelledRef.current = true
+    try {
+      childRef.current?.close()
+    } catch {
+      /* child already gone */
+    }
+    childRef.current = null
+    clearStoredSessionId()
+    setConnecting(false)
+    setError(null)
+  }, [])
+
+  // MSI-066: a manual OAuth child close cancels the attempt automatically
+  // instead of leaving the parent stuck at `Connecting...`.
+  useEffect(() => {
+    if (!connecting) return
+    const timer = setInterval(() => {
+      const child = childRef.current
+      if (child && child.closed && !settledRef.current) {
+        handleCancelConnect()
+      }
+    }, 500)
+    return () => clearInterval(timer)
+  }, [connecting, handleCancelConnect])
+
   const handleConnect = async () => {
     setConnecting(true)
     setError(null)
+    cancelledRef.current = false
+    settledRef.current = false
+    childRef.current = null
     try {
       // Start production OAuth flow. This stores the sessionId in sessionStorage.
       const result = await startProductionOAuth()
@@ -215,7 +251,11 @@ export function GoogleDriveBrowser({
       // Open the Google authorization URL in the system browser instead of
       // navigating the main window away. This preserves the SPA and its
       // completion context so the post-Allow return no longer blanks the window.
-      window.open(result.url, '_blank')
+      try {
+        childRef.current = window.open(result.url, '_blank')
+      } catch {
+        childRef.current = null
+      }
 
       if (!sessionId) {
         throw new Error('OAuth session was not initialized.')
@@ -223,7 +263,12 @@ export function GoogleDriveBrowser({
 
       // Poll the production session to completion in the MAIN window, then
       // verify + persist locally and refresh Drive status.
-      const verifyResult = await completeProductionOAuth(sessionId)
+      const verifyResult = await completeProductionOAuth(
+        sessionId,
+        () => cancelledRef.current
+      )
+      settledRef.current = true
+      childRef.current = null
       clearStoredSessionId()
       const data = await apiFetch<DriveStatus>('/api/google/drive/status')
       setStatus(data)
@@ -231,8 +276,15 @@ export function GoogleDriveBrowser({
         void loadTabFiles('my-drive')
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Google Workspace service is unavailable.')
-      clearStoredSessionId()
+      settledRef.current = true
+      childRef.current = null
+      if (err instanceof OAuthCancelledError || cancelledRef.current) {
+        clearStoredSessionId()
+        setError(null)
+      } else {
+        setError(err instanceof Error ? err.message : 'Google Workspace service is unavailable.')
+        clearStoredSessionId()
+      }
     } finally {
       setConnecting(false)
     }
@@ -522,10 +574,17 @@ export function GoogleDriveBrowser({
                       {error}
                     </div>
                   )}
-                  <Button onClick={handleConnect} disabled={connecting}>
-                    <ExternalLink className='size-4' />
-                    {connecting ? 'Connecting...' : 'Connect Google'}
-                  </Button>
+                  <div className='flex items-center gap-2'>
+                    <Button onClick={handleConnect} disabled={connecting}>
+                      <ExternalLink className='size-4' />
+                      {connecting ? 'Connecting...' : 'Connect Google'}
+                    </Button>
+                    {connecting && (
+                      <Button variant='outline' size='sm' onClick={handleCancelConnect}>
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>

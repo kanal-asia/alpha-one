@@ -5,6 +5,7 @@ import { useOpenCodeStore } from '../store/opencode-store'
 import { useProjectStore, type Project } from '@/features/ai-assistant/store/project-store'
 import { OpenCodeToolbar } from './opencode-toolbar'
 import { ChatSidebar } from './chat-sidebar'
+import { useChatScrollToBottom } from './chat-scroll'
 import { ChatMessageView } from './chat-message'
 import { ChatComposer } from './chat-composer'
 import { DeveloperPanel } from './developer-panel'
@@ -72,9 +73,9 @@ export function OpenCodeDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [messages, isStreaming])
+  // MSI-066R1: shared restore-to-bottom hook (viewport-targeted; re-runs on
+  // chat switch so a newly opened/restored chat lands on the latest message).
+  useChatScrollToBottom(scrollRef, activeChatId, messages, isStreaming)
 
   return (
     <>

@@ -60,3 +60,5 @@ spint/
 
 # Installer runtime binaries generated/copied locally
 /build-installer/runtime/
+# Local Git audit artifact
+git-prestage-audit.txt

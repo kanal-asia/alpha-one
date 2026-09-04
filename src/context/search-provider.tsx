@@ -23,7 +23,13 @@ export function SearchProvider({ children }: SearchProviderProps) {
       }
     }
     document.addEventListener('keydown', down)
-    return () => document.removeEventListener('keydown', down)
+    // MSI-067: desktop Navigate → Search command opens the palette.
+    const onMenuSearch = () => setOpen(true)
+    window.addEventListener('alpha-one:open-search', onMenuSearch)
+    return () => {
+      document.removeEventListener('keydown', down)
+      window.removeEventListener('alpha-one:open-search', onMenuSearch)
+    }
   }, [])
 
   return (

@@ -28,7 +28,9 @@ import {
   type OAuthSession,
 } from './alpha-infra-db'
 
-import { saveConnection, getConnection } from '../lib/sqlite-persistence'
+import { saveConnection, getConnection, upsertCanonicalProfile, upsertConnectionMetadata, recordDownloadEvent } from '../lib/sqlite-persistence'
+import { stat } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -378,6 +380,35 @@ app.get('/google/oauth/callback', async (req: Request, res: Response) => {
       refreshToken: tokens.refresh_token,
       expiresAt: Date.now() + tokens.expires_in * 1000,
     })
+
+    // TASK-ALPHA-VPS-069: Canonical metadata persistence (credential-free,
+    // provider-keyed, idempotent). Failure is observable via server logs but
+    // must not break the OAuth redirect contract.
+    try {
+      const observedAt = new Date().toISOString()
+      await upsertCanonicalProfile({
+        providerUserId: identity.providerUserId,
+        provider: identity.provider,
+        email: identity.email,
+        displayName: identity.displayName,
+        avatarUrl: identity.avatarUrl,
+        observedAt,
+      })
+      await upsertConnectionMetadata({
+        providerUserId: identity.providerUserId,
+        provider: identity.provider,
+        email: identity.email,
+        status: 'connected',
+        observedAt,
+      })
+    } catch (metadataErr) {
+      // eslint-disable-next-line no-console
+      console.error(
+        '[canonical-metadata] failed to persist OAuth metadata for provider_user_id:',
+        identity.providerUserId,
+        metadataErr instanceof Error ? metadataErr.message : metadataErr
+      )
+    }
 
     // MSI-069 Case A: VPS-side credential persistence REMOVED. Audit proved no
     // desktop production consumer reads the VPS `google_connections` row —
@@ -873,6 +904,192 @@ app.get('/google/drive/files/:fileId/thumbnail', async (req: Request, res: Respo
     })
   }
 })
+
+// ---------------------------------------------------------------------------
+// TASK-ALPHA-VPS-069: Public artifact download tracking
+// ---------------------------------------------------------------------------
+//
+// Topology: Cloudflare -> Caddy -> Node. Caddy routes /downloads/* here
+// (static file_server no longer serves them). Only proxy headers produced
+// by this topology are trusted: CF-Connecting-IP / CF-IPCountry / CF-RAY
+// (Cloudflare) and X-Forwarded-For (appended by Caddy). Arbitrary
+// client-supplied forwarding headers are ignored. Geographic fields are
+// best-effort: only what Cloudflare actually sends is persisted; the rest
+// stays NULL (never fabricated, no GeoIP lookup).
+//
+// Event policy (documented to avoid count inflation):
+// - HEAD            -> headers only, NO event.
+// - GET, no Range   -> 200 full body + one event.
+// - GET, single Range starting at byte 0 -> 206 partial + one event.
+// - GET, resumed Range (start > 0) / If-Range mismatch -> 206, NO event.
+// - GET, multipart Range -> Range ignored, 200 full + one event.
+// - Invalid Range   -> 416, NO event.
+
+const DOWNLOADS_DIR =
+  process.env.ALPHA_DOWNLOADS_DIR || '/var/www/kanal.asia/alpha/downloads'
+
+function singleHeader(req: Request, name: string): string | null {
+  const value = req.headers[name]
+  if (typeof value !== 'string' || !value.trim()) return null
+  return value.trim().split(',')[0].trim() || null
+}
+
+function getDownloadClientIp(req: Request): string | null {
+  return (
+    singleHeader(req, 'cf-connecting-ip') ??
+    singleHeader(req, 'x-forwarded-for') ??
+    req.socket.remoteAddress ??
+    null
+  )
+}
+
+function downloadContentType(fileName: string): string {
+  if (fileName.endsWith('.exe')) return 'application/octet-stream'
+  if (fileName.endsWith('.msi')) return 'application/octet-stream'
+  if (fileName.endsWith('.zip')) return 'application/zip'
+  if (fileName.endsWith('.json')) return 'application/json'
+  return 'application/octet-stream'
+}
+
+async function handleDownload(req: Request, res: Response): Promise<void> {
+  try {
+    const rel = (req.params as Record<string, string>)[0] ?? ''
+    const resolved = join(DOWNLOADS_DIR, rel)
+    // Path-traversal guard: resolved path must stay inside DOWNLOADS_DIR.
+    if (!resolved.startsWith(DOWNLOADS_DIR + '/')) {
+      res.status(404).json({ error: 'Not found' })
+      return
+    }
+
+    let fileStat
+    try {
+      fileStat = await stat(resolved)
+    } catch {
+      res.status(404).json({ error: 'Not found' })
+      return
+    }
+    if (!fileStat.isFile()) {
+      res.status(404).json({ error: 'Not found' })
+      return
+    }
+
+    const size = fileStat.size
+    const artifact = resolved.split('/').pop() ?? rel
+    const etag = `W/"${size.toString(16)}-${Number(fileStat.mtimeMs).toString(16)}"`
+    const lastModified = fileStat.mtime.toUTCString()
+
+    const recordEvent = async (): Promise<void> => {
+      try {
+        await recordDownloadEvent({
+          artifact,
+          // No version source exists alongside the served artifacts;
+          // stored as NULL rather than fabricated.
+          version: null,
+          path: req.path,
+          ipAddress: getDownloadClientIp(req),
+          // Best-effort Cloudflare geo/request metadata. CF-IPCountry and
+          // CF-RAY arrive on all plans; city/region headers require extra
+          // Cloudflare configuration and are NULL when absent.
+          countryCode: singleHeader(req, 'cf-ipcountry'),
+          country: null,
+          region:
+            singleHeader(req, 'cf-region') ??
+            singleHeader(req, 'cf-region-code'),
+          city: singleHeader(req, 'cf-ipcity') ?? singleHeader(req, 'cf-city'),
+          userAgent:
+            typeof req.headers['user-agent'] === 'string'
+              ? req.headers['user-agent']
+              : null,
+          referer:
+            typeof req.headers['referer'] === 'string'
+              ? req.headers['referer']
+              : null,
+          cfRay: singleHeader(req, 'cf-ray'),
+          downloadedAt: new Date().toISOString(),
+        })
+      } catch (eventErr) {
+        // eslint-disable-next-line no-console
+        console.error(
+          '[download-events] failed to record event for path:',
+          req.path,
+          eventErr instanceof Error ? eventErr.message : eventErr
+        )
+      }
+    }
+
+    res.setHeader('Content-Type', downloadContentType(artifact))
+    res.setHeader('Accept-Ranges', 'bytes')
+    res.setHeader('Last-Modified', lastModified)
+    res.setHeader('ETag', etag)
+
+    // HEAD: reachable check only, never a download event.
+    if (req.method === 'HEAD') {
+      res.setHeader('Content-Length', String(size))
+      res.status(200).end()
+      return
+    }
+
+    const rangeHeader =
+      typeof req.headers.range === 'string' ? req.headers.range : null
+
+    if (!rangeHeader) {
+      res.setHeader('Content-Length', String(size))
+      res.status(200)
+      await recordEvent()
+      createReadStream(resolved).on('error', () => res.destroy()).pipe(res)
+      return
+    }
+
+    // Multipart ranges are not supported: serve the full body instead.
+    const single = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim())
+    if (!single || rangeHeader.includes(',')) {
+      res.setHeader('Content-Length', String(size))
+      res.status(200)
+      await recordEvent()
+      createReadStream(resolved).on('error', () => res.destroy()).pipe(res)
+      return
+    }
+
+    let start = single[1] === '' ? NaN : Number(single[1])
+    let end = single[2] === '' ? NaN : Number(single[2])
+    if (Number.isNaN(start)) {
+      // Suffix range: last N bytes.
+      start = Number.isNaN(end) ? NaN : Math.max(size - end, 0)
+      end = size - 1
+    } else if (Number.isNaN(end)) {
+      end = size - 1
+    }
+    if (Number.isNaN(start) || start < 0 || start >= size || end < start) {
+      res.setHeader('Content-Range', `bytes */${size}`)
+      res.status(416).end()
+      return
+    }
+    end = Math.min(end, size - 1)
+
+    res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`)
+    res.setHeader('Content-Length', String(end - start + 1))
+    res.status(206)
+    // Only the initial chunk (start == 0) counts as a download event;
+    // resumed chunks must not inflate the count.
+    if (start === 0) {
+      await recordEvent()
+    }
+    createReadStream(resolved, { start, end })
+      .on('error', () => res.destroy())
+      .pipe(res)
+  } catch (err) {
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Download failed',
+      })
+    } else {
+      res.destroy()
+    }
+  }
+}
+
+app.get('/downloads/*', handleDownload)
+app.head('/downloads/*', handleDownload)
 
 // ---------------------------------------------------------------------------
 // Cleanup expired sessions periodically

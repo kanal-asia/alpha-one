@@ -43,6 +43,9 @@ export function createGoogleOAuthRouter(): Router {
         connected: Boolean(token),
         configured: true,
         email: connection.email,
+        // TASK-ALPHA-LOCAL-072: authoritative Google sub for local telemetry
+        // identity (additive; existing consumers unaffected).
+        providerUserId: connection.providerUserId ?? null,
         scopes: connection.scopes,
         connectedAt: connection.connectedAt,
       })

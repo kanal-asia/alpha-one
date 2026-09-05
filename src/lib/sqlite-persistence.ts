@@ -561,6 +561,94 @@ export async function upsertConnectionMetadata(input: {
   }
 }
 
+export interface GoogleActivityInput {
+  providerUserId: string
+  toolName: string
+  occurredAt: string
+}
+
+export interface GoogleActivityResult {
+  /** False when no canonical identity exists — caller must NOT fabricate. */
+  updated: boolean
+  firstActivityAt: string | null
+  lastActivityAt: string | null
+  activityCount: number
+  lastActivityTool: string | null
+}
+
+const ACTIVITY_TOOL_RE = /^[A-Za-z0-9_.:-]{1,128}$/
+
+/**
+ * TASK-ALPHA-LOCAL-072: record one successful Google MCP activity against the
+ * canonical `google_connections` identity row (TASK-071 columns).
+ *
+ * Semantics mirror `upsertConnectionMetadata`:
+ * - unknown provider_user_id → `{ updated: false }`, NO row is created;
+ * - first activity → first=last=occurred_at, count=1, tool set;
+ * - subsequent → first preserved, last advanced, count+1, tool replaced.
+ * All inputs validated; activity fields are never touched elsewhere.
+ */
+export async function recordGoogleActivity(
+  input: GoogleActivityInput
+): Promise<GoogleActivityResult> {
+  const providerOk =
+    typeof input.providerUserId === 'string' &&
+    input.providerUserId.length > 0 &&
+    input.providerUserId.length <= 128
+  const toolOk =
+    typeof input.toolName === 'string' &&
+    ACTIVITY_TOOL_RE.test(input.toolName)
+  const ts = Date.parse(input.occurredAt)
+  const timeOk =
+    Number.isFinite(ts) &&
+    ts >= Date.parse('2000-01-01T00:00:00.000Z') &&
+    ts <= Date.now() + 5 * 60 * 1000
+  if (!providerOk || !toolOk || !timeOk) {
+    throw new Error('Invalid Google activity event.')
+  }
+
+  const database = getDb()
+  const existing = database
+    .prepare('SELECT * FROM google_connections WHERE provider_user_id = ?')
+    .all(input.providerUserId)[0] as
+    | {
+        first_activity_at: string | null
+        last_activity_at: string | null
+        activity_count: number
+        last_activity_tool: string | null
+      }
+    | undefined
+
+  if (!existing) {
+    return {
+      updated: false,
+      firstActivityAt: null,
+      lastActivityAt: null,
+      activityCount: 0,
+      lastActivityTool: null,
+    }
+  }
+
+  const first = existing.first_activity_at ?? input.occurredAt
+  const count = (existing.activity_count ?? 0) + 1
+  database
+    .prepare(
+      `UPDATE google_connections
+       SET first_activity_at = ?, last_activity_at = ?,
+           activity_count = ?, last_activity_tool = ?
+       WHERE provider_user_id = ?`
+    )
+    .run(first, input.occurredAt, count, input.toolName, input.providerUserId)
+
+  return {
+    updated: true,
+    firstActivityAt: first,
+    lastActivityAt: input.occurredAt,
+    activityCount: count,
+    lastActivityTool: input.toolName,
+  }
+}
+
 export async function getCanonicalProfile(
   providerUserId: string
 ): Promise<CanonicalGoogleProfile | null> {

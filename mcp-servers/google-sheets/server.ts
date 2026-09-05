@@ -36,6 +36,10 @@
 // ---------------------------------------------------------------------------
 
 import { getAccessToken } from '../shared/google/auth'
+import {
+  emitGoogleActivitySuccess,
+  shouldEmitActivityForResult,
+} from '../shared/google/activity'
 
 const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4'
 
@@ -1854,7 +1858,15 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
 
     // We need to handle async here — buffer the response
     return promise.then(
-      (result) => ({ jsonrpc: '2.0', id: req.id, result }),
+      (result) => {
+        // TASK-ALPHA-LOCAL-072: same success semantics as the shared wrapper —
+        // exactly one activity event per successful execution, fire-and-forget,
+        // never altering the result; isError/rejection paths emit nothing.
+        if (shouldEmitActivityForResult(result)) {
+          emitGoogleActivitySuccess('google-sheets', name)
+        }
+        return { jsonrpc: '2.0', id: req.id, result }
+      },
       (err) => ({
         jsonrpc: '2.0',
         id: req.id,

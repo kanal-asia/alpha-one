@@ -16,6 +16,7 @@ import express, { type Request, type Response } from 'express'
 import cors from 'cors'
 import { randomBytes, createHash } from 'node:crypto'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { DATA_ROOT } from '../lib/data-root'
 import {
   upsertIdentity,
@@ -28,7 +29,7 @@ import {
   type OAuthSession,
 } from './alpha-infra-db'
 
-import { saveConnection, getConnection, upsertCanonicalProfile, upsertConnectionMetadata, recordDownloadEvent } from '../lib/sqlite-persistence'
+import { saveConnection, getConnection, upsertCanonicalProfile, upsertConnectionMetadata, recordDownloadEvent, recordGoogleActivity } from '../lib/sqlite-persistence'
 import { stat } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 
@@ -561,6 +562,74 @@ app.get('/google/access-token', async (_req: Request, res: Response) => {
   } catch (err) {
     return res.status(500).json({
       error: err instanceof Error ? err.message : 'Failed to get access token',
+    })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// TASK-ALPHA-LOCAL-072: Google MCP successful-activity ingestion (LOCAL
+// source; VPS deployment is a separate phase and intentionally untouched).
+//
+// Local Google MCP servers observe successful tool executions (the VPS never
+// sees them) and POST metadata-only events here. Successful Google operation
+// results are never gated on this endpoint: delivery is best-effort from the
+// MCP side, and unknown identities are rejected, never fabricated.
+// ---------------------------------------------------------------------------
+
+app.post('/google/activity', async (req: Request, res: Response) => {
+  try {
+    const body = (req.body ?? {}) as {
+      provider?: unknown
+      provider_user_id?: unknown
+      tool_name?: unknown
+      occurred_at?: unknown
+    }
+
+    if (body.provider !== 'google') {
+      return res.status(400).json({ error: 'provider must be google.' })
+    }
+    if (
+      typeof body.provider_user_id !== 'string' ||
+      !body.provider_user_id ||
+      body.provider_user_id.length > 128
+    ) {
+      return res.status(400).json({ error: 'provider_user_id is required.' })
+    }
+    if (typeof body.tool_name !== 'string' || !body.tool_name) {
+      return res.status(400).json({ error: 'tool_name is required.' })
+    }
+    if (typeof body.occurred_at !== 'string' || !body.occurred_at) {
+      return res.status(400).json({ error: 'occurred_at is required.' })
+    }
+
+    let result
+    try {
+      result = await recordGoogleActivity({
+        providerUserId: body.provider_user_id,
+        toolName: body.tool_name,
+        occurredAt: body.occurred_at,
+      })
+    } catch {
+      return res.status(400).json({ error: 'Invalid Google activity event.' })
+    }
+
+    if (!result.updated) {
+      return res.status(404).json({
+        error:
+          'Unknown Google identity. Connect a Google account before reporting activity.',
+      })
+    }
+
+    return res.json({
+      updated: true,
+      first_activity_at: result.firstActivityAt,
+      last_activity_at: result.lastActivityAt,
+      activity_count: result.activityCount,
+      last_activity_tool: result.lastActivityTool,
+    })
+  } catch (err) {
+    return res.status(500).json({
+      error: err instanceof Error ? err.message : 'Failed to record activity.',
     })
   }
 })
@@ -1103,7 +1172,21 @@ setInterval(() => {
 // Start Server
 // ---------------------------------------------------------------------------
 
-if (process.argv[1] && import.meta.url === new URL(process.argv[1], 'file://').href) {
+// Direct-invocation gate. NOTE: `new URL(argv[1], 'file://')` breaks on
+// Windows (backslashes) so the server silently never listened there;
+// pathToFileURL is correct on every platform.
+const invokedDirectly = (() => {
+  try {
+    return (
+      !!process.argv[1] &&
+      import.meta.url === pathToFileURL(process.argv[1]).href
+    )
+  } catch {
+    return false
+  }
+})()
+
+if (invokedDirectly) {
   app.listen(PORT, () => {
     // eslint-disable-next-line no-console
     console.log(`Alpha One Infrastructure server running on http://localhost:${PORT}`)

@@ -26,7 +26,7 @@ export interface GoogleConnection {
  * 127.0.0.1:PORT where PORT is injected by the Electron main process.
  * MCP servers inherit this via process.env from the spawned backend.
  */
-function getBackendBaseUrl(): string {
+export function getBackendBaseUrl(): string {
   const port = process.env.PORT || '3001'
   return `http://127.0.0.1:${port}`
 }

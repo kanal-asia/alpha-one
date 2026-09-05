@@ -8,7 +8,14 @@
  * - Owns only transport framing, protocol lifecycle, and process lifecycle.
  * - Service MCPs explicitly register their own tools and dispatch logic
  *   (tool registration is intentionally NOT abstracted).
+ * - TASK-ALPHA-LOCAL-072: observes exactly one successful-activity telemetry
+ *   event per successful tools/call (fire-and-forget; never alters results).
  */
+
+import {
+  emitGoogleActivitySuccess,
+  shouldEmitActivityForResult,
+} from './activity'
 
 export interface McpTool {
   name: string
@@ -83,7 +90,16 @@ export function startMcpServer(options: McpServerOptions): void {
       }
       const result = options.callTool(name, args)
       return Promise.resolve(result).then(
-        (r) => ({ jsonrpc: '2.0' as const, id: req.id, result: r }),
+        (r) => {
+          // TASK-ALPHA-LOCAL-072: exactly one successful-activity event per
+          // successful handler execution. Fire-and-forget AFTER the result is
+          // computed: never blocks/alters the response; resolved isError and
+          // rejections (below) emit nothing.
+          if (shouldEmitActivityForResult(r)) {
+            emitGoogleActivitySuccess(options.name, name)
+          }
+          return { jsonrpc: '2.0' as const, id: req.id, result: r }
+        },
         (err) => ({
           jsonrpc: '2.0' as const,
           id: req.id,

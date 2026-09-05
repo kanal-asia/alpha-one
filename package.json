@@ -26,7 +26,8 @@
     "test:ui": "vitest --ui --browser.headless",
     "test:browser": "vitest",
     "test:coverage": "vitest run --coverage --browser.headless",
-    "test:browser:install": "playwright install chromium --with-deps"
+    "test:browser:install": "playwright install chromium --with-deps",
+    "test:port": "vitest run --config vitest.node.config.ts"
   },
   "dependencies": {
     "@clerk/react": "^6.14.5",

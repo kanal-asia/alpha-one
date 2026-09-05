@@ -56,6 +56,25 @@ export interface OpenCodeTransport {
   compactSession(sessionId: string): Promise<CompactResult>
   fetchConfigDefaultAgent(): Promise<string | null>
   getRuntimeWorkspace(): Promise<{ path: string } | null>
+  /**
+   * MSI-070: canonical CLI identity from the runtime snapshot. Lets UI logs
+   * report the ACTUAL resolved executable instead of a stale configured path.
+   */
+  getRuntimeCliInfo(): Promise<RuntimeCliInfo | null>
+}
+
+/**
+ * MSI-070/071: subset of the runtime snapshot relevant to the UI — CLI
+ * identity plus lifecycle/stage so the console can distinguish transitional
+ * startup (not an error) from terminal failure.
+ */
+export interface RuntimeCliInfo {
+  installed: boolean
+  version: string | null
+  executablePath: string | null
+  resolvedCommand: string | null
+  lifecycle: string | null
+  stage: string | null
 }
 
 const API_BASE = '/api/opencode'
@@ -340,6 +359,34 @@ export class HTTPTransport implements OpenCodeTransport {
       if (!res.ok) return null
       const data = await res.json()
       return data.workspace ?? null
+    } catch {
+      return null
+    }
+  }
+
+  async getRuntimeCliInfo(): Promise<RuntimeCliInfo | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/runtime`)
+      if (!res.ok) return null
+      const data = (await res.json()) as {
+        lifecycle?: unknown
+        stage?: unknown
+        cli?: unknown
+      }
+      const cli = data.cli
+      if (!cli || typeof cli !== 'object') return null
+      const c = cli as Record<string, unknown>
+      return {
+        installed: c.installed === true,
+        version: typeof c.version === 'string' ? c.version : null,
+        executablePath:
+          typeof c.executablePath === 'string' ? c.executablePath : null,
+        resolvedCommand:
+          typeof c.resolvedCommand === 'string' ? c.resolvedCommand : null,
+        lifecycle:
+          typeof data.lifecycle === 'string' ? data.lifecycle : null,
+        stage: typeof data.stage === 'string' ? data.stage : null,
+      }
     } catch {
       return null
     }

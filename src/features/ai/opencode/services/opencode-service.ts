@@ -41,6 +41,10 @@ export class OpenCodeService {
     return this.transport.detectInstallation(executablePath)
   }
 
+  async getRuntimeCliInfo() {
+    return this.transport.getRuntimeCliInfo()
+  }
+
   async launchSession(settings: OpenCodeSettings) {
     return this.transport.launchSession(settings)
   }

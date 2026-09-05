@@ -1,14 +1,28 @@
 import { app, BrowserWindow, shell, ipcMain, screen, Menu, dialog } from 'electron'
 import { commandMeta } from '../src/lib/desktop-command-ids'
+import {
+  checkLoopbackPortFree,
+  allocateLoopbackPort,
+} from '../src/lib/free-port'
 import { join } from 'node:path'
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, cpSync, mkdtempSync, appendFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { createServer } from 'node:net'
 
 const isDev = !app.isPackaged
-const PORT = 3001
-const HEALTH_URL = `http://127.0.0.1:${PORT}/api/opencode/health`
+
+// MSI-069: preferred loopback port (compatibility default). The ACTUAL port
+// for this instance is `runtimePort`: 3001 when free, otherwise an OS-allocated
+// free loopback port. All consumers must derive endpoints from runtimePort via
+// healthUrl()/frontendUrl() — never guess 3001.
+const PREFERRED_PORT = 3001
+let runtimePort = PREFERRED_PORT
+function healthUrl(): string {
+  return `http://127.0.0.1:${runtimePort}/api/opencode/health`
+}
+function frontendUrl(): string {
+  return `http://127.0.0.1:${runtimePort}/`
+}
 
 // ---------------------------------------------------------------------------
 // Temporary file logger for MSI-061R2 runtime trace (user-writable location)
@@ -24,8 +38,6 @@ function traceLog(msg: string) {
 }
 // Clear log on fresh start
 try { writeFileSync(getTraceLogPath(), `=== Alpha One OAuth Trace ===\nStarted at ${new Date().toISOString()}\n`) } catch { /* ignore */ }
-const FRONTEND_URL = `http://127.0.0.1:${PORT}/`
-
 let mainWindow: BrowserWindow | null = null
 let serverProcess: ChildProcess | null = null
 let isQuitting = false
@@ -606,17 +618,11 @@ function extractFrontendDist(): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Port detection
+// Port detection (MSI-069: probe primitive lives in src/lib/free-port so the
+// selection mechanism is unit-testable; OS allocation likewise shared).
 // ---------------------------------------------------------------------------
 function checkPortFree(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const server = createServer()
-    server.once('error', () => resolve(false))
-    server.once('listening', () => {
-      server.close(() => resolve(true))
-    })
-    server.listen(port, '127.0.0.1')
-  })
+  return checkLoopbackPortFree(port)
 }
 
 function waitForPortFree(port: number, timeoutMs = 10000, intervalMs = 200): Promise<boolean> {
@@ -808,7 +814,7 @@ function startBackend(): Promise<void> {
 
     console.log(`[Alpha One] Starting backend: ${nodeExe} ${serverScript}`)
     console.log(`[Alpha One] CWD: ${cwd}`)
-    console.log(`[Alpha One] Port: ${PORT}`)
+    console.log(`[Alpha One] Port: ${runtimePort}`)
 
     const dataDir = resolveDataDir()
     mkdirSync(dataDir, { recursive: true })
@@ -822,7 +828,7 @@ function startBackend(): Promise<void> {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        PORT: String(PORT),
+        PORT: String(runtimePort),
         NODE_ENV: 'production',
         ALPHA_DATA_DIR: dataDir,
         ...(extractedDist ? { DIST_DIR: extractedDist } : {}),
@@ -868,7 +874,7 @@ async function waitForBackend(timeoutMs = 30000, intervalMs = 500): Promise<bool
 
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch(HEALTH_URL, {
+      const res = await fetch(healthUrl(), {
         signal: AbortSignal.timeout(2000),
       })
       if (res.ok) {
@@ -891,53 +897,81 @@ async function waitForBackend(timeoutMs = 30000, intervalMs = 500): Promise<bool
 type PortResolution = 'READY_TO_START' | 'FOREIGN_CONFLICT' | 'UNRESOLVABLE'
 
 async function resolvePortCollision(): Promise<PortResolution> {
-  const isFree = await checkPortFree(PORT)
+  const isFree = await checkPortFree(PREFERRED_PORT)
   if (isFree) {
-    console.log(`[Alpha One] Port ${PORT} is free`)
+    runtimePort = PREFERRED_PORT
+    console.log(`[Alpha One] Port ${runtimePort} is free`)
     return 'READY_TO_START'
   }
 
-  console.log(`[Alpha One] Port ${PORT} is occupied, identifying owner...`)
-  const { ownership, pid, info } = classifyPortOwner(PORT)
+  console.log(`[Alpha One] Port ${PREFERRED_PORT} is occupied, identifying owner...`)
+  const { ownership, pid, info } = classifyPortOwner(PREFERRED_PORT)
 
   switch (ownership) {
     case 'ALPHA_ONE_OWNED':
       if (pid === null) {
         // Port occupied but no PID found — try health check to confirm it's us
         try {
-          const res = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(2000) })
+          const res = await fetch(healthUrl(), { signal: AbortSignal.timeout(2000) })
           if (res.ok) {
             console.log('[Alpha One] Existing Alpha One backend detected, will reuse')
+            runtimePort = PREFERRED_PORT
             return 'READY_TO_START'
           }
         } catch {
           // Can't reach it, wait for port to free
         }
-        const freed = await waitForPortFree(PORT, 5000)
-        return freed ? 'READY_TO_START' : 'UNRESOLVABLE'
+        const freed = await waitForPortFree(PREFERRED_PORT, 5000)
+        if (freed) {
+          runtimePort = PREFERRED_PORT
+          return 'READY_TO_START'
+        }
+        return 'UNRESOLVABLE'
       }
 
       console.log(`[Alpha One] Terminating stale Alpha One backend (PID: ${pid})`)
       terminateProcessTree(pid)
 
-      console.log(`[Alpha One] Waiting for port ${PORT} to be released...`)
-      const freed = await waitForPortFree(PORT, 10000)
-      if (!freed) {
-        console.error(`[Alpha One] Port ${PORT} not released after termination`)
+      console.log(`[Alpha One] Waiting for port ${PREFERRED_PORT} to be released...`)
+      const released = await waitForPortFree(PREFERRED_PORT, 10000)
+      if (!released) {
+        console.error(`[Alpha One] Port ${PREFERRED_PORT} not released after termination`)
         return 'UNRESOLVABLE'
       }
 
-      console.log(`[Alpha One] Port ${PORT} released`)
+      console.log(`[Alpha One] Port ${PREFERRED_PORT} released`)
+      runtimePort = PREFERRED_PORT
       return 'READY_TO_START'
 
     case 'FOREIGN_PROCESS':
-      console.log(`[Alpha One] Port ${PORT} owned by foreign process: ${info?.exePath}`)
-      return 'FOREIGN_CONFLICT'
+      // MSI-069: never kill or fail on a foreign owner (e.g. VS Code on
+      // 3001). Fall through to an OS-allocated alternate loopback port.
+      console.log(`[Alpha One] Port ${PREFERRED_PORT} owned by foreign process: ${info?.exePath} (pid ${pid}) — selecting alternate port`)
+      return selectAlternatePort()
 
     case 'UNKNOWN':
-      console.log(`[Alpha One] Port ${PORT} owner cannot be identified`)
-      return 'UNRESOLVABLE'
+      // Owner unidentifiable: killing is unsafe, so take an alternate port.
+      console.log(`[Alpha One] Port ${PREFERRED_PORT} owner cannot be identified — selecting alternate port`)
+      return selectAlternatePort()
   }
+}
+
+/**
+ * MSI-069: set runtimePort to an OS-allocated free loopback port.
+ * The foreign occupant is never touched.
+ */
+async function selectAlternatePort(): Promise<PortResolution> {
+  try {
+    const port = await allocateLoopbackPort()
+    if (await checkPortFree(port)) {
+      runtimePort = port
+      console.log(`[Alpha One] Alternate runtime port selected: ${runtimePort} (preferred ${PREFERRED_PORT} unavailable)`)
+      return 'READY_TO_START'
+    }
+  } catch (err) {
+    console.error('[Alpha One] Alternate port allocation failed:', err)
+  }
+  return 'UNRESOLVABLE'
 }
 
 // ---------------------------------------------------------------------------
@@ -1111,8 +1145,8 @@ if (!gotTheLock) {
     // Helper: close OAuth child if it landed on localhost after OAuth
     const tryCloseOauthChild = (url: string, source: string) => {
       if (!sawExternalOAuth) return
-      const isLocalReturn = url.startsWith(`http://127.0.0.1:${PORT}/`) ||
-        url.startsWith(`http://localhost:${PORT}/`)
+      const isLocalReturn = url.startsWith(`http://127.0.0.1:${runtimePort}/`) ||
+        url.startsWith(`http://localhost:${runtimePort}/`)
       if (!isLocalReturn) return
 
       // Fresh reference — contents.browserWindow may be stale
@@ -1224,7 +1258,7 @@ if (!gotTheLock) {
 
       if (resolution === 'FOREIGN_CONFLICT') {
         showErrorWindow(
-          'Port 3001 is already in use',
+          `Port ${PREFERRED_PORT} is already in use`,
           'Alpha One did not terminate the other application. Please close the conflicting application and try again.'
         )
         return
@@ -1233,10 +1267,12 @@ if (!gotTheLock) {
       if (resolution === 'UNRESOLVABLE') {
         showErrorWindow(
           'Cannot start Alpha One',
-          'Port 3001 is occupied by an unidentified process. Please check what is using this port and try again.'
+          `No free loopback port is available (preferred ${PREFERRED_PORT}). Please check what is using local ports and try again.`
         )
         return
       }
+
+      console.log(`[Alpha One] Runtime endpoint: ${frontendUrl()}`)
 
       // Ensure MCP config is correct before spawning backend
       ensureOpenCodeMcpConfig()
@@ -1253,7 +1289,7 @@ if (!gotTheLock) {
       if (!ready) {
         showErrorWindow(
           'Failed to start backend server',
-          'The backend process started but did not become ready. Please check that port 3001 is available.'
+          `The backend process started but did not become ready on ${frontendUrl()}.`
         )
         return
       }
@@ -1261,13 +1297,13 @@ if (!gotTheLock) {
       // Create window and load frontend
       mainWindow = createMainWindow()
       if (isDev) {
-        mainWindow.loadURL(FRONTEND_URL)
+        mainWindow.loadURL(frontendUrl())
       } else {
         // Production: load from backend HTTP server.
         // Express static middleware cannot serve files from ASAR, so we extract
         // the frontend dist to a temp directory and serve via HTTP.
         // This provides a proper HTTP origin for routing, API calls, and OAuth.
-        mainWindow.loadURL(FRONTEND_URL)
+        mainWindow.loadURL(frontendUrl())
       }
 
       // MSI-067: native application menu + context-aware state sync.

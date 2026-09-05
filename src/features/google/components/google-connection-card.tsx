@@ -7,11 +7,14 @@ import {
   startProductionOAuth,
   completeProductionOAuth,
   pollProductionOAuthStatus,
+  verifyAndPersistProductionOAuth,
   getStoredSessionId,
   clearStoredSessionId,
   OAuthCancelledError,
+  traceOAuth,
   type ProductionOAuthVerifyResult,
 } from '@/lib/production-oauth-client'
+import { OAuthAttempt } from '@/lib/oauth-attempt'
 
 interface GoogleStatus {
   connected: boolean
@@ -48,12 +51,12 @@ export function GoogleConnectionCard() {
     return state.shouldRefresh ? 1 : 0
   })
   const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // MSI-066: cancellation state for the in-flight OAuth attempt. `cancelledRef`
-  // aborts the status poll; `settledRef` guards the child-closed watcher against
-  // racing a just-completed success; `childRef` holds the OAuth child window so
-  // manual child close and the Cancel action both terminate the attempt.
-  const cancelledRef = useRef(false)
-  const settledRef = useRef(false)
+  // MSI-070: single ordering authority for the in-flight OAuth attempt
+  // (replaces the MSI-066 cancelled/settled refs, whose guard was set too
+  // late and let success auto-close masquerade as manual cancellation).
+  // `childRef` holds the OAuth child window so manual close and Cancel can
+  // terminate the attempt.
+  const attemptRef = useRef<OAuthAttempt | null>(null)
   const childRef = useRef<Window | null>(null)
 
   // Poll production OAuth status after redirect
@@ -62,19 +65,11 @@ export function GoogleConnectionCard() {
       const result = await pollProductionOAuthStatus(sessionId, 60, 2000)
 
       if (result.status === 'completed' && result.identity) {
-        // Verify and get tokens
-        const verifyResult: ProductionOAuthVerifyResult = await verifyProductionOAuth(sessionId)
-
-        // Persist tokens locally via local server (include sessionId for binding)
-        await fetch('/api/google/oauth/persist-production', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId,
-            identity: verifyResult.identity,
-            tokens: verifyResult.tokens,
-          }),
-        })
+        // MSI-069: verify + persist + local status proof as one contract.
+        // Throws on persist failure or unverified status — never marks
+        // Connected from approval/redirect alone.
+        const verifyResult: ProductionOAuthVerifyResult =
+          await verifyAndPersistProductionOAuth(sessionId)
 
         // Clear session and refresh status
         clearStoredSessionId()
@@ -136,11 +131,10 @@ export function GoogleConnectionCard() {
     }
   }, [refreshKey, pollOAuthStatus])
 
-  // MSI-066: cancel the in-flight OAuth attempt. Closes the child (if still
-  // open), aborts the status poll, and returns the UI to the idle
-  // disconnected state WITHOUT an error banner. Safe to call repeatedly.
-  const handleCancel = useCallback(() => {
-    cancelledRef.current = true
+  // MSI-070: cancel side effects shared by the Cancel action and the
+  // child-closed watcher. Runs only when the attempt guard says 'cancel'.
+  const performCancel = useCallback(() => {
+    traceOAuth('oauth.manual_cancel')
     try {
       childRef.current?.close()
     } catch {
@@ -152,26 +146,37 @@ export function GoogleConnectionCard() {
     setError(null)
   }, [])
 
-  // MSI-066: watch the OAuth child — a manual child close cancels the attempt
-  // automatically instead of leaving the parent stuck at `Connecting...`.
-  // `Window.closed` is readable cross-origin. The watcher only runs while an
-  // attempt is active and never fires after the attempt settled.
+  // MSI-066: cancel the in-flight OAuth attempt. Ignored once success is
+  // recognized or the attempt settled (Cancel during verify lets success win).
+  const handleCancel = useCallback(() => {
+    if ((attemptRef.current?.requestCancel() ?? 'cancel') === 'ignore') return
+    performCancel()
+  }, [performCancel])
+
+  // MSI-066/070: watch the OAuth child — a manual child close cancels the
+  // attempt automatically. `Window.closed` is readable cross-origin. The
+  // attempt guard distinguishes success auto-close (ignored) from genuine
+  // manual close (cancelled), so only one of them ever wins.
   useEffect(() => {
     if (!connecting) return
     const timer = setInterval(() => {
       const child = childRef.current
-      if (child && child.closed && !settledRef.current) {
-        handleCancel()
+      if (child && child.closed) {
+        if ((attemptRef.current?.noteChildClosed() ?? 'cancel') === 'ignore') {
+          traceOAuth('oauth.child_closed_after_success')
+        } else {
+          performCancel()
+        }
       }
     }, 500)
     return () => clearInterval(timer)
-  }, [connecting, handleCancel])
+  }, [connecting, performCancel])
 
   const handleConnect = async () => {
     setConnecting(true)
     setError(null)
-    cancelledRef.current = false
-    settledRef.current = false
+    const attempt = new OAuthAttempt()
+    attemptRef.current = attempt
     childRef.current = null
     try {
       // Start production OAuth flow. This stores the sessionId in sessionStorage.
@@ -195,11 +200,15 @@ export function GoogleConnectionCard() {
       // Poll the production session to completion in the MAIN window, then
       // verify + persist locally. This keeps the app usable after Allow.
       // The abort hook ends the poll promptly on manual child close / Cancel.
+      // onStatusCompleted arms the ordering guard BEFORE verify/persist, so a
+      // success auto-close racing this window can never cancel the attempt.
       const verifyResult = await completeProductionOAuth(
         sessionId,
-        () => cancelledRef.current
+        () => attempt.shouldAbort(),
+        () => attempt.noteStatusCompleted()
       )
-      settledRef.current = true
+      attempt.settle()
+      traceOAuth('oauth.settled')
       childRef.current = null
       clearStoredSessionId()
       setStatus({
@@ -210,9 +219,9 @@ export function GoogleConnectionCard() {
         connectedAt: verifyResult.identity.createdAt,
       })
     } catch (err) {
-      settledRef.current = true
+      attempt.settle()
       childRef.current = null
-      if (err instanceof OAuthCancelledError || cancelledRef.current) {
+      if (err instanceof OAuthCancelledError || attempt.isUserCancelled) {
         // User-cancelled: clean return to idle, no error banner.
         clearStoredSessionId()
         setError(null)

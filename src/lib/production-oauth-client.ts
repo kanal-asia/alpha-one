@@ -93,6 +93,31 @@ export class OAuthCancelledError extends Error {
 }
 
 /**
+ * MSI-070: minimal local-only OAuth tracing. Structured event labels let a
+ * failed completion be classified (success seen? persist ok? status ok?
+ * cancelled?) without ever logging tokens, codes, secrets, or full URLs.
+ */
+export function traceOAuth(
+  event:
+    | 'oauth.completion_started'
+    | 'oauth.status_completed'
+    | 'oauth.verify_success'
+    | 'oauth.local_persist_success'
+    | 'oauth.local_persist_failed'
+    | 'oauth.local_status_connected'
+    | 'oauth.local_status_disconnected'
+    | 'oauth.settled'
+    | 'oauth.child_closed_after_success'
+    | 'oauth.manual_cancel'
+): void {
+  try {
+    console.info(`[oauth] ${event}`)
+  } catch {
+    /* logging must never break completion */
+  }
+}
+
+/**
  * Poll the production OAuth status until completion or failure.
  * Returns the status result.
  *
@@ -180,6 +205,55 @@ export function clearStoredSessionId(): void {
 }
 
 /**
+ * MSI-069: verify a completed session, persist credentials locally, and prove
+ * persistence via local status — as ONE completion contract.
+ *
+ * Google approval and redirect alone are NOT success. Every step is checked:
+ * non-2xx persistence throws, and the connection is only reported complete
+ * after the local backend confirms `connected: true`. Callers therefore can
+ * never mark Connected from an unverified completion result.
+ */
+export async function verifyAndPersistProductionOAuth(
+  sessionId: string
+): Promise<ProductionOAuthVerifyResult> {
+  const verifyResult = await verifyProductionOAuth(sessionId)
+  traceOAuth('oauth.verify_success')
+
+  const persistRes = await fetch('/api/google/oauth/persist-production', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sessionId,
+      identity: verifyResult.identity,
+      tokens: verifyResult.tokens,
+    }),
+  })
+  if (!persistRes.ok) {
+    traceOAuth('oauth.local_persist_failed')
+    throw new Error(
+      `Local credential persistence failed (HTTP ${persistRes.status}). Google approval alone is not a completed connection.`
+    )
+  }
+  traceOAuth('oauth.local_persist_success')
+
+  const statusRes = await fetch('/api/google/oauth/status')
+  if (!statusRes.ok) {
+    traceOAuth('oauth.local_status_disconnected')
+    throw new Error(
+      `Local connection verification failed (HTTP ${statusRes.status}).`
+    )
+  }
+  const status = (await statusRes.json()) as { connected?: boolean }
+  if (!status.connected) {
+    traceOAuth('oauth.local_status_disconnected')
+    throw new Error('Google connection not verified after credential persist.')
+  }
+  traceOAuth('oauth.local_status_connected')
+
+  return verifyResult
+}
+
+/**
  * Poll the production OAuth session to completion, then verify and persist the
  * resulting identity/tokens via the LOCAL backend (/api/google/oauth/persist-production).
  *
@@ -190,8 +264,10 @@ export function clearStoredSessionId(): void {
  */
 export async function completeProductionOAuth(
   sessionId: string,
-  shouldAbort?: () => boolean
+  shouldAbort?: () => boolean,
+  onStatusCompleted?: () => void
 ): Promise<ProductionOAuthVerifyResult> {
+  traceOAuth('oauth.completion_started')
   const status = await pollProductionOAuthStatus(sessionId, 60, 2000, shouldAbort)
 
   if (status.status === 'failed') {
@@ -201,17 +277,13 @@ export async function completeProductionOAuth(
     throw new Error('OAuth session did not complete')
   }
 
-  const verifyResult = await verifyProductionOAuth(sessionId)
+  // MSI-070: success is recognized HERE — before verify/persist — so the
+  // completion callback can arm the ordering guard ahead of the success
+  // auto-close racing the child-closed watcher.
+  traceOAuth('oauth.status_completed')
+  onStatusCompleted?.()
 
-  await fetch('/api/google/oauth/persist-production', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sessionId,
-      identity: verifyResult.identity,
-      tokens: verifyResult.tokens,
-    }),
-  })
-
-  return verifyResult
+  const result = await verifyAndPersistProductionOAuth(sessionId)
+  traceOAuth('oauth.settled')
+  return result
 }

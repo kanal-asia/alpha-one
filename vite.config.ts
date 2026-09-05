@@ -41,6 +41,13 @@ export default defineConfig({
   test: {
     silent: 'passed-only',
     unstubEnvs: true,
+    // MSI-069: loopback-socket tests cannot run in Chromium (node:net is
+    // externalized); they run via `npm run test:port` (vitest.node.config.ts).
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      'src/lib/free-port.test.ts',
+    ],
     browser: {
       enabled: true,
       provider: playwright(),

@@ -37,12 +37,13 @@ import {
   startProductionOAuth,
   completeProductionOAuth,
   pollProductionOAuthStatus,
-  verifyProductionOAuth,
+  verifyAndPersistProductionOAuth,
   getStoredSessionId,
   clearStoredSessionId,
   OAuthCancelledError,
-  type ProductionOAuthVerifyResult,
+  traceOAuth,
 } from '@/lib/production-oauth-client'
+import { OAuthAttempt } from '@/lib/oauth-attempt'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -205,14 +206,13 @@ export function GoogleDriveBrowser({
 
   const [viewMode, setViewMode] = useState<ViewMode>('list')
 
-  // MSI-066: cancellation state for the in-flight OAuth attempt (see
-  // google-connection-card.tsx for the shared pattern).
-  const cancelledRef = useRef(false)
-  const settledRef = useRef(false)
+  // MSI-070: single ordering authority for the in-flight OAuth attempt
+  // (same shared pattern as google-connection-card.tsx).
+  const attemptRef = useRef<OAuthAttempt | null>(null)
   const childRef = useRef<Window | null>(null)
 
-  const handleCancelConnect = useCallback(() => {
-    cancelledRef.current = true
+  const performCancelConnect = useCallback(() => {
+    traceOAuth('oauth.manual_cancel')
     try {
       childRef.current?.close()
     } catch {
@@ -224,24 +224,33 @@ export function GoogleDriveBrowser({
     setError(null)
   }, [])
 
-  // MSI-066: a manual OAuth child close cancels the attempt automatically
-  // instead of leaving the parent stuck at `Connecting...`.
+  const handleCancelConnect = useCallback(() => {
+    if ((attemptRef.current?.requestCancel() ?? 'cancel') === 'ignore') return
+    performCancelConnect()
+  }, [performCancelConnect])
+
+  // MSI-066/070: a manual OAuth child close cancels the attempt automatically.
+  // The attempt guard ignores success auto-close, so only one outcome wins.
   useEffect(() => {
     if (!connecting) return
     const timer = setInterval(() => {
       const child = childRef.current
-      if (child && child.closed && !settledRef.current) {
-        handleCancelConnect()
+      if (child && child.closed) {
+        if ((attemptRef.current?.noteChildClosed() ?? 'cancel') === 'ignore') {
+          traceOAuth('oauth.child_closed_after_success')
+        } else {
+          performCancelConnect()
+        }
       }
     }, 500)
     return () => clearInterval(timer)
-  }, [connecting, handleCancelConnect])
+  }, [connecting, performCancelConnect])
 
   const handleConnect = async () => {
     setConnecting(true)
     setError(null)
-    cancelledRef.current = false
-    settledRef.current = false
+    const attempt = new OAuthAttempt()
+    attemptRef.current = attempt
     childRef.current = null
     try {
       // Start production OAuth flow. This stores the sessionId in sessionStorage.
@@ -263,11 +272,13 @@ export function GoogleDriveBrowser({
 
       // Poll the production session to completion in the MAIN window, then
       // verify + persist locally and refresh Drive status.
-      const verifyResult = await completeProductionOAuth(
+      await completeProductionOAuth(
         sessionId,
-        () => cancelledRef.current
+        () => attempt.shouldAbort(),
+        () => attempt.noteStatusCompleted()
       )
-      settledRef.current = true
+      attempt.settle()
+      traceOAuth('oauth.settled')
       childRef.current = null
       clearStoredSessionId()
       const data = await apiFetch<DriveStatus>('/api/google/drive/status')
@@ -276,9 +287,9 @@ export function GoogleDriveBrowser({
         void loadTabFiles('my-drive')
       }
     } catch (err) {
-      settledRef.current = true
+      attempt.settle()
       childRef.current = null
-      if (err instanceof OAuthCancelledError || cancelledRef.current) {
+      if (err instanceof OAuthCancelledError || attempt.isUserCancelled) {
         clearStoredSessionId()
         setError(null)
       } else {
@@ -403,19 +414,10 @@ export function GoogleDriveBrowser({
             const result = await pollProductionOAuthStatus(storedSessionId, 60, 2000)
 
             if (result.status === 'completed' && result.identity) {
-              // Verify and get tokens
-              const verifyResult: ProductionOAuthVerifyResult = await verifyProductionOAuth(storedSessionId)
-
-              // Persist tokens locally via local server (include sessionId for binding)
-              await fetch('/api/google/oauth/persist-production', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  sessionId: storedSessionId,
-                  identity: verifyResult.identity,
-                  tokens: verifyResult.tokens,
-                }),
-              })
+              // MSI-069: hardened completion contract — throws on persist
+              // failure or unverified status. The status fetch below remains
+              // the authoritative UI source.
+              await verifyAndPersistProductionOAuth(storedSessionId)
             }
           } catch {
             // Production OAuth completion failed, continue with local status check

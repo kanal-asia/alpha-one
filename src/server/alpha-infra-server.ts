@@ -379,19 +379,13 @@ app.get('/google/oauth/callback', async (req: Request, res: Response) => {
       expiresAt: Date.now() + tokens.expires_in * 1000,
     })
 
-    // TASK-MSI-026: Persist to SQLite for VPS-side connection storage
-    await saveConnection('local-user', {
-      provider: 'google',
-      providerUserId: userInfo.id,
-      email: userInfo.email,
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      tokenExpiry: Date.now() + tokens.expires_in * 1000,
-      scopes: tokens.scope ? tokens.scope.split(' ') : [],
-      status: 'active',
-      connectedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    })
+    // MSI-069 Case A: VPS-side credential persistence REMOVED. Audit proved no
+    // desktop production consumer reads the VPS `google_connections` row —
+    // desktop obtains one-time tokens from /verify and persists LOCALLY, and
+    // no caller uses VPS /google/access-token or /google/connection. The
+    // shared 'local-user' row was ambiguous multi-device state with no proven
+    // consumer. Identity row (upsertIdentity) and session completion above are
+    // the only VPS writes the desktop flow requires.
 
     // Redirect to success page
     // Use returnTo from session if available, otherwise fallback to CLIENT_URL

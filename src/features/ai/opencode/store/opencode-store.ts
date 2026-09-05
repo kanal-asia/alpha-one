@@ -259,6 +259,105 @@ function makeChat(firstPrompt?: string): Chat {
   }
 }
 
+// ---------------------------------------------------------------------------
+// MSI-071: lifecycle-aware runtime detection (single source of truth).
+//
+// PROVEN DEFECT: the previous detect() treated any non-ready snapshot as
+// terminal — during normal startup (starting/checking_cli/loading_*) it
+// logged `OpenCode runtime reported not installed`, a false error that then
+// lingered after the runtime became healthy.
+//
+// Contract:
+// - transitional lifecycle/stage (anything not ready/busy/error/stopped)
+//   emits ONE informational pending line, never a terminal error;
+// - terminal ready + installed logs the canonical resolved path (MSI-070);
+// - terminal failure (error lifecycle, ready-but-not-installed, backend
+//   unreachable, or startup timeout) logs ONE actionable error with the
+//   actual observed state;
+// - concurrent callers share one run (no duplicate diagnostics).
+// ---------------------------------------------------------------------------
+
+/** Lifecycle values that mean "still starting, not a failure". */
+function isTransitionalLifecycle(lifecycle: string | null): boolean {
+  return (
+    lifecycle !== 'ready' &&
+    lifecycle !== 'busy' &&
+    lifecycle !== 'error' &&
+    lifecycle !== 'stopped'
+  )
+}
+
+let detectInflight: Promise<void> | null = null
+
+async function runDetect(
+  set: (partial: Partial<OpenCodeStore>) => void,
+  get: () => OpenCodeStore
+): Promise<void> {
+  set({ connection: 'connecting' })
+
+  // Wait for a terminal runtime state (bounded): the runtime typically needs
+  // a few seconds for CLI detection + model discovery after backend boot.
+  const deadline = Date.now() + 30_000
+  let pendingLogged = false
+  let lastLifecycle: string | null = null
+  let lastStage: string | null = null
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const cliInfo = await openCodeService
+      .getRuntimeCliInfo()
+      .catch(() => null)
+    lastLifecycle = cliInfo?.lifecycle ?? null
+    lastStage = cliInfo?.stage ?? null
+
+    const terminal =
+      cliInfo === null
+        ? Date.now() >= deadline
+        : !isTransitionalLifecycle(cliInfo.lifecycle) || cliInfo.lifecycle === 'error'
+
+    if (terminal) {
+      const installed =
+        cliInfo !== null &&
+        cliInfo.installed &&
+        cliInfo.lifecycle !== 'error'
+      set({
+        installed,
+        connection: installed ? 'connected' : 'disconnected',
+      })
+      if (installed) {
+        const canonicalPath =
+          cliInfo?.resolvedCommand ?? cliInfo?.executablePath ?? null
+        get().pushLog(
+          'info',
+          `OpenCode detected at "${canonicalPath ?? get().settings.executablePath}".`
+        )
+      } else if (cliInfo) {
+        get().pushLog(
+          'error',
+          `OpenCode runtime reported not installed (lifecycle=${cliInfo.lifecycle ?? 'unknown'}, stage=${cliInfo.stage ?? 'unknown'}). Check runtime health and restart.`
+        )
+      } else {
+        get().pushLog(
+          'error',
+          'OpenCode runtime unreachable. Check that Alpha One backend is running and restart.'
+        )
+      }
+      return
+    }
+
+    if (!pendingLogged) {
+      pendingLogged = true
+      get().pushLog(
+        'info',
+        lastStage === 'checking_cli'
+          ? 'Checking OpenCode CLI...'
+          : 'OpenCode runtime is starting...'
+      )
+    }
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+}
+
 export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
   settings: hydrateSettings(),
   connection: 'disconnected',
@@ -308,17 +407,15 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     })),
 
   detect: async () => {
-    set({ connection: 'connecting' })
-    const installed = await openCodeService.detectInstallation(
-      get().settings.executablePath
-    )
-    set({ installed, connection: installed ? 'connected' : 'disconnected' })
-    get().pushLog(
-      installed ? 'info' : 'error',
-      installed
-        ? `OpenCode detected at "${get().settings.executablePath}".`
-        : `OpenCode not found at "${get().settings.executablePath}".`
-    )
+    // MSI-071: concurrent detect() calls share one in-flight run so duplicate
+    // consumers cannot emit duplicate/contradictory diagnostics.
+    if (detectInflight) return detectInflight
+    detectInflight = runDetect(set, get)
+    try {
+      await detectInflight
+    } finally {
+      detectInflight = null
+    }
   },
 
   loadWorkspaces: async () => {

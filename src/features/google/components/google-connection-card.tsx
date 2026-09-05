@@ -12,6 +12,7 @@ import {
   clearStoredSessionId,
   OAuthCancelledError,
   traceOAuth,
+  resolveOAuthChildClose,
   type ProductionOAuthVerifyResult,
 } from '@/lib/production-oauth-client'
 import { OAuthAttempt } from '@/lib/oauth-attempt'
@@ -58,6 +59,7 @@ export function GoogleConnectionCard() {
   // terminate the attempt.
   const attemptRef = useRef<OAuthAttempt | null>(null)
   const childRef = useRef<Window | null>(null)
+  const sessionIdRef = useRef<string | null>(null)
 
   // Poll production OAuth status after redirect
   const pollOAuthStatus = useCallback(async (sessionId: string) => {
@@ -141,6 +143,7 @@ export function GoogleConnectionCard() {
       /* child already gone */
     }
     childRef.current = null
+    sessionIdRef.current = null
     clearStoredSessionId()
     setConnecting(false)
     setError(null)
@@ -153,21 +156,27 @@ export function GoogleConnectionCard() {
     performCancel()
   }, [performCancel])
 
-  // MSI-066/070: watch the OAuth child — a manual child close cancels the
-  // attempt automatically. `Window.closed` is readable cross-origin. The
-  // attempt guard distinguishes success auto-close (ignored) from genuine
-  // manual close (cancelled), so only one of them ever wins.
+  // MSI-066/067/070: watch the OAuth child. `Window.closed` is readable
+  // cross-origin. On close, the shared resolver re-checks server status
+  // BEFORE deciding: completed → success path continues (never cancelled);
+  // otherwise the existing manual-cancel path runs. Resolved once per close.
   useEffect(() => {
     if (!connecting) return
     const timer = setInterval(() => {
       const child = childRef.current
-      if (child && child.closed) {
-        if ((attemptRef.current?.noteChildClosed() ?? 'cancel') === 'ignore') {
+      if (!child || !child.closed) return
+      clearInterval(timer)
+      void (async () => {
+        const resolution = await resolveOAuthChildClose(
+          sessionIdRef.current,
+          attemptRef.current
+        )
+        if (resolution === 'continue-success') {
           traceOAuth('oauth.child_closed_after_success')
         } else {
           performCancel()
         }
-      }
+      })()
     }, 500)
     return () => clearInterval(timer)
   }, [connecting, performCancel])
@@ -178,10 +187,14 @@ export function GoogleConnectionCard() {
     const attempt = new OAuthAttempt()
     attemptRef.current = attempt
     childRef.current = null
+    sessionIdRef.current = null
     try {
       // Start production OAuth flow. This stores the sessionId in sessionStorage.
       const result = await startProductionOAuth()
       const sessionId = getStoredSessionId()
+      // MSI-067: retained for the child-closed resolver (single status
+      // re-check before cancelling).
+      sessionIdRef.current = sessionId
 
       // Open the Google authorization URL in the system browser instead of
       // navigating the main window away. This preserves the SPA and its
@@ -210,6 +223,7 @@ export function GoogleConnectionCard() {
       attempt.settle()
       traceOAuth('oauth.settled')
       childRef.current = null
+      sessionIdRef.current = null
       clearStoredSessionId()
       setStatus({
         connected: true,
@@ -221,6 +235,7 @@ export function GoogleConnectionCard() {
     } catch (err) {
       attempt.settle()
       childRef.current = null
+      sessionIdRef.current = null
       if (err instanceof OAuthCancelledError || attempt.isUserCancelled) {
         // User-cancelled: clean return to idle, no error banner.
         clearStoredSessionId()

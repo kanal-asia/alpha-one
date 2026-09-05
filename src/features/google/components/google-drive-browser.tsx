@@ -42,6 +42,7 @@ import {
   clearStoredSessionId,
   OAuthCancelledError,
   traceOAuth,
+  resolveOAuthChildClose,
 } from '@/lib/production-oauth-client'
 import { OAuthAttempt } from '@/lib/oauth-attempt'
 
@@ -210,6 +211,7 @@ export function GoogleDriveBrowser({
   // (same shared pattern as google-connection-card.tsx).
   const attemptRef = useRef<OAuthAttempt | null>(null)
   const childRef = useRef<Window | null>(null)
+  const sessionIdRef = useRef<string | null>(null)
 
   const performCancelConnect = useCallback(() => {
     traceOAuth('oauth.manual_cancel')
@@ -219,6 +221,7 @@ export function GoogleDriveBrowser({
       /* child already gone */
     }
     childRef.current = null
+    sessionIdRef.current = null
     clearStoredSessionId()
     setConnecting(false)
     setError(null)
@@ -229,19 +232,26 @@ export function GoogleDriveBrowser({
     performCancelConnect()
   }, [performCancelConnect])
 
-  // MSI-066/070: a manual OAuth child close cancels the attempt automatically.
-  // The attempt guard ignores success auto-close, so only one outcome wins.
+  // MSI-066/067/070: on child close, the shared resolver re-checks server
+  // status BEFORE deciding — completed continues to success, otherwise the
+  // existing manual-cancel path runs. Resolved once per close.
   useEffect(() => {
     if (!connecting) return
     const timer = setInterval(() => {
       const child = childRef.current
-      if (child && child.closed) {
-        if ((attemptRef.current?.noteChildClosed() ?? 'cancel') === 'ignore') {
+      if (!child || !child.closed) return
+      clearInterval(timer)
+      void (async () => {
+        const resolution = await resolveOAuthChildClose(
+          sessionIdRef.current,
+          attemptRef.current
+        )
+        if (resolution === 'continue-success') {
           traceOAuth('oauth.child_closed_after_success')
         } else {
           performCancelConnect()
         }
-      }
+      })()
     }, 500)
     return () => clearInterval(timer)
   }, [connecting, performCancelConnect])
@@ -252,10 +262,13 @@ export function GoogleDriveBrowser({
     const attempt = new OAuthAttempt()
     attemptRef.current = attempt
     childRef.current = null
+    sessionIdRef.current = null
     try {
       // Start production OAuth flow. This stores the sessionId in sessionStorage.
       const result = await startProductionOAuth()
       const sessionId = getStoredSessionId()
+      // MSI-067: retained for the child-closed resolver.
+      sessionIdRef.current = sessionId
 
       // Open the Google authorization URL in the system browser instead of
       // navigating the main window away. This preserves the SPA and its
@@ -280,6 +293,7 @@ export function GoogleDriveBrowser({
       attempt.settle()
       traceOAuth('oauth.settled')
       childRef.current = null
+      sessionIdRef.current = null
       clearStoredSessionId()
       const data = await apiFetch<DriveStatus>('/api/google/drive/status')
       setStatus(data)
@@ -289,6 +303,7 @@ export function GoogleDriveBrowser({
     } catch (err) {
       attempt.settle()
       childRef.current = null
+      sessionIdRef.current = null
       if (err instanceof OAuthCancelledError || attempt.isUserCancelled) {
         clearStoredSessionId()
         setError(null)

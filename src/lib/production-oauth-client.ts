@@ -5,6 +5,8 @@
  * Replaces the local server-side OAuth flow with direct production API calls.
  */
 
+import type { OAuthAttempt } from './oauth-attempt'
+
 const PRODUCTION_BASE_URL = 'https://alpha.kanal.asia'
 
 export interface ProductionOAuthStartResult {
@@ -167,6 +169,73 @@ export async function pollProductionOAuthStatus(
   }
 
   return { status: 'failed', error: 'OAuth polling timed out' }
+}
+
+/**
+ * MSI-067: single synchronous session-status re-check for the child-closed
+ * watcher. Reads the authoritative server session state exactly once — no
+ * loop, no wait, no side effects. Returns true only when the session is
+ * already `completed`. Network errors and non-completed states return false
+ * (the caller then preserves the existing cancellation behavior).
+ */
+export async function checkOAuthSessionCompleted(
+  sessionId: string
+): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `${PRODUCTION_BASE_URL}/api/google/oauth/status/${sessionId}`,
+      {
+        headers: { Accept: 'application/json' },
+      }
+    )
+    if (!response.ok) return false
+    const data = (await response.json()) as { status?: string }
+    return data.status === 'completed'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * MSI-067: child-closed decision boundary, shared by both Google OAuth
+ * surfaces so the fix cannot drift between them.
+ *
+ * When the OAuth child closes, the cause is ambiguous (manual close vs
+ * success auto-close after the localhost redirect). This resolves it with
+ * one authoritative server read performed BEFORE any cancellation:
+ *
+ * - session already `completed` → arm success on the attempt and return
+ *   'continue-success'. The main poll/verify/persist chain proceeds; nothing
+ *   is cancelled, cleaned, or duplicated (only the main flow persists).
+ * - otherwise → delegate to `attempt.noteChildClosed()`, preserving the
+ *   existing manual-cancel behavior (cancel + session cleanup by caller).
+ *
+ * At destroy time the session is always already completed server-side (the
+ * redirect is issued after the callback completes it), so the re-check is
+ * deterministic rather than racy. A missing session/attempt degrades to the
+ * legacy cancel path.
+ */
+export async function resolveOAuthChildClose(
+  sessionId: string | null,
+  attempt: OAuthAttempt | null
+): Promise<'continue-success' | 'cancel'> {
+  if (sessionId && attempt) {
+    let completed = false
+    try {
+      completed = await checkOAuthSessionCompleted(sessionId)
+    } catch {
+      completed = false
+    }
+    if (completed) {
+      attempt.noteStatusCompleted()
+      traceOAuth('oauth.status_completed')
+      return 'continue-success'
+    }
+    if (attempt.noteChildClosed() === 'ignore') {
+      return 'continue-success'
+    }
+  }
+  return 'cancel'
 }
 
 /**

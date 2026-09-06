@@ -5,6 +5,10 @@ import { useOpenCodeStore } from '@/features/ai/opencode/store/opencode-store'
 import type { ChatProjectContext } from '@/features/ai/opencode/types'
 import { ChatSidebar } from '@/features/ai/opencode/components/chat-sidebar'
 import { useChatScrollToBottom } from '@/features/ai/opencode/components/chat-scroll'
+import {
+  useReasoningVariant,
+  variantDisplayName,
+} from '@/features/ai/opencode/components/reasoning-variant'
 import { ChatMessageView } from '@/features/ai/opencode/components/chat-message'
 import { ChatComposer } from '@/features/ai/opencode/components/chat-composer'
 import { DeveloperPanel } from '@/features/ai/opencode/components/developer-panel'
@@ -89,6 +93,16 @@ export function AssistantChatPage() {
   const activeModel = models.find((m) => m.id === settings.defaultModel)
   const scrollRef = useRef<HTMLDivElement>(null)
 
+  // MSI-077: reasoning effort selector restored to the primary chat surface
+  // via the shared proven hook (dynamic per-model variants; hidden when the
+  // model provides none). Placed adjacent to the Build/Plan mode control.
+  const { variantNames, activeVariant } = useReasoningVariant(
+    models,
+    settings.defaultModel,
+    settings.defaultVariant,
+    (variant) => updateSettings({ defaultVariant: variant })
+  )
+
   useEffect(() => {
     void detect()
     void loadWorkspaces()
@@ -134,10 +148,28 @@ export function AssistantChatPage() {
               disabled={models.length === 0}
               refreshing={models.length === 0}
               onSelect={(model) => {
-                updateSettings({ defaultModel: model.id })
+                updateSettings({ defaultModel: model.id, defaultVariant: '' })
               }}
               onRefresh={() => void loadModels()}
             />
+
+            {variantNames.length > 0 && (
+              <Select
+                value={activeVariant}
+                onValueChange={(v) => updateSettings({ defaultVariant: v })}
+              >
+                <SelectTrigger className='h-8 w-[120px]' aria-label='Reasoning variant'>
+                  <SelectValue placeholder='Reasoning' />
+                </SelectTrigger>
+                <SelectContent>
+                  {variantNames.map((v) => (
+                    <SelectItem key={v} value={v}>
+                      {variantDisplayName(v)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
 
             <Select
               value={settings.defaultMode}
@@ -177,17 +209,12 @@ export function AssistantChatPage() {
             </div>
           </div>
 
-          {/* Header */}
-          <div className='flex items-center justify-between px-4 py-2'>
-            <div>
-              <h1 className='flex items-center gap-2 text-lg font-semibold'>
-                <Sparkles className='size-5' />
-                Alpha Workspace
-              </h1>
-              <p className='text-xs text-muted-foreground'>
-                One workspace. One assistant. All your work.
-              </p>
-            </div>
+          {/* MSI-077: compact workspace identity label (replaces the large
+              persistent hero heading + tagline; tagline lives on only in the
+              empty-state onboarding below). */}
+          <div className='flex items-center gap-1.5 px-4 pt-2 text-xs font-medium text-muted-foreground'>
+            <Sparkles className='size-3.5' />
+            Alpha Workspace
           </div>
 
           {/* Mobile chat history trigger */}
@@ -233,7 +260,7 @@ export function AssistantChatPage() {
             </div>
           </ScrollArea>
 
-          <div className='border-t px-4 py-3'>
+          <div className='border-t px-4 py-2'>
             <div className='mx-auto max-w-3xl'>
               <ChatComposer
                 onSend={(t, refs) => void sendMessage(t, refs)}

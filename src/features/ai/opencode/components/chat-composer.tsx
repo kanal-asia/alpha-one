@@ -97,7 +97,7 @@ export function ChatComposer({
   }
 
   return (
-    <div className='relative rounded-2xl border bg-card p-2 shadow-sm'>
+    <div className='relative rounded-2xl border bg-card p-1.5 shadow-sm'>
       {attachments.length > 0 && (
         <ReferenceChips
           references={attachments}
@@ -125,9 +125,9 @@ export function ChatComposer({
         }}
         rows={1}
         placeholder='Message OpenCode…  (Enter to send, Shift+Enter for newline, / for skills)'
-        className='max-h-[220px] w-full resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground'
+        className='max-h-[220px] w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-muted-foreground'
       />
-      <div className='flex items-center justify-between px-1 pt-1'>
+      <div className='flex items-center justify-between px-1 pt-0.5'>
         <div className='flex items-center gap-1'>
           <ReferenceSourcePicker
             onAddReference={(ref) =>
@@ -139,7 +139,7 @@ export function ChatComposer({
                 ref={attachBtnRef}
                 variant='ghost'
                 size='icon'
-                className='size-8'
+                className='size-7'
                 aria-label='Attach file reference'
                 type='button'
                 disabled={isStreaming}
@@ -152,18 +152,18 @@ export function ChatComposer({
           </ReferenceSourcePicker>
         </div>
         {isStreaming ? (
-          <Button size='icon' className='size-8 rounded-full' onClick={onStop} aria-label='Stop'>
-            <Square className='size-4' />
+          <Button size='icon' className='size-7 rounded-full' onClick={onStop} aria-label='Stop'>
+            <Square className='size-3.5' />
           </Button>
         ) : (
           <Button
             size='icon'
-            className='size-8 rounded-full'
+            className='size-7 rounded-full'
             onClick={submit}
             disabled={disabled || !value.trim()}
             aria-label='Send'
           >
-            <ArrowUp className='size-4' />
+            <ArrowUp className='size-3.5' />
           </Button>
         )}
       </div>

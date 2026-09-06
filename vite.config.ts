@@ -44,9 +44,12 @@ export default defineConfig({
     // MSI-069/072: Node-runtime tests (loopback sockets, node:sqlite,
     // child_process) cannot run in Chromium; they run via the
     // vitest.node.config.ts project instead.
+    // MSI-077: packaged build output under release/ must never be
+    // test-scanned (it mirrors source files into win-unpacked).
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
+      'release/**',
       'src/lib/free-port.test.ts',
       'src/lib/activity-persistence.test.ts',
       'mcp-servers/shared/google/activity-runtime.test.ts',

@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from 'react'
 import { Plus, Settings2 } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import { useOpenCodeStore } from '../store/opencode-store'
+import { useReasoningVariant, variantDisplayName } from './reasoning-variant'
 import type { ChatProjectContext } from '../types'
 import { ProjectSelector } from '@/features/ai-assistant/components/project-selector'
 import type { Project } from '@/features/ai-assistant/store/project-store'
@@ -15,20 +15,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-
-/**
- * TASK-OPENCODE-023R1: Resolve a valid default variant from the available list.
- * Priority: persisted valid → "low" if available → first available.
- * Never fabricates a variant the model does not provide.
- */
-function resolveDefaultVariant(
-  available: string[],
-  persisted: string
-): string {
-  if (available.includes(persisted)) return persisted
-  if (available.includes('low')) return 'low'
-  return available[0] ?? ''
-}
 
 /** TASK-OPENCODE-055: ChatProjectContext → Project (for the controlled
  *  ProjectSelector). Drive folder ID is preserved as `contextPath`. */
@@ -77,27 +63,13 @@ export function OpenCodeToolbar() {
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null
   const effectiveModelId = activeChat?.model ?? settings.defaultModel
 
-  // TASK-OPENCODE-023: Derive available variants for the selected model.
-  // (Computed directly — the React Compiler memoizes this; an explicit useMemo
-  // can no longer be preserved once `activeChat` is also read in the JSX.)
-  const selectedModel = models.find((m) => m.id === effectiveModelId)
-  const variantNames = useMemo(() => {
-    const v = selectedModel?.variants
-    return v ? Object.keys(v).sort() : []
-  }, [selectedModel])
-
-  // TASK-OPENCODE-023R1: Compute valid active variant with auto-default.
-  const activeVariant = useMemo(
-    () => resolveDefaultVariant(variantNames, settings.defaultVariant),
-    [variantNames, settings.defaultVariant]
+  // MSI-077: shared reasoning-variant hook (same proven 023/023R1 behavior).
+  const { variantNames, activeVariant } = useReasoningVariant(
+    models,
+    effectiveModelId,
+    settings.defaultVariant,
+    (variant) => updateSettings({ defaultVariant: variant })
   )
-
-  // TASK-OPENCODE-023R1: Auto-select default when variant names exist but selection is empty.
-  useEffect(() => {
-    if (variantNames.length > 0 && activeVariant && activeVariant !== settings.defaultVariant) {
-      updateSettings({ defaultVariant: activeVariant })
-    }
-  }, [variantNames, activeVariant, settings.defaultVariant, updateSettings])
 
   return (
     <div className='flex flex-wrap items-center gap-2 border-b px-4 py-2'>
@@ -135,7 +107,7 @@ export function OpenCodeToolbar() {
           <SelectContent>
             {variantNames.map((v) => (
               <SelectItem key={v} value={v}>
-                {v.charAt(0).toUpperCase() + v.slice(1)}
+                {variantDisplayName(v)}
               </SelectItem>
             ))}
           </SelectContent>

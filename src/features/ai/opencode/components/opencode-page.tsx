@@ -167,7 +167,7 @@ export function OpenCodeDashboard() {
             </div>
           </ScrollArea>
 
-          <div className='border-t px-4 py-3'>
+          <div className='border-t px-4 py-2'>
             <div className='mx-auto max-w-3xl'>
               <ChatComposer
                 onSend={(t, refs) => void sendMessage(t, refs)}

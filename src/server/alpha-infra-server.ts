@@ -29,7 +29,7 @@ import {
   type OAuthSession,
 } from './alpha-infra-db'
 
-import { saveConnection, getConnection, upsertCanonicalProfile, upsertConnectionMetadata, recordDownloadEvent, recordGoogleActivity } from '../lib/sqlite-persistence'
+import { saveConnection, getConnection, upsertCanonicalProfile, upsertConnectionMetadata, recordDownloadEvent, recordGoogleActivity, resolveCountryName } from '../lib/sqlite-persistence'
 import { stat } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 
@@ -1059,8 +1059,11 @@ async function handleDownload(req: Request, res: Response): Promise<void> {
           // Best-effort Cloudflare geo/request metadata. CF-IPCountry and
           // CF-RAY arrive on all plans; city/region headers require extra
           // Cloudflare configuration and are NULL when absent.
+          // TASK-ALPHA-VPS-075R1: country is derived ONLY from the factual
+          // country_code via deterministic ISO resolution (NULL when
+          // unresolvable); raw code, region, and city pass through unchanged.
           countryCode: singleHeader(req, 'cf-ipcountry'),
-          country: null,
+          country: resolveCountryName(singleHeader(req, 'cf-ipcountry')),
           region:
             singleHeader(req, 'cf-region') ??
             singleHeader(req, 'cf-region-code'),
@@ -1088,6 +1091,11 @@ async function handleDownload(req: Request, res: Response): Promise<void> {
 
     res.setHeader('Content-Type', downloadContentType(artifact))
     res.setHeader('Accept-Ranges', 'bytes')
+    // TASK-ALPHA-VPS-075: tracked installer path must not be edge-cached.
+    // Without this, Cloudflare serves repeat downloads from cache and the
+    // origin tracking handler (and download_events) never sees them.
+    // Path-specific only: landing/static caching is untouched.
+    res.setHeader('Cache-Control', 'no-store')
     res.setHeader('Last-Modified', lastModified)
     res.setHeader('ETag', etag)
 

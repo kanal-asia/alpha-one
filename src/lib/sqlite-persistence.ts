@@ -684,6 +684,38 @@ export async function getCanonicalProfile(
 }
 
 /**
+ * TASK-ALPHA-VPS-075R1: deterministic ISO 3166-1 alpha-2 → canonical English
+ * country name resolution (platform-native Intl, no network, no GeoIP DB).
+ *
+ * Returns NULL unless the code truthfully resolves to a country/region name:
+ * - input must be exactly 2 ASCII letters (trimmed, uppercased);
+ * - Cloudflare special/non-country codes (XX unknown, T1 Tor, ZZ, A1)
+ *   are rejected;
+ * - Intl echo-backs (result === input, e.g. 'UK') and 'Unknown …' results
+ *   are rejected rather than persisted.
+ */
+const NON_COUNTRY_CODES = new Set(['XX', 'T1', 'ZZ', 'A1'])
+
+let regionNames: Intl.DisplayNames | null = null
+
+export function resolveCountryName(code: string | null | undefined): string | null {
+  if (typeof code !== 'string') return null
+  const normalized = code.trim().toUpperCase()
+  if (!/^[A-Z]{2}$/.test(normalized)) return null
+  if (NON_COUNTRY_CODES.has(normalized)) return null
+  try {
+    regionNames ??= new Intl.DisplayNames(['en'], { type: 'region' })
+    const name = regionNames.of(normalized)
+    if (typeof name !== 'string') return null
+    if (name === normalized) return null
+    if (/unknown/i.test(name)) return null
+    return name
+  } catch {
+    return null
+  }
+}
+
+/**
  * Records one public-artifact download event. Anonymous downloads stay
  * anonymous: no profile/user linkage is created here by design.
  */

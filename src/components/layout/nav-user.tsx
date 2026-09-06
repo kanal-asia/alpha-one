@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router'
+import { toast } from 'sonner'
 import {
   BadgeCheck,
   Bell,
@@ -8,6 +9,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import useDialogState from '@/hooks/use-dialog-state'
+import { useAccountIdentity } from '@/hooks/use-account-identity'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
   DropdownMenu,
@@ -26,17 +28,10 @@ import {
 } from '@/components/ui/sidebar'
 import { SignOutDialog } from '@/components/sign-out-dialog'
 
-type NavUserProps = {
-  user: {
-    name: string
-    email: string
-    avatar: string
-  }
-}
-
-export function NavUser({ user }: NavUserProps) {
+export function NavUser() {
   const { isMobile } = useSidebar()
   const [open, setOpen] = useDialogState()
+  const identity = useAccountIdentity()
 
   return (
     <>
@@ -49,12 +44,12 @@ export function NavUser({ user }: NavUserProps) {
                 className='data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground'
               >
                 <Avatar className='h-8 w-8 rounded-lg'>
-                  <AvatarImage src={user.avatar} alt={user.name} />
-                  <AvatarFallback className='rounded-lg'>SN</AvatarFallback>
+                  {identity.avatar && <AvatarImage src={identity.avatar} alt={identity.name} />}
+                  <AvatarFallback className='rounded-lg'>{identity.initials}</AvatarFallback>
                 </Avatar>
                 <div className='grid flex-1 text-start text-sm leading-tight'>
-                  <span className='truncate font-semibold'>{user.name}</span>
-                  <span className='truncate text-xs'>{user.email}</span>
+                  <span className='truncate font-semibold'>{identity.name}</span>
+                  <span className='truncate text-xs'>{identity.email}</span>
                 </div>
                 <ChevronsUpDown className='ms-auto size-4' />
               </SidebarMenuButton>
@@ -68,18 +63,18 @@ export function NavUser({ user }: NavUserProps) {
               <DropdownMenuLabel className='p-0 font-normal'>
                 <div className='flex items-center gap-2 px-1 py-1.5 text-start text-sm'>
                   <Avatar className='h-8 w-8 rounded-lg'>
-                    <AvatarImage src={user.avatar} alt={user.name} />
-                    <AvatarFallback className='rounded-lg'>SN</AvatarFallback>
+                    {identity.avatar && <AvatarImage src={identity.avatar} alt={identity.name} />}
+                    <AvatarFallback className='rounded-lg'>{identity.initials}</AvatarFallback>
                   </Avatar>
                   <div className='grid flex-1 text-start text-sm leading-tight'>
-                    <span className='truncate font-semibold'>{user.name}</span>
-                    <span className='truncate text-xs'>{user.email}</span>
+                    <span className='truncate font-semibold'>{identity.name}</span>
+                    <span className='truncate text-xs'>{identity.email}</span>
                   </div>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem>
+                <DropdownMenuItem onClick={() => toast.info('Upgrade to Pro — Coming Soon')}>
                   <Sparkles />
                   Upgrade to Pro
                 </DropdownMenuItem>
@@ -92,11 +87,9 @@ export function NavUser({ user }: NavUserProps) {
                     Account
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to='/settings'>
-                    <CreditCard />
-                    Billing
-                  </Link>
+                <DropdownMenuItem onClick={() => toast.info('Billing — Coming Soon')}>
+                  <CreditCard />
+                  Billing
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
                   <Link to='/settings/notifications'>

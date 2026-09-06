@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { Settings } from 'lucide-react'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { useAccountIdentity } from '@/hooks/use-account-identity'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -11,31 +12,24 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
-type UserMenuProps = {
-  user?: {
-    name: string
-    email: string
-  }
-}
-
-export function UserMenu({ user }: UserMenuProps) {
-  const name = user?.name ?? 'Workspace User'
-  const email = user?.email ?? 'local@workspace'
+export function UserMenu() {
+  const identity = useAccountIdentity()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant='ghost' className='relative h-8 w-8 rounded-full'>
           <Avatar className='h-8 w-8'>
-            <AvatarFallback>{name.slice(0, 2).toUpperCase()}</AvatarFallback>
+            {identity.avatar && <AvatarImage src={identity.avatar} alt={identity.name} />}
+            <AvatarFallback>{identity.initials}</AvatarFallback>
           </Avatar>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className='w-56' align='end' forceMount>
         <DropdownMenuLabel className='font-normal'>
           <div className='flex flex-col gap-1.5'>
-            <p className='text-sm leading-none font-medium'>{name}</p>
+            <p className='text-sm leading-none font-medium'>{identity.name}</p>
             <p className='text-xs leading-none text-muted-foreground'>
-              {email}
+              {identity.email}
             </p>
           </div>
         </DropdownMenuLabel>

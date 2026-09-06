@@ -45,6 +45,7 @@ import {
   resolveOAuthChildClose,
 } from '@/lib/production-oauth-client'
 import { OAuthAttempt } from '@/lib/oauth-attempt'
+import { refreshAccountIdentity } from '@/hooks/use-account-identity'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -297,6 +298,7 @@ export function GoogleDriveBrowser({
       clearStoredSessionId()
       const data = await apiFetch<DriveStatus>('/api/google/drive/status')
       setStatus(data)
+      refreshAccountIdentity()
       if (data.connected) {
         void loadTabFiles('my-drive')
       }

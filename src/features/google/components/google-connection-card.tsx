@@ -3,6 +3,7 @@ import { Cloud, CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { refreshAccountIdentity } from '@/hooks/use-account-identity'
 import {
   startProductionOAuth,
   completeProductionOAuth,
@@ -232,6 +233,7 @@ export function GoogleConnectionCard() {
         scopes: [],
         connectedAt: verifyResult.identity.createdAt,
       })
+      refreshAccountIdentity()
     } catch (err) {
       attempt.settle()
       childRef.current = null
@@ -258,6 +260,7 @@ export function GoogleConnectionCard() {
       const res = await fetch('/api/google/oauth/status')
       const data = await res.json()
       setStatus(data)
+      refreshAccountIdentity()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to disconnect.')
     } finally {

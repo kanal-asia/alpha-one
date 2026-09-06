@@ -30,10 +30,15 @@ export interface GoogleActivityEvent {
 const TELEMETRY_TIMEOUT_MS = 3000
 const MAX_TOOL_NAME_LEN = 128
 
-function telemetryUrl(): string {
-  return (
-    process.env.GOOGLE_ACTIVITY_URL || 'https://alpha.kanal.asia/google/activity'
-  )
+// TASK-ALPHA-LOCAL-074: the production default MUST carry the /api prefix.
+// Caddy only proxies /api/* to the backend (stripping the prefix), so the
+// unprefixed URL fell through to the static file server (HTTP 405). The
+// GOOGLE_ACTIVITY_URL override (tests, local runs) is unchanged.
+const PRODUCTION_TELEMETRY_URL = 'https://alpha.kanal.asia/api/google/activity'
+
+/** Exported for the endpoint-prefix regression test. */
+export function telemetryUrl(): string {
+  return process.env.GOOGLE_ACTIVITY_URL || PRODUCTION_TELEMETRY_URL
 }
 
 function backendBaseUrl(): string {

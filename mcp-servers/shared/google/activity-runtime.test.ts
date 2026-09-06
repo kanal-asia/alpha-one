@@ -4,6 +4,34 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { telemetryUrl } from './activity'
+
+/**
+ * TASK-ALPHA-LOCAL-074: endpoint-prefix regression. The production default
+ * MUST carry the /api prefix (Caddy only proxies /api/* to the backend);
+ * the env override from 072 stays authoritative for tests/local runs.
+ */
+describe('telemetryUrl', () => {
+  const saved = process.env.GOOGLE_ACTIVITY_URL
+
+  it('defaults to the canonical public API route', () => {
+    delete process.env.GOOGLE_ACTIVITY_URL
+    expect(telemetryUrl()).toBe(
+      'https://alpha.kanal.asia/api/google/activity'
+    )
+    if (saved !== undefined) process.env.GOOGLE_ACTIVITY_URL = saved
+  })
+
+  it('explicit env override still wins', () => {
+    process.env.GOOGLE_ACTIVITY_URL = 'http://127.0.0.1:9/stub'
+    try {
+      expect(telemetryUrl()).toBe('http://127.0.0.1:9/stub')
+    } finally {
+      if (saved !== undefined) process.env.GOOGLE_ACTIVITY_URL = saved
+      else delete process.env.GOOGLE_ACTIVITY_URL
+    }
+  })
+})
 
 /**
  * TASK-ALPHA-LOCAL-072: execution-boundary proof against REAL artifacts.

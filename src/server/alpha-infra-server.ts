@@ -29,7 +29,7 @@ import {
   type OAuthSession,
 } from './alpha-infra-db'
 
-import { saveConnection, getConnection, upsertCanonicalProfile, upsertConnectionMetadata, recordDownloadEvent, recordGoogleActivity, resolveCountryName } from '../lib/sqlite-persistence'
+import { saveConnection, getConnection, getCanonicalProfile, upsertCanonicalProfile, upsertConnectionMetadata, recordDownloadEvent, recordGoogleActivity, resolveCountryName } from '../lib/sqlite-persistence'
 import { stat } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 
@@ -539,6 +539,48 @@ app.get('/google/connection', async (_req: Request, res: Response) => {
     return res.status(500).json({
       error: err instanceof Error ? err.message : 'Failed to read connection',
     })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// TASK-ALPHA-VPS-078R2: Canonical Google Profile Read Endpoint
+// ---------------------------------------------------------------------------
+
+app.post('/google/profile/resolve', async (req: Request, res: Response) => {
+  try {
+    const { providerUserId, email } = req.body as {
+      providerUserId?: unknown
+      email?: unknown
+    }
+
+    if (
+      typeof providerUserId !== 'string' || !providerUserId.trim() ||
+      typeof email !== 'string' || !email.trim()
+    ) {
+      return res.status(400).json({ error: 'providerUserId and email are required.' })
+    }
+
+    const trimmedProviderUserId = providerUserId.trim()
+    const trimmedEmail = email.trim()
+
+    if (trimmedProviderUserId.length > 128 || trimmedEmail.length > 254) {
+      return res.status(400).json({ error: 'providerUserId and email are required.' })
+    }
+
+    const profile = await getCanonicalProfile(trimmedProviderUserId)
+
+    if (!profile || (profile.email ?? '').toLowerCase() !== trimmedEmail.toLowerCase()) {
+      return res.status(404).json({ error: 'Google profile not found.' })
+    }
+
+    return res.json({
+      providerUserId: profile.providerUserId,
+      email: profile.email,
+      displayName: profile.displayName,
+      avatarUrl: profile.avatarUrl,
+    })
+  } catch {
+    return res.status(500).json({ error: 'Failed to resolve profile.' })
   }
 })
 

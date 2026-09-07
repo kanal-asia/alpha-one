@@ -18,6 +18,7 @@ export default defineConfig({
       'src/lib/free-port.test.ts',
       'mcp-servers/shared/google/activity-runtime.test.ts',
       'src/lib/activity-persistence.test.ts',
+      'src/lib/profile-resolve.test.ts',
     ],
   },
 })

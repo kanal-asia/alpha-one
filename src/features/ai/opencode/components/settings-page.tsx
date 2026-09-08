@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 import { OpenCodeConfigCard } from './opencode-config-card'
 import {
   AlertDialog,
@@ -47,9 +48,22 @@ export function OpenCodeSettingsPage() {
     modes,
     loadModels,
     loadProviders,
+    modelRefreshing,
+    modelRefreshResult,
+    providerRefreshing,
+    providerRefreshResult,
     chats,
     clearLocalCache,
   } = useOpenCodeStore()
+  // R2B G05: combined-refresh feedback derived from the shared refresh states.
+  const combinedRefreshing = modelRefreshing || providerRefreshing
+  const combinedLabel = combinedRefreshing
+    ? 'Refreshing…'
+    : modelRefreshResult === 'success' && providerRefreshResult === 'success'
+      ? '✓ Updated'
+      : modelRefreshResult === 'error' || providerRefreshResult === 'error'
+        ? '⚠ Failed'
+        : 'Refresh Providers & Models'
   const [providerDialogOpen, setProviderDialogOpen] = useState(false)
   const [clearCacheOpen, setClearCacheOpen] = useState(false)
   const [storageBytes, setStorageBytes] = useState(() => {
@@ -293,13 +307,14 @@ export function OpenCodeSettingsPage() {
                 variant='outline'
                 size='sm'
                 className='gap-1.5'
+                disabled={combinedRefreshing}
                 onClick={() => {
-                  void loadModels()
-                  void loadProviders()
+                  void loadModels(true)
+                  void loadProviders(true)
                 }}
               >
-                <RefreshCw className='size-3.5' />
-                Refresh Providers & Models
+                <RefreshCw className={cn('size-3.5', combinedRefreshing && 'animate-spin')} />
+                {combinedLabel}
               </Button>
             </div>
           </CardContent>

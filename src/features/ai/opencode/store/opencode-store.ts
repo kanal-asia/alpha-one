@@ -183,9 +183,13 @@ interface OpenCodeStore {
   models: ModelInfo[]
   modes: ModeInfo[]
   modelsLoaded: boolean
+  modelRefreshing: boolean
+  modelRefreshResult: 'idle' | 'success' | 'error'
 
   providers: ProviderSummary[]
   providersLoaded: boolean
+  providerRefreshing: boolean
+  providerRefreshResult: 'idle' | 'success' | 'error'
 
   usageSummary: UsageStats | null
   compacting: boolean
@@ -200,8 +204,8 @@ interface OpenCodeStore {
   detect: () => Promise<void>
   loadWorkspaces: () => Promise<void>
   selectWorkspace: (path: string) => void
-  loadModels: () => Promise<void>
-  loadProviders: () => Promise<void>
+  loadModels: (force?: boolean) => Promise<void>
+  loadProviders: (force?: boolean) => Promise<void>
   loadUsageSummary: (days?: number) => Promise<void>
   compactActiveSession: () => Promise<void>
   syncConfigMode: () => Promise<void>
@@ -289,6 +293,9 @@ function isTransitionalLifecycle(lifecycle: string | null): boolean {
 
 let detectInflight: Promise<void> | null = null
 
+// R2B: shared in-flight force model refresh (concurrent Refresh clicks join one run).
+let modelRefreshInflight: Promise<void> | null = null
+
 async function runDetect(
   set: (partial: Partial<OpenCodeStore>) => void,
   get: () => OpenCodeStore
@@ -371,8 +378,12 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
   models: [],
   modes: [],
   modelsLoaded: false,
+  modelRefreshing: false,
+  modelRefreshResult: 'idle' as const,
   providers: [],
   providersLoaded: false,
+  providerRefreshing: false,
+  providerRefreshResult: 'idle' as const,
   usageSummary: null,
   compacting: false,
   compactResult: null,
@@ -438,32 +449,80 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     get().pushLog('info', `Workspace selected: ${path}`)
   },
 
-  loadModels: async () => {
-    const [models, modes] = await Promise.all([
-      openCodeService.listModels(),
-      openCodeService.listModes(),
-    ])
-    const current = get().settings.defaultModel
-    const stillExists = models.some((m) => m.id === current)
-    let nextDefault = current
-    if (!stillExists) {
-      // TASK-OPENCODE-025: Prefer the intended default if available.
-      const intended = models.find((m) => m.id === INTENDED_DEFAULT_MODEL)
-      if (intended) {
-        nextDefault = intended.id
-      } else {
-        const firstFree = [...models]
-          .sort((a, b) => Number(b.free) - Number(a.free) || a.displayName.localeCompare(b.displayName))
-          .find((m) => m.free)
-        nextDefault = firstFree?.id ?? models[0]?.id ?? ''
+  loadModels: async (force?: boolean) => {
+    // R2B: concurrent force refreshes share one run (same idea as detectInflight).
+    if (force && modelRefreshInflight) {
+      await modelRefreshInflight
+      return
+    }
+    const run = (async (): Promise<void> => {
+      // R2B safety: snapshot previous catalog so a force refresh can never
+      // destructively replace a usable list with an empty one.
+      const prevModels = get().models
+      if (force) {
+        set({ modelRefreshing: true, modelRefreshResult: 'idle' })
       }
+      try {
+        const [models, modes] = await Promise.all([
+          force
+            ? openCodeService.forceRefreshModels()
+            : openCodeService.listModels(),
+          openCodeService.listModes(),
+        ])
+        const current = get().settings.defaultModel
+        const stillExists = models.some((m) => m.id === current)
+        let nextDefault = current
+        if (!stillExists) {
+          const intended = models.find((m) => m.id === INTENDED_DEFAULT_MODEL)
+          if (intended) {
+            nextDefault = intended.id
+          } else {
+            const firstFree = [...models]
+              .sort((a, b) => Number(b.free) - Number(a.free) || a.displayName.localeCompare(b.displayName))
+              .find((m) => m.free)
+            nextDefault = firstFree?.id ?? models[0]?.id ?? ''
+          }
+        }
+        // R2B safety: an empty force result must never wipe a previously usable
+        // catalog (malformed/failed refresh). Preserve and report error instead.
+        // Only a genuinely empty runtime on a previously empty catalog yields [].
+      if (force && models.length === 0 && prevModels.length > 0) {
+        set({ modes, modelsLoaded: true, modelRefreshResult: 'error' })
+        setTimeout(() => set({ modelRefreshResult: 'idle' }), 2000)
+        void get().syncConfigMode()
+        return
+      }
+        if (nextDefault !== current) {
+          get().updateSettings({ defaultModel: nextDefault })
+        }
+        if (nextDefault) markModelUsed(nextDefault)
+        set({ models, modes, modelsLoaded: true })
+      if (force) {
+        set({ modelRefreshResult: 'success' })
+        setTimeout(() => {
+          set({ modelRefreshResult: 'idle' })
+        }, 1500)
+      }
+        void get().syncConfigMode()
+      } catch {
+      if (force) {
+        set({ modelRefreshResult: 'error' })
+        setTimeout(() => set({ modelRefreshResult: 'idle' }), 2000)
+      }
+      } finally {
+        if (force) set({ modelRefreshing: false })
+      }
+    })()
+    if (force) {
+      modelRefreshInflight = run
+      try {
+        await run
+      } finally {
+        if (modelRefreshInflight === run) modelRefreshInflight = null
+      }
+    } else {
+      await run
     }
-    if (nextDefault !== current) {
-      get().updateSettings({ defaultModel: nextDefault })
-    }
-    if (nextDefault) markModelUsed(nextDefault)
-    set({ models, modes, modelsLoaded: true })
-    void get().syncConfigMode()
   },
 
   syncConfigMode: async () => {
@@ -477,12 +536,23 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     }
   },
 
-  loadProviders: async () => {
+  loadProviders: async (force?: boolean) => {
+    if (force) set({ providerRefreshing: true, providerRefreshResult: 'idle' })
     try {
-      const providers = await openCodeService.listProviders()
+      const providers = await openCodeService.listProviders(force)
       set({ providers, providersLoaded: true })
+      if (force) {
+        set({ providerRefreshResult: 'success' })
+        setTimeout(() => set({ providerRefreshResult: 'idle' }), 1500)
+      }
     } catch {
       set({ providers: [], providersLoaded: true })
+      if (force) {
+        set({ providerRefreshResult: 'error' })
+        setTimeout(() => set({ providerRefreshResult: 'idle' }), 2000)
+      }
+    } finally {
+      if (force) set({ providerRefreshing: false })
     }
   },
 

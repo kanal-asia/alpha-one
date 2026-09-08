@@ -69,12 +69,16 @@ export class OpenCodeService {
     return this.transport.listModels()
   }
 
+  async forceRefreshModels(): Promise<ModelInfo[]> {
+    return this.transport.forceRefreshModels()
+  }
+
   async listModes(): Promise<ModeInfo[]> {
     return this.transport.listModes()
   }
 
-  async listProviders(): Promise<ProviderSummary[]> {
-    return this.transport.listProviders()
+  async listProviders(force?: boolean): Promise<ProviderSummary[]> {
+    return this.transport.listProviders(force)
   }
 
   async connectProvider(providerId: string): Promise<OpenCodeAuthResult> {

@@ -36,6 +36,7 @@ export interface OpenCodeTransport {
   restartSession(sessionId: string, settings: OpenCodeSettings): Promise<OpenCodeSession>
   listWorkspaces(): Promise<WorkspaceInfo[]>
   listModels(): Promise<ModelInfo[]>
+  forceRefreshModels(): Promise<ModelInfo[]>
   listModes(): Promise<ModeInfo[]>
   sendPrompt(
     sessionId: string,
@@ -48,7 +49,7 @@ export interface OpenCodeTransport {
     variant?: string,
     project?: ChatProjectContext
   ): Promise<void>
-  listProviders(): Promise<ProviderSummary[]>
+  listProviders(force?: boolean): Promise<ProviderSummary[]>
   connectProvider(providerId: string): Promise<OpenCodeAuthResult>
   disconnectProvider(providerId: string): Promise<OpenCodeAuthResult>
   saveApiKey(providerId: string, apiKey: string): Promise<{ ok: boolean }>
@@ -411,12 +412,28 @@ export class HTTPTransport implements OpenCodeTransport {
     }))
   }
 
+  async forceRefreshModels(): Promise<ModelInfo[]> {
+    // R2B: POST /api/runtime/refresh-models returns a RuntimeModelsInfo ACK
+    // ({total, free, providers, source, ...}) — NOT a model array. Forcing must
+    // therefore be: trigger server refresh, then read the normal list endpoint.
+    const res = await fetch(`${this.baseUrl}${API_BASE}/../runtime/refresh-models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string }
+      throw new Error(err.error ?? `HTTP ${res.status}`)
+    }
+    await res.json().catch(() => ({}))
+    return this.listModels()
+  }
+
   async listModes(): Promise<ModeInfo[]> {
     const res = await this.request<{ modes: ModeInfo[] }>('/modes')
     return res.modes
   }
 
-  async listProviders(): Promise<ProviderSummary[]> {
+  async listProviders(force?: boolean): Promise<ProviderSummary[]> {
     const res = await this.request<{ providers: ProviderSummary[] }>('/providers')
     return res.providers
   }

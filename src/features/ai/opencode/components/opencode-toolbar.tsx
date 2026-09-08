@@ -52,6 +52,8 @@ export function OpenCodeToolbar() {
     updateSettings,
     loadModels,
     modelsLoaded,
+    modelRefreshing,
+    modelRefreshResult,
     newChat,
     setActiveChatModel,
     setActiveChatProject,
@@ -86,14 +88,13 @@ export function OpenCodeToolbar() {
         models={models}
         value={effectiveModelId}
         disabled={!modelsLoaded}
-        refreshing={!modelsLoaded}
+        refreshing={modelRefreshing}
+        refreshResult={modelRefreshResult}
         onSelect={(model) => {
-          // TASK-OPENCODE-053: Session-scoped model selection. Does NOT change
-          // the configured/default model; a New Chat still starts with the default.
           setActiveChatModel(model.id)
           updateSettings({ defaultVariant: '' })
         }}
-        onRefresh={() => void loadModels()}
+        onRefresh={() => void loadModels(true)}
       />
 
       {variantNames.length > 0 && (

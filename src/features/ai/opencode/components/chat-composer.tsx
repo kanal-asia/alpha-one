@@ -97,14 +97,14 @@ export function ChatComposer({
   }
 
   return (
-    <div className='relative rounded-2xl border bg-card p-1.5 shadow-sm'>
+    <div className='relative rounded-2xl border bg-card shadow-sm'>
       {attachments.length > 0 && (
         <ReferenceChips
           references={attachments}
           onRemove={(i) =>
             setAttachments((prev) => prev.filter((_, idx) => idx !== i))
           }
-          className='px-1 pb-1'
+          className='px-2 pt-1.5'
         />
       )}
       <SkillPalette
@@ -113,52 +113,52 @@ export function ChatComposer({
         onSelect={handleSkillSelect}
         onClose={handleSlashClose}
       />
-      <textarea
-        ref={ref}
-        value={value}
-        onChange={handleChange}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey && !slashOpen) {
-            e.preventDefault()
-            submit()
+      {/* TASK-077C1: Single horizontal interaction line — attach → input → submit.
+          items-end keeps buttons anchored at bottom when textarea grows multiline. */}
+      <div className='flex items-end gap-0.5 p-1.5'>
+        <ReferenceSourcePicker
+          onAddReference={(ref) =>
+            setAttachments((prev) => [...prev, ref])
           }
-        }}
-        rows={1}
-        placeholder='Message OpenCode…  (Enter to send, Shift+Enter for newline, / for skills)'
-        className='max-h-[220px] w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-muted-foreground'
-      />
-      <div className='flex items-center justify-between px-1 pt-0.5'>
-        <div className='flex items-center gap-1'>
-          <ReferenceSourcePicker
-            onAddReference={(ref) =>
-              setAttachments((prev) => [...prev, ref])
+        >
+          {({ open }) => (
+            <Button
+              ref={attachBtnRef}
+              variant='ghost'
+              size='icon'
+              className='size-7 shrink-0'
+              aria-label='Attach file reference'
+              type='button'
+              disabled={isStreaming}
+              title='Attach a file reference'
+              data-state={open ? 'open' : 'closed'}
+            >
+              <Paperclip className='size-4' />
+            </Button>
+          )}
+        </ReferenceSourcePicker>
+        <textarea
+          ref={ref}
+          value={value}
+          onChange={handleChange}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !slashOpen) {
+              e.preventDefault()
+              submit()
             }
-          >
-            {({ open }) => (
-              <Button
-                ref={attachBtnRef}
-                variant='ghost'
-                size='icon'
-                className='size-7'
-                aria-label='Attach file reference'
-                type='button'
-                disabled={isStreaming}
-                title='Attach a file reference'
-                data-state={open ? 'open' : 'closed'}
-              >
-                <Paperclip className='size-4' />
-              </Button>
-            )}
-          </ReferenceSourcePicker>
-        </div>
+          }}
+          rows={1}
+          placeholder='Message OpenCode…'
+          className='min-h-[28px] max-h-[220px] flex-1 resize-none bg-transparent px-1 py-1 text-sm outline-none placeholder:text-muted-foreground'
+        />
         {isStreaming ? (
-          <Button size='icon' className='size-7 rounded-full' onClick={onStop} aria-label='Stop'>
+          <Button size='icon' className='size-7 shrink-0 rounded-full' onClick={onStop} aria-label='Stop'>
             <Square className='size-3.5' />
           </Button>
         ) : (
           <Button
             size='icon'
-            className='size-7 rounded-full'
+            className='size-7 shrink-0 rounded-full'
             onClick={submit}
             disabled={disabled || !value.trim()}
             aria-label='Send'

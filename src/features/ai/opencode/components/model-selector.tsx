@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   AudioLines,
   BadgeCheck,
@@ -38,6 +38,7 @@ type ModelSelectorProps = {
   onSelect: (model: ModelInfo) => void
   onRefresh?: () => void
   refreshing?: boolean
+  refreshResult?: 'idle' | 'success' | 'error'
   disabled?: boolean
 }
 
@@ -53,6 +54,7 @@ export function ModelSelector({
   onSelect,
   onRefresh,
   refreshing,
+  refreshResult,
   disabled,
 }: ModelSelectorProps) {
   const [open, setOpen] = useState(false)
@@ -190,12 +192,16 @@ export function ModelSelector({
               className='h-7 gap-1 text-[11px]'
               onClick={() => {
                 onRefresh?.()
-                setOpen(false)
               }}
-              disabled={refreshing}
             >
               <RefreshCw className={cn('size-3', refreshing && 'animate-spin')} />
-              Refresh
+              {refreshing
+                ? 'Refreshing…'
+                : refreshResult === 'success'
+                  ? '✓ Updated'
+                  : refreshResult === 'error'
+                    ? '⚠ Failed'
+                    : 'Refresh'}
             </Button>
           </div>
         </div>

@@ -50,7 +50,10 @@ export function ConnectProviderDialog({
 }: ConnectProviderDialogProps) {
   const providers = useOpenCodeStore((s) => s.providers)
   const providersLoaded = useOpenCodeStore((s) => s.providersLoaded)
+  const providerRefreshing = useOpenCodeStore((s) => s.providerRefreshing)
+  const providerRefreshResult = useOpenCodeStore((s) => s.providerRefreshResult)
   const loadProviders = useOpenCodeStore((s) => s.loadProviders)
+
   const [busy, setBusy] = useState<string | null>(null)
   const [connectingProviderId, setConnectingProviderId] = useState<string | null>(null)
   const [apiKeyInput, setApiKeyInput] = useState('')
@@ -58,8 +61,8 @@ export function ConnectProviderDialog({
   const [result, setResult] = useState<{ providerId: string } & OpenCodeAuthResult | null>(null)
   const [copied, setCopied] = useState(false)
 
-  const reload = async () => {
-    await loadProviders()
+  const reload = async (force?: boolean) => {
+    await loadProviders(force)
     onRefreshed?.()
   }
 
@@ -201,11 +204,17 @@ export function ConnectProviderDialog({
             variant='outline'
             size='sm'
             className='h-8 shrink-0 gap-1.5'
-            onClick={() => void reload()}
-            disabled={!providersLoaded}
+            onClick={() => void reload(true)}
+            disabled={providerRefreshing}
           >
-            <RefreshCw className={cn('size-3.5', !providersLoaded && 'animate-spin')} />
-            Refresh Providers
+            <RefreshCw className={cn('size-3.5', providerRefreshing && 'animate-spin')} />
+            {providerRefreshing
+              ? 'Refreshing…'
+              : providerRefreshResult === 'success'
+                ? '✓ Updated'
+                : providerRefreshResult === 'error'
+                  ? '⚠ Failed'
+                  : 'Refresh Providers'}
           </Button>
         </div>
 

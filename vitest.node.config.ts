@@ -19,6 +19,7 @@ export default defineConfig({
       'mcp-servers/shared/google/activity-runtime.test.ts',
       'src/lib/activity-persistence.test.ts',
       'src/lib/profile-resolve.test.ts',
+      'src/services/opencode/artifact-correspondence.test.ts',
     ],
   },
 })

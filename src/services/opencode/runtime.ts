@@ -4,6 +4,7 @@ import {
   checkHealth,
   detectProviderStatus,
   fetchModelsFromOpenCode,
+  forceRefreshModelCatalog,
 } from "./client";
 import type { HealthStatus, ProviderModel } from "./types";
 import type { RuntimeExecutionTrace } from "../../features/runtime/contract";
@@ -421,7 +422,9 @@ export class RuntimeManager {
     this.setStage("loading_models");
     this.setLifecycle("loading_models");
     this.log("loading_models", "info", "Refreshing models...");
-    const discovery = await withTimeout(fetchModelsFromOpenCode(), RACE_MS.models, null);
+    // TASK-080: Force-refresh the TTL cache so the next fetchModelCatalog() call
+    // returns fresh data. Also refreshes RuntimeManager's own model cache.
+    const discovery = await withTimeout(forceRefreshModelCatalog(), RACE_MS.models, null);
     if (discovery) {
       this.models = discovery.models;
       this.modelsSource = discovery.source;

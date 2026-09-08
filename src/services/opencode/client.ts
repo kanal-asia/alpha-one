@@ -220,13 +220,13 @@ function parseModelsVerbose(stdout: string): OpenCodeRawModel[] {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    const headerMatch = trimmed.match(/^([\w.-]+)\/([\w.-]+)$/);
+    const headerMatch = trimmed.match(/^([\w.~@-]+)\/(.+)$/);
     if (headerMatch) {
       flush();
       headerProvider = headerMatch[1];
       continue;
     }
-    if (headerProvider && (trimmed.startsWith("{") || trimmed.startsWith("}") || trimmed.includes(":"))) {
+    if (headerProvider && trimmed.length > 0) {
       buffer.push(line);
     }
   }
@@ -618,8 +618,94 @@ export async function fetchModelsFromOpenCode(): Promise<ModelsResponse> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// TASK-080: Model catalog TTL auto-refresh
+//
+// Wraps fetchModelsFromOpenCode() with a 30-minute TTL cache. When the cache
+// is fresh, returns immediately without CLI invocation. When stale, returns
+// the cached result immediately while refreshing in the background. Manual
+// refresh bypasses the TTL entirely.
+// ---------------------------------------------------------------------------
+
+/** Production TTL: 30 minutes. Exported for test access. */
+export const MODEL_CATALOG_TTL_MS = 30 * 60 * 1000;
+
+interface ModelCatalogCache {
+  at: number;
+  value: ModelsResponse;
+}
+
+let modelCatalogCache: ModelCatalogCache | null = null;
+let modelCatalogRefreshPromise: Promise<ModelsResponse> | null = null;
+
+/**
+ * Core refresh: always runs fresh CLI discovery. Used by both TTL background
+ * refresh and manual force-refresh. Returns the fresh ModelsResponse.
+ */
+async function refreshModelCatalogCore(): Promise<ModelsResponse> {
+  const result = await fetchModelsFromOpenCode();
+  modelCatalogCache = { at: Date.now(), value: result };
+  return result;
+}
+
+/**
+ * TTL-aware model catalog fetch. Returns cached models when fresh; when stale,
+ * returns stale data immediately and refreshes in the background. Manual
+ * refresh bypasses TTL via force=true.
+ */
+export async function fetchModelCatalog(force = false): Promise<ModelsResponse> {
+  // Force refresh: bypass TTL, run fresh discovery immediately.
+  if (force) {
+    modelCatalogRefreshPromise = null;
+    return refreshModelCatalogCore();
+  }
+
+  // Cache is fresh: return immediately.
+  if (modelCatalogCache && Date.now() - modelCatalogCache.at < MODEL_CATALOG_TTL_MS) {
+    return modelCatalogCache.value;
+  }
+
+  // Cache is stale or missing: return stale data if available, refresh in background.
+  const staleResult = modelCatalogCache?.value ?? null;
+
+  // In-flight deduplication: reuse existing refresh promise if one is running.
+  if (!modelCatalogRefreshPromise) {
+    modelCatalogRefreshPromise = refreshModelCatalogCore().catch((err) => {
+      // On failure: preserve existing catalog, clear in-flight state.
+      console.warn("[model-catalog] Background refresh failed:", err?.message ?? err);
+      modelCatalogRefreshPromise = null;
+      // Return stale result if available, otherwise an empty fallback.
+      return staleResult ?? {
+        providers: [],
+        models: [],
+        fetchedAt: new Date().toISOString(),
+        source: "fallback" as const,
+        warnings: ["Background model refresh failed."],
+      };
+    }).finally(() => {
+      modelCatalogRefreshPromise = null;
+    });
+  }
+
+  // Return stale data immediately while background refresh runs.
+  if (staleResult) {
+    return staleResult;
+  }
+
+  // No stale data available: await the first refresh.
+  return modelCatalogRefreshPromise;
+}
+
+/**
+ * Manual force-refresh: bypasses TTL and returns fresh models immediately.
+ * Used by the Refresh button in the model picker.
+ */
+export async function forceRefreshModelCatalog(): Promise<ModelsResponse> {
+  return fetchModelCatalog(true);
+}
+
 export async function fetchProviders(): Promise<ProviderSummary[]> {
-  const { models } = await fetchModelsFromOpenCode();
+  const { models } = await fetchModelCatalog();
   const configured = readConfiguredProviders();
   const registry = readModelsDevRegistry();
   const registryById = new Map(registry.providers.map((p) => [p.id, p]));

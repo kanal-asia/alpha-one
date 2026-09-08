@@ -53,6 +53,7 @@ export default defineConfig({
       'src/lib/free-port.test.ts',
       'src/lib/activity-persistence.test.ts',
       'mcp-servers/shared/google/activity-runtime.test.ts',
+      'src/services/opencode/artifact-correspondence.test.ts',
     ],
     browser: {
       enabled: true,

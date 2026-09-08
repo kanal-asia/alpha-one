@@ -3,7 +3,7 @@ import {
   type RuntimeModel,
   type RuntimeProvider,
 } from "../../features/runtime/contract";
-import { fetchModelsFromOpenCode } from "./client";
+import { fetchModelCatalog } from "./client";
 import type { ProviderModel } from "./types";
 
 /**
@@ -27,13 +27,15 @@ export function toRuntimeModelAdapter(pm: ProviderModel): RuntimeModel {
 
 /**
  * OpenCode runtime provider — implements the RuntimeProvider contract.
- * `discoverModels()` returns `RuntimeModel[]`. No arbitrary strings.
+ * `discoverModels()` returns `RuntimeModel[]` using the TTL-aware cache.
+ * Fresh data is returned when the cache is fresh; stale data + background
+ * refresh is used when the cache is stale.
  */
 export const openCodeRuntimeProvider: RuntimeProvider = {
   id: "opencode",
   label: "OpenCode",
   async discoverModels(): Promise<RuntimeModel[]> {
-    const discovery = await fetchModelsFromOpenCode();
+    const discovery = await fetchModelCatalog();
     return discovery.models.map(toRuntimeModelAdapter);
   },
 };

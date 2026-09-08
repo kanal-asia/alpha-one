@@ -71,6 +71,8 @@ export function AssistantChatPage() {
     detect,
     loadWorkspaces,
     loadModels,
+    modelRefreshing,
+    modelRefreshResult,
     newChat,
     selectChat,
     renameChat,
@@ -115,9 +117,27 @@ export function AssistantChatPage() {
   // so restored chats opened at the top.
   useChatScrollToBottom(scrollRef, activeChatId, messages, isStreaming)
 
+  // TASK-077C1: Determine if a thinking indicator should show between the last
+  // user message and the first streaming assistant response. Factual signal:
+  // isStreaming is true AND the last message is from the user (no assistant
+  // response has started rendering yet).
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
+  const showThinkingIndicator =
+    isStreaming && lastMessage?.role === 'user'
+
   return (
     <>
-      <PageHeader />
+      <PageHeader>
+        {/* TASK-077C1: Alpha Workspace identity placed in the header area
+            beside/right of Search — replaces the old standalone row. */}
+        <div className='flex items-center gap-1.5 text-xs text-muted-foreground'>
+          <Sparkles className='size-3.5' />
+          <span className='font-medium'>Alpha Workspace</span>
+          <span className='hidden text-[10px] text-muted-foreground/70 sm:inline'>
+            One workspace. One assistant. All your work.
+          </span>
+        </div>
+      </PageHeader>
       <div data-layout='fixed' className='flex min-h-0 flex-1 flex-col overflow-hidden'>
         <div className='flex min-h-0 flex-1 overflow-hidden'>
         {/* Chat history sidebar */}
@@ -146,11 +166,12 @@ export function AssistantChatPage() {
               models={models}
               value={settings.defaultModel}
               disabled={models.length === 0}
-              refreshing={models.length === 0}
+              refreshing={modelRefreshing}
+              refreshResult={modelRefreshResult}
               onSelect={(model) => {
                 updateSettings({ defaultModel: model.id, defaultVariant: '' })
               }}
-              onRefresh={() => void loadModels()}
+              onRefresh={() => void loadModels(true)}
             />
 
             {variantNames.length > 0 && (
@@ -209,14 +230,6 @@ export function AssistantChatPage() {
             </div>
           </div>
 
-          {/* MSI-077: compact workspace identity label (replaces the large
-              persistent hero heading + tagline; tagline lives on only in the
-              empty-state onboarding below). */}
-          <div className='flex items-center gap-1.5 px-4 pt-2 text-xs font-medium text-muted-foreground'>
-            <Sparkles className='size-3.5' />
-            Alpha Workspace
-          </div>
-
           {/* Mobile chat history trigger */}
           <div className='px-4 md:hidden'>
             <Sheet>
@@ -256,6 +269,21 @@ export function AssistantChatPage() {
                     onContinue={() => void continueGeneration()}
                   />
                 ))
+              )}
+              {/* TASK-077C1: Global thinking indicator — factual signal:
+                  isStreaming + last message is user = request submitted,
+                  no assistant output yet. Clears when first assistant
+                  content or tool events appear. */}
+              {showThinkingIndicator && (
+                <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+                  <span className='activity-indicator' aria-hidden='true'>
+                    <span className='activity-indicator__seg' />
+                    <span className='activity-indicator__seg' />
+                    <span className='activity-indicator__seg' />
+                    <span className='activity-indicator__seg' />
+                  </span>
+                  <span>Thinking...</span>
+                </div>
               )}
             </div>
           </ScrollArea>

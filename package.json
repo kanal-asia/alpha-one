@@ -5,6 +5,10 @@
   "description": "Alpha One — AI-powered workspace",
   "author": "Kanal Asia",
   "type": "module",
+  "engines": {
+    "node": "26.5.0",
+    "npm": ">=11"
+  },
   "scripts": {
     "dev": "concurrently -k -n web,runtime -c cyan,magenta \"npm:dev:web\" \"npm:dev:server\"",
     "dev:web": "vite",
@@ -13,7 +17,10 @@
     "build": "tsc -b && vite build",
     "build:server": "tsup --config tsup.server.config.ts",
     "build:electron": "npx tsup --config tsup.electron.config.ts",
+    "build:mcp": "npx tsup --config tsup.mcp.config.ts",
     "build:package": "npm run build:server && npm run build && npm run build:electron",
+    "prepare:runtime": "node scripts/prepare-runtime-binaries.mjs",
+    "build:windows": "npm run prepare:runtime && npm run build:server && npm run build:mcp && npm run build && npm run build:electron",
     "start:server": "node dist/server/alpha-server.js",
     "start:infra": "node dist/server/alpha-infra-server.js",
     "lint": "eslint .",
@@ -98,6 +105,7 @@
     "@vitest/ui": "^4.1.4",
     "concurrently": "^9.0.1",
     "electron": "^35.7.0",
+    "electron-builder": "26.15.3",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",

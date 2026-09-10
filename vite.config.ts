@@ -54,6 +54,9 @@ export default defineConfig({
       'src/lib/activity-persistence.test.ts',
       'mcp-servers/shared/google/activity-runtime.test.ts',
       'src/services/opencode/artifact-correspondence.test.ts',
+      // TASK-ALPHA-LOCAL-BUILDER-MIGRATION-002: bootstrap script uses node
+      // builtins; runs in the node project instead.
+      'scripts/prepare-runtime-binaries.test.ts',
     ],
     browser: {
       enabled: true,

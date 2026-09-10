@@ -391,3 +391,40 @@ At minimum, the agent must recover these facts before making changes:
 - LOCAL and VPS execution boundaries must remain separate
 
 If current runtime evidence contradicts this document, stop and audit before mutating production. Update this runbook only after the new canonical state has been proven.
+
+---
+
+## Fresh Windows Builder Bootstrap (TASK-ALPHA-LOCAL-BUILDER-MIGRATION-002)
+
+Proven toolchain (see `package.json` engines + devDependencies):
+
+- Git 2.55+
+- Node v26.5.0 exactly (`engines.node`; the runtime bootstrap fails closed otherwise)
+- npm 11+ (`engines.npm`)
+- Electron 35.7.0, electron-builder 26.15.3, opencode-ai 1.18.21 (all npm-pinned)
+- Windows x64. No Visual Studio, Python, signing tools, or global packages required.
+
+Fresh-machine flow (example root `C:\dev\alpha-one`; any path works — no absolute
+paths are baked in):
+
+1. Install Git and Node v26.5.0 (https://nodejs.org). Verify: `node --version`.
+2. `git clone <origin>`, checkout the intended branch/commit.
+3. Copy runtime `.env` from `.env.example`; provision `GOOGLE_CLIENT_SECRET`
+   (and IDs/URIs) securely. BUILD needs no Google user OAuth state; per-user
+   tokens are created by login at runtime and are never transferred.
+4. `npm ci` (uses `package-lock.json`; installs opencode-ai platform binary).
+5. `npm run build:windows` — canonical flow, runs in order:
+   `prepare:runtime` (validates Node/platform, stages
+   `build-installer/runtime/{node,opencode}.exe` from npm-provided sources with
+   SHA256 report) → `build:server` → `build:mcp` (all 7 MCP dists) → `build`
+   (`tsc -b` + frontend) → `build:electron`. Never copy the runtime EXEs by hand.
+6. `npx electron-builder build --win` (uses the pinned local binary) →
+   `release/win-unpacked/Alpha One.exe`.
+7. Validate staging: backend boots, `opencode.exe mcp list` all connected, model
+   list loads, fresh-chat `hi` succeeds, Slides `tools/list` = 13/13 with
+   `slides_compose_slide`.
+
+Do NOT copy between machines: `node_modules/`, `release/`, `dist/`,
+`mcp-servers-dist/`, `build-installer/runtime/`, `C:\Program Files\Alpha One`,
+`%APPDATA%\Alpha One` data, `~/.local/share/opencode` sessions/tokens, caches.
+All regenerate from the steps above.

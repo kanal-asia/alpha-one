@@ -18,6 +18,7 @@ export default defineConfig({
       'src/lib/free-port.test.ts',
       'mcp-servers/shared/google/activity-runtime.test.ts',
       'mcp-servers/google-slides/compose-registration.test.ts',
+      'scripts/prepare-runtime-binaries.test.ts',
       'src/lib/activity-persistence.test.ts',
       'src/lib/profile-resolve.test.ts',
       'src/services/opencode/artifact-correspondence.test.ts',

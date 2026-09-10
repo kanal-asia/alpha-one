@@ -433,7 +433,7 @@ export class HTTPTransport implements OpenCodeTransport {
     return res.modes
   }
 
-  async listProviders(force?: boolean): Promise<ProviderSummary[]> {
+  async listProviders(_force?: boolean): Promise<ProviderSummary[]> {
     const res = await this.request<{ providers: ProviderSummary[] }>('/providers')
     return res.providers
   }

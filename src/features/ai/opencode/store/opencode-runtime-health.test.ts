@@ -38,7 +38,7 @@ function stubFetch(snapshots: Array<{ lifecycle: string; stage: string; cli: { i
   )
 }
 
-function installed(): boolean {
+function installed(): boolean | null {
   return useOpenCodeStore.getState().installed
 }
 

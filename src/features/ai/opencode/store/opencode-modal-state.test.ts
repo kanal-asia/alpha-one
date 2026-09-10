@@ -96,7 +96,7 @@ afterEach(() => {
 
 describe('providerErrorModal state propagation (TASK-085 CORRECTIVE-6)', () => {
   it('modelError with classification → providerErrorModal.open = true', async () => {
-    const chatId = seedConversation()
+    seedConversation()
     stubChatStream([
       'error\ndata: {"message":"The provider is temporarily limiting requests","modelError":{"classification":"PROVIDER_TEMPORARILY_UNAVAILABLE","provider":"opencode","model":"opencode/mimo-v2.5-free","retryAfterSeconds":null}}',
     ])
@@ -118,7 +118,7 @@ describe('providerErrorModal state propagation (TASK-085 CORRECTIVE-6)', () => {
   })
 
   it('FREE_MODEL_LIMIT_EXCEEDED → modal shows "Free model limit reached"', async () => {
-    const chatId = seedConversation()
+    seedConversation()
     stubChatStream([
       'error\ndata: {"message":"Free model limit reached for opencode/mimo-v2.5-free","modelError":{"classification":"PAID_MODEL_USAGE_EXHAUSTED","provider":"opencode","model":"opencode/mimo-v2.5-free","retryAfterSeconds":null}}',
     ])
@@ -156,7 +156,7 @@ describe('providerErrorModal state propagation (TASK-085 CORRECTIVE-6)', () => {
   })
 
   it('RATE_LIMITED → modal shows "Too many requests"', async () => {
-    const chatId = seedConversation()
+    seedConversation()
     stubChatStream([
       'error\ndata: {"message":"Too many requests, retry after 30 seconds","modelError":{"classification":"RATE_LIMITED","provider":"opencode","model":"opencode/mimo-v2.5-free","retryAfterSeconds":30}}',
     ])
@@ -170,7 +170,8 @@ describe('providerErrorModal state propagation (TASK-085 CORRECTIVE-6)', () => {
     expect(modal.primaryLabel).toBe('Choose Another Model')
   })
 
-  it('AUTHENTICATION_REQUIRED → modal shows "Provider connection required"', async () => {    const chatId = seedConversation()
+  it('AUTHENTICATION_REQUIRED → modal shows "Provider connection required"', async () => {
+    seedConversation()
     stubChatStream([
       'error\ndata: {"message":"Unauthorized","modelError":{"classification":"AUTHENTICATION_REQUIRED","provider":"opencode","model":"opencode/mimo-v2.5-free","retryAfterSeconds":null}}',
     ])
@@ -238,7 +239,7 @@ describe('providerErrorModal state propagation (TASK-085 CORRECTIVE-6)', () => {
   })
 
   it('non-modelError chunks do not open the modal', async () => {
-    const chatId = seedConversation()
+    seedConversation()
     stubChatStream([
       'token\ndata: {"type":"text","text":"Hello!"}',
       'done\ndata: {"terminal":true}',

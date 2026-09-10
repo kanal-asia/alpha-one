@@ -30,7 +30,7 @@ describe('useAccountIdentity', () => {
   })
 
   it('enriches connected identity with canonical profile', async () => {
-    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+    const fetchFn = vi.fn(async (url: string, _init?: RequestInit) => {
       if (url.includes('/api/google/oauth/status')) {
         return {
           ok: true,

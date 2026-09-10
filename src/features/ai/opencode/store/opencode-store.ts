@@ -326,7 +326,6 @@ async function runDetect(
   // a few seconds for CLI detection + model discovery after backend boot.
   const deadline = Date.now() + 30_000
   let pendingLogged = false
-  let lastLifecycle: string | null = null
   let lastStage: string | null = null
 
   // eslint-disable-next-line no-constant-condition
@@ -334,7 +333,6 @@ async function runDetect(
     const cliInfo = await openCodeService
       .getRuntimeCliInfo()
       .catch(() => null)
-    lastLifecycle = cliInfo?.lifecycle ?? null
     lastStage = cliInfo?.stage ?? null
 
     const terminal =

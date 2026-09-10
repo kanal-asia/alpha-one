@@ -6,7 +6,6 @@
  */
 import 'dotenv/config'
 import { join, dirname } from 'node:path'
-import { existsSync } from 'node:fs'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import express from 'express'
 import { app, runtimeManager } from '../services/opencode/server'

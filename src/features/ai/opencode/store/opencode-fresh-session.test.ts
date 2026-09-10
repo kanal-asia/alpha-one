@@ -110,7 +110,7 @@ describe('fresh-session isolation (TASK-085 corrective)', () => {
   })
 
   it('second prompt on the now-established chat reuses the live session', async () => {
-    const chatId = seedFreshChat()
+    seedFreshChat()
     const seenBodies: Array<Record<string, unknown>> = []
     vi.stubGlobal(
       'fetch',

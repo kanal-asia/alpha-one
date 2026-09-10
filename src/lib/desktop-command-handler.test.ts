@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { AppRouter } from './app-router'
 import { DESKTOP_COMMANDS } from './desktop-command-ids'
 import { handleDesktopCommand } from './desktop-command-handler'
 import { useOpenCodeStore } from '@/features/ai/opencode/store/opencode-store'
@@ -9,7 +10,7 @@ import { useOpenCodeStore } from '@/features/ai/opencode/store/opencode-store'
  * component-consumed window event) — never a placeholder.
  */
 describe('handleDesktopCommand', () => {
-  const router = { navigate: vi.fn() } as never
+  const router = { navigate: vi.fn() } as unknown as AppRouter
 
   it('exposes a stable, unique identity per command', () => {
     const ids = DESKTOP_COMMANDS.map((c) => c.id)

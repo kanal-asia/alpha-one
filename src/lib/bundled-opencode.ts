@@ -59,10 +59,12 @@ export function resolveBundledOpenCode(): string | null {
   }
 
   // 2. PACKAGED PRODUCTION: Electron bundles opencode.exe at resourcesPath.
-  //    process.resourcesPath is only available in packaged Electron context;
-  //    in development it is undefined or points elsewhere.
-  if (typeof process.resourcesPath === "string" && process.resourcesPath) {
-    candidates.push(join(process.resourcesPath, binaryName))
+  //    process.resourcesPath exists only in packaged Electron context (plain
+  //    node has no such property, hence the narrow cast — never `any`).
+  const electronResourcesPath = (process as unknown as { resourcesPath?: string })
+    .resourcesPath
+  if (typeof electronResourcesPath === "string" && electronResourcesPath) {
+    candidates.push(join(electronResourcesPath, binaryName))
   }
 
   // 3. Relative to this module's location:

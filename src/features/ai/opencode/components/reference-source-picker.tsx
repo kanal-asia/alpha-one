@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Cloud, File as FileIcon, FileCode } from 'lucide-react'
 import type { ReferenceAttachment } from '@/features/ai/references/contract'
 import { openDriveFilePicker } from '@/features/google/components/drive-file-picker'

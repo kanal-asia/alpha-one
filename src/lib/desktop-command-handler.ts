@@ -105,9 +105,12 @@ export function handleDesktopCommand(
 /** Subscribe once at bootstrap; no-op outside the Electron host. */
 export function initDesktopCommandListener(router: AppRouter): void {
   try {
-    window.electronAPI?.onDesktopCommand?.((cmd: DesktopCommandPayload) => {
+    // The preload wire contract carries {id: string; path?: string}; narrow to
+    // the product DesktopCommandPayload at this boundary. Unknown ids fall
+    // through the switch default below — no behavior change for valid commands.
+    window.electronAPI?.onDesktopCommand?.((cmd) => {
       try {
-        handleDesktopCommand(router, cmd)
+        handleDesktopCommand(router, cmd as DesktopCommandPayload)
       } catch {
         /* ignore malformed commands */
       }

@@ -713,11 +713,20 @@ export class HTTPTransport implements OpenCodeTransport {
             }
             break
           case 'error': {
-            const { message } = parsed.data as { message: string }
-            console.log('[OC-TRANSPORT] ERROR EVENT', { message, responseCompleted })
+            // TASK-082B: pass classified provider/model metadata through so the
+            // store can render quota/rate/auth warnings (Working still ends).
+            const { message, modelError } = parsed.data as {
+              message: string
+              modelError?: StreamChunk['modelError']
+            }
+            console.log('[OC-TRANSPORT] ERROR EVENT', {
+              message,
+              classification: modelError?.classification,
+              responseCompleted,
+            })
             // TASK-AI-032: Only emit error if response has NOT already completed.
             if (!responseCompleted) {
-              onChunk({ type: 'error', error: message })
+              onChunk({ type: 'error', error: message, ...(modelError ? { modelError } : {}) })
             } else {
               console.log('[OC-TRANSPORT] ERROR SUPPRESSED (response already completed)', { message })
             }

@@ -19,6 +19,22 @@ import {
 import { spawn } from "node:child_process";
 import { resolve as resolvePath, isAbsolute } from "node:path";
 import { existsSync, realpathSync, statSync } from "node:fs";
+import { ensureDataRoot } from "../../lib/data-root";
+import { resolveChatCwd } from "../../lib/chat-cwd";
+import { assemblePromptWithGuidance } from "./prompt-intent";
+import { armStartupWatchdog, STARTUP_QUIET_MS } from "./spawn-watchdog";
+import {
+  armFirstResponseWatchdog,
+  FIRST_RESPONSE_QUIET_MS,
+} from "./first-response-watchdog";
+import { createTimeline, markTimeline, summarizeTimeline } from "./request-timeline";
+import {
+  classifyProviderError,
+  defaultWatchdogClassification,
+  extractCliError,
+  truncateProviderText,
+  type ClassifiedProviderError,
+} from "./provider-errors";
 import { RuntimeManager, detectWorkspace } from "./runtime";
 import { openCodeRuntimeProvider, toRuntimeModelAdapter } from "./runtime-model";
 import {
@@ -271,6 +287,12 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
     }
   }
   const allowedRoots = projectCwd ? [projectCwd, process.cwd()] : [process.cwd()];
+  // TASK-082-CORRECTIVE (C01): deterministic chat CWD. Explicit Local Project
+  // keeps its directory; no-project resolves to the ensured neutral DATA_ROOT
+  // (user-writable, contains no opencode.jsonc, so OpenCode uses the
+  // packaged/global MCP configuration). NEVER inherited process CWD.
+  // Computed once here so initial and continuation spawns share it.
+  const chatCwd = resolveChatCwd(projectCwd, ensureDataRoot());
 
   // TASK-AIASSISTANT-005: references are resolved server-side on demand.
   const files = await resolveRequestReferences(req, res, allowedRoots);
@@ -318,24 +340,13 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
     }
   }
 
-  // TASK-OPENCODE-082: Canonical Google Custom MCP selection guidance. Always
-  // present (not Drive-attachment-only) so the agent routes every Google
-  // request to the correct service MCP and verifies persisted state.
-  const mcpGuidanceBlock = [
-    `GOOGLE MCP (TASK-OPENCODE-082): Choose the MCP by the resource/INTENT you operate, not by assuming every Google file is a Drive operation.`,
-    `- Google Sheets (google_sheets.*): spreadsheet data - list/read/write ranges, sheets, formulas.`,
-    `- Google Docs (docs_*): document create/read/update/append.`,
-    `- Google Slides (slides_*): presentation create/read/add-slide/insert-text.`,
-    `- Google Drive (drive_*): file discovery/search/metadata/content and file-level ops; use it to LOCATE resources, not to edit Doc/Slides/Sheet content.`,
-    `- Google Calendar (calendar_*): calendar/event create/read/update/delete.`,
-    `- Google Apps Script (apps_script_*): discover/read projects and run a known callable function via the Execution API.`,
-    `Cross-service requests: decompose into per-service operations and use MULTIPLE MCPs - never force one MCP to do another service's job.`,
-    `VERIFY: after every important write/execute, READ BACK the authoritative Google state (docs_get_document, slides_get_presentation, drive_get_file_metadata/content, calendar_get/list, read_range, apps_script_run DONE+SUCCESS) before claiming success.`,
-    `Never report "done/created/updated/executed" without that verification evidence. Classify outcomes PROVEN / UNPROVEN / UNKNOWN.`,
-    `If a capability is AUTHORIZATION_REQUIRED and not yet granted, use the existing progressive OAuth flow once (preserve granted scopes, same identity), then retry - do NOT blindly reconnect or loop.`,
-    `Apps Script Execution API can return a transient 404: treat it as retriable with bounded retry, verify DONE+SUCCESS, and never interpret it as an OAuth failure.`,
-  ].join('\n');
-  enhancedMessage = `${mcpGuidanceBlock}\n\n${enhancedMessage}`;
+  // TASK-OPENCODE-082 (+ TASK-082-CORRECTIVE C02): Canonical Google Custom MCP
+  // selection guidance. ROUTING_CORRECTIVE: intent-gated, not unconditional.
+  // Previously every message (even "hi") carried ~920 tokens of Google/Slides
+  // doctrine, biasing greetings toward MCP/archetype chatter. Now the
+  // assembled pre-guidance text (refs + project + message) earns routing only
+  // on Google intent and Slides doctrine only on presentation intent.
+  enhancedMessage = assemblePromptWithGuidance(enhancedMessage);
 
   const resolved = resolveOpenCode();
   if (!resolved) {
@@ -373,7 +384,24 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
   let settled = false;
 
   runtimeManager.setBusy(true);
-  res.on("close", () => runtimeManager.setBusy(false));
+  // TASK-082-RUNTIME-CORRECTIVE (R04): every armed startup watchdog is
+  // disarmed when the client goes away, so a late timer can never write to
+  // a dead SSE response.
+  const activeWatchdogDisarmers = new Set<() => void>();
+  const disarmWatchdogs = (): void => {
+    for (const disarm of activeWatchdogDisarmers) {
+      try {
+        disarm();
+      } catch {
+        /* ignore */
+      }
+    }
+    activeWatchdogDisarmers.clear();
+  };
+  res.on("close", () => {
+    disarmWatchdogs();
+    runtimeManager.setBusy(false);
+  });
 
   try {
     child = spawn(resolved.command, [...resolved.prefixArgs, ...args], {
@@ -381,14 +409,87 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
       windowsHide: true,
       shell: false,
       detached: false,
-      // TASK-OPENCODE-055: When a Local Project Path is selected, the CLI runs
-      // with that folder as its working directory. No project ΓåÆ server cwd
-      // (existing behavior). settings.workspacePath is never used here.
-      cwd: projectCwd ?? undefined,
+      // TASK-OPENCODE-055 + TASK-082-CORRECTIVE (C01): the CLI runs with the
+      // resolved chat CWD (selected project, else neutral DATA_ROOT).
+      // settings.workspacePath is never used here.
+      cwd: chatCwd,
       env: { ...process.env, OPENCODE_NO_TUI: "1", CI: "1", NO_COLOR: "1" },
     });
     activeChild = child;
-    if (process.env.NODE_ENV !== "test") console.log('[API] PROCESS SPAWNED', { pid: child.pid, cwd: projectCwd ?? process.cwd() });
+    if (process.env.NODE_ENV !== "test") console.log('[API] PROCESS SPAWNED', { pid: child.pid, cwd: chatCwd });
+    // TASK-082-RUNTIME-CORRECTIVE (R04): quiet-only watchdog. A proven stale
+    // `--session` resume hangs with zero output forever (fresh spawns emit
+    // step_start almost immediately, so healthy runs can never trip this).
+    // On timeout the child is killed and the UI receives a terminal error
+    // instead of indefinite Working...
+    {
+      const watched = child;
+      const disarm = armStartupWatchdog(watched, {
+        quietMs: STARTUP_QUIET_MS,
+        onTimeout: () => {
+          if (settled) return;
+          settled = true;
+          runtimeManager.setBusy(false);
+          try {
+            watched.kill("SIGTERM");
+            setTimeout(() => {
+              try {
+                watched.kill("SIGKILL");
+              } catch {
+                /* already dead */
+              }
+            }, 2000);
+          } catch {
+            /* already dead */
+          }
+          // TASK-082B-R1: the selected model's free-tier flag travels with the
+          // classification so free-tier rate-limit exhaustion (the proven
+          // exhausted-free-model channel) maps to FREE_MODEL_LIMIT_EXCEEDED
+          // instead of generic RATE_LIMITED. Paid/unknown tiers are unaffected.
+          const watchdogClassification = defaultWatchdogClassification({
+            stashedClassification: lastProviderError?.classification ?? null,
+            modelFree: model.free === true,
+            stdoutBytes: stdout.length,
+            stderrBytes,
+          })
+          const staleHint = body.sessionId
+            ? ` The reused session (${body.sessionId}) may be stale; start a New Chat to continue with a fresh session.`
+            : ` Try again or start a New Chat.`;
+          const watchdogMessage = lastProviderError
+            ? `${lastProviderError.message}${staleHint}`
+            : `OpenCode produced no output for ${STARTUP_QUIET_MS / 1000}s and the provider did not respond.${staleHint}`;
+          if (process.env.NODE_ENV !== "test") {
+            console.log('[API] STARTUP_WATCHDOG_DIAG', {
+              ts: new Date().toISOString(),
+              pid: watched.pid,
+              quietMs: STARTUP_QUIET_MS,
+              sessionId: body.sessionId ?? null,
+              stdoutBytes: stdout.length,
+              stderrClassified: lastProviderError?.classification ?? null,
+              classification: watchdogClassification,
+              model: model.id,
+              cwd: chatCwd,
+              stdoutPreview: stdout.slice(0, 200),
+            });
+          }
+          try {
+            sendEvent("error", {
+              message: watchdogMessage,
+              modelError: {
+                classification: watchdogClassification,
+                provider: providerId,
+                model: model.id,
+                retryAfterSeconds: lastProviderError?.retryAfterSeconds ?? null,
+              },
+            });
+            res.end();
+          } catch {
+            /* client already gone */
+          }
+        },
+      });
+      activeWatchdogDisarmers.add(disarm);
+    }
   } catch (err) {
     runtimeManager.setBusy(false);
     sendEvent("error", { message: err instanceof Error ? err.message : "Failed to spawn OpenCode" });
@@ -397,20 +498,152 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
   }
 
   let stdout = "";
+  let stderrBytes = 0;
   let tokenCount = 0;
   let textExtracted = "";
   let extractedSessionId: string | null = null;
+  // TASK-082B: last classified provider/model failure observed on this stream
+  // (stdout CLI error event preferred; specific stderr classification as
+  // fallback). Used by the close handler so a non-terminal exit reports the
+  // actual provider condition instead of a generic exit-code message.
+  let lastProviderError: {
+    message: string;
+    classification: ClassifiedProviderError["classification"];
+    retryAfterSeconds: number | null;
+  } | null = null;
+  const providerId = model.id.includes("/") ? model.id.split("/")[0] : null;
+  // TASK-082B: stderr fallback stash. Some providers surface failures on
+  // stderr with no stdout error envelope. Only specific (non-generic)
+  // classifications are stashed, and stdout error events always win
+  // (stash-once). "Session not found" keeps its exact existing retry path.
+  const stashStderrProviderError = (text: string, pid: number | undefined): void => {
+    if (lastProviderError) return;
+    if (/session not found/i.test(text)) return;
+    // TASK-082B-R1: free-tier flag so free-model rate-limit text classifies
+    // as exhaustion rather than generic throttling.
+    const classified = classifyProviderError({ message: text, isFreeModel: model.free === true });
+    if (classified.classification === "PROVIDER_ERROR") return;
+    lastProviderError = {
+      message: truncateProviderText(text, 500),
+      classification: classified.classification,
+      retryAfterSeconds: classified.retryAfterSeconds,
+    };
+    if (process.env.NODE_ENV !== "test") {
+      console.log("[API] MODEL_ERROR", {
+        pid,
+        classification: classified.classification,
+        provider: providerId,
+        model: model.id,
+        source: "stderr",
+      });
+    }
+    // TASK-085 CORRECTIVE: emit the classified provider error as an SSE warning
+    // immediately, before the 60s watchdog can fire. This gives the frontend an
+    // actionable toast instead of an ambiguous "Working..." state. The modelError
+    // field is picked up by the transport → store → toast pipeline.
+    try {
+      sendEvent("error", {
+        message: truncateProviderText(text, 500),
+        modelError: {
+          classification: classified.classification,
+          provider: providerId,
+          model: model.id,
+          retryAfterSeconds: classified.retryAfterSeconds,
+        },
+      });
+    } catch {
+      /* client already gone */
+    }
+  };
   const processStart = Date.now();
   let firstTextAt: number | null = null;
   let stepFinishAt: number | null = null;
+  // TASK-082B-R2 Phase 1: per-request lifecycle timeline (elapsed-ms markers,
+  // byte counts, labels only — never prompts/payloads/secrets). The summary is
+  // logged once at terminal resolution (watchdog fire / close settle / error).
+  const tl = createTimeline(processStart);
   // TASK-OPENCODE-045: Removed 60-second timeout.
   // The timeout was killing active OpenCode executions before continuation logic could run.
   // The process has its own natural termination via step_finish(reason="stop").
   // Continuation logic in the 'close' handler manages session persistence.
+  // TASK-082B-R2 Phase 4: dedicated first-response watchdog. Fires at
+  // FIRST_RESPONSE_QUIET_MS on total post-spawn silence ONLY — any first child
+  // byte disarms it, so healthy runs (P50 first activity 37ms, max 7.7s mined)
+  // can never trip it. Classification reuses the TASK-082B-R1 helper, so
+  // free-tier silence still maps to FREE_MODEL_LIMIT_EXCEEDED. The 60s
+  // startup watchdog above stays untouched as the last-resort net.
+  const disarmFirstResponse = armFirstResponseWatchdog(child, {
+    quietMs: FIRST_RESPONSE_QUIET_MS,
+    onTimeout: () => {
+      if (settled) return;
+      settled = true;
+      runtimeManager.setBusy(false);
+      markTimeline(tl, 'firstResponseFired');
+      try {
+        child.kill("SIGTERM");
+        setTimeout(() => {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            /* already dead */
+          }
+        }, 2000);
+      } catch {
+        /* already dead */
+      }
+      const watchdogClassification = defaultWatchdogClassification({
+        stashedClassification: lastProviderError?.classification ?? null,
+        modelFree: model.free === true,
+        stdoutBytes: stdout.length,
+        stderrBytes,
+      });
+      const staleHint = body.sessionId
+        ? ` The reused session (${body.sessionId}) may be stale; start a New Chat to continue with a fresh session.`
+        : ` Try again or start a New Chat.`;
+      const watchdogMessage = lastProviderError
+        ? `${lastProviderError.message}${staleHint}`
+        : `OpenCode produced no output for ${FIRST_RESPONSE_QUIET_MS / 1000}s and the provider did not respond.${staleHint}`;
+      if (process.env.NODE_ENV !== "test") {
+        console.log('[API] STARTUP_WATCHDOG_DIAG', {
+          ts: new Date().toISOString(),
+          pid: child?.pid,
+          watchdog: 'first-response',
+          quietMs: FIRST_RESPONSE_QUIET_MS,
+          sessionId: body.sessionId ?? null,
+          stdoutBytes: stdout.length,
+          stderrClassified: lastProviderError?.classification ?? null,
+          classification: watchdogClassification,
+          model: model.id,
+          cwd: chatCwd,
+          stdoutPreview: stdout.slice(0, 200),
+          timeline: summarizeTimeline(tl),
+        });
+      }
+      try {
+        markTimeline(tl, 'errorEmitted');
+        markTimeline(tl, 'terminal');
+        sendEvent("error", {
+          message: watchdogMessage,
+          modelError: {
+            classification: watchdogClassification,
+            provider: providerId,
+            model: model.id,
+            retryAfterSeconds: lastProviderError?.retryAfterSeconds ?? null,
+          },
+        });
+        res.end();
+      } catch {
+        /* client already gone */
+      }
+    },
+  });
+  activeWatchdogDisarmers.add(disarmFirstResponse);
 
   child.stdout?.on("data", (chunk: Buffer) => {
     const text = chunk.toString();
     stdout += text;
+    tl.stdoutBytes += chunk.length;
+    markTimeline(tl, 'firstStdout');
     if (process.env.NODE_ENV !== "test") console.log("[API] STDOUT CHUNK", { pid: child?.pid, bytes: chunk.length, preview: text.slice(0, 300) });
 
     const lines = text.split(/\r?\n/).filter(Boolean);
@@ -423,6 +656,9 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
         if (process.env.NODE_ENV !== "test") console.log("[API] PARSE ERROR", { pid: child?.pid, error: String(parseErr), line: line.slice(0, 200) });
         continue;
       }
+      // TASK-082B-R2: first structured event proves the child is alive
+      // (first-response state ends here at the latest for evented runs).
+      markTimeline(tl, 'firstEvent');
 
       const evtType = String(evt.type ?? "");
       const part = evt.part as Record<string, unknown> | undefined;
@@ -440,10 +676,55 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
         sendEvent("session", { sessionId: evtSessionId });
       }
 
+      // TASK-082B: CLI provider failures arrive as stdout {type:"error"} events
+      // (machine-proven envelope). Previously they fell through to the generic
+      // "token" forward and were dropped by the transport parser, so quota /
+      // rate / auth conditions surfaced only as generic exit-code errors (or as
+      // indefinite Working when no terminal event followed). Forward them as
+      // first-class error events with classification, and stash for the close
+      // handler. "Session not found" keeps its exact stderr-driven retry path.
+      if (evtType === "error") {
+        const cliErr = extractCliError(evt);
+        if (cliErr) {
+          // TASK-082B-R1: free-tier flag (see stash comment above).
+          const classified = classifyProviderError({
+            message: cliErr.message,
+            statusCode: cliErr.statusCode,
+            code: typeof cliErr.code === "string" ? cliErr.code : cliErr.code != null ? String(cliErr.code) : null,
+            isFreeModel: model.free === true,
+          });
+          lastProviderError = {
+            message: cliErr.message,
+            classification: classified.classification,
+            retryAfterSeconds: classified.retryAfterSeconds,
+          };
+          if (process.env.NODE_ENV !== "test") {
+            console.log("[API] MODEL_ERROR", {
+              pid: child?.pid,
+              classification: classified.classification,
+              provider: providerId,
+              model: model.id,
+              message: truncateProviderText(cliErr.message),
+            });
+          }
+          sendEvent("error", {
+            message: cliErr.message,
+            modelError: {
+              classification: classified.classification,
+              provider: providerId,
+              model: model.id,
+              retryAfterSeconds: classified.retryAfterSeconds,
+            },
+          });
+        }
+        continue;
+      }
+
       tokenCount++;
       if (extracted) {
         textExtracted += extracted;
         if (firstTextAt === null) firstTextAt = Date.now();
+        markTimeline(tl, 'firstText');
       }
 
       if (process.env.NODE_ENV !== "test") {
@@ -512,11 +793,15 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
 
   child.stderr?.on("data", (chunk: Buffer) => {
     const text = chunk.toString();
+    stderrBytes += chunk.length;
+    tl.stderrBytes += chunk.length;
+    markTimeline(tl, 'firstStderr');
     if (process.env.NODE_ENV !== "test") console.log("[API] STDERR", { pid: child?.pid, data: text.slice(0, 500) });
     // TASK-AI-034: Suppress the known non-actionable NO_COLOR / FORCE_COLOR warning.
     // This is a diagnostic warning from chalk/colorette, not an AI response error.
     // The env vars are intentionally set to control TUI behavior.
     if (/NO_COLOR.*FORCE_COLOR|FORCE_COLOR.*NO_COLOR/.test(text)) return;
+    stashStderrProviderError(text, child?.pid);
     sendEvent("stderr", { data: text });
   });
 
@@ -524,7 +809,9 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
     if (settled) return;
     settled = true;
     runtimeManager.setBusy(false);
-    if (process.env.NODE_ENV !== "test") console.log("[API] PROCESS ERROR", { pid: child?.pid, error: err.message });
+    markTimeline(tl, 'errorEmitted');
+    markTimeline(tl, 'terminal');
+    if (process.env.NODE_ENV !== "test") console.log("[API] PROCESS ERROR", { pid: child?.pid, error: err.message, timeline: summarizeTimeline(tl) });
     sendEvent("error", { message: err.message });
     res.end();
   });
@@ -550,6 +837,9 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
     if (settled) return;
     settled = true;
     runtimeManager.setBusy(false);
+    // TASK-082B-R2: terminal resolution wins over every timer (idempotent).
+    disarmFirstResponse();
+    markTimeline(tl, 'terminal');
     sendEvent("done", { terminal });
     sendEvent("exit", { code });
     res.end();
@@ -592,11 +882,48 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
         windowsHide: true,
         shell: false,
         detached: false,
-        // TASK-OPENCODE-055: Continuation keeps the same project execution root.
-        cwd: projectCwd ?? undefined,
+        // TASK-OPENCODE-055 + TASK-082-CORRECTIVE (C01): continuation keeps the
+        // same resolved chat CWD (shared chatCwd const; cannot regress).
+        cwd: chatCwd,
         env: { ...process.env, OPENCODE_NO_TUI: "1", CI: "1", NO_COLOR: "1" },
       });
       activeChild = continueChild;
+      // TASK-082-RUNTIME-CORRECTIVE (R04): same quiet-only watchdog for resume
+      // spawns. Terminal settle (not another resume) so a wedged continuation
+      // cannot chain forever.
+      {
+        const watchedContinuation = continueChild;
+        const disarmContinuation = armStartupWatchdog(watchedContinuation, {
+          quietMs: STARTUP_QUIET_MS,
+          onTimeout: () => {
+            if (settled) return;
+            try {
+              watchedContinuation.kill("SIGTERM");
+              setTimeout(() => {
+                try {
+                  watchedContinuation.kill("SIGKILL");
+                } catch {
+                  /* already dead */
+                }
+              }, 2000);
+            } catch {
+              /* already dead */
+            }
+            if (process.env.NODE_ENV !== "test") {
+              console.log('[API] CONTINUATION WATCHDOG TIMEOUT', { pid: watchedContinuation.pid, attempt: continuationCount });
+            }
+            try {
+              sendEvent("error", {
+                message: `OpenCode continuation produced no output for ${STARTUP_QUIET_MS / 1000}s. The session may be stale; start a New Chat to continue with a fresh session.`,
+              });
+            } catch {
+              /* client already gone */
+            }
+            settle(false, 1);
+          },
+        });
+        activeWatchdogDisarmers.add(disarmContinuation);
+      }
       // TASK-OPENCODE-050: Emit a continuation lifecycle event so the frontend
       // can represent "Γå╗ Melanjutkan pekerjaan..." instead of implying completion.
       sendEvent("continuation", { attempt: continuationCount, sessionId: extractedSessionId });
@@ -644,6 +971,45 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
         const topText = typeof evt.text === "string" ? evt.text : "";
         const extracted = topText || partText;
 
+        // TASK-082B: same CLI error-event interception as the initial child
+        // (provider failures must surface identically on resume paths).
+        if (evtType === "error") {
+          const cliErr = extractCliError(evt);
+          if (cliErr) {
+            // TASK-082B-R1: free-tier flag, same as the initial-child path.
+            const classified = classifyProviderError({
+              message: cliErr.message,
+              statusCode: cliErr.statusCode,
+              code: typeof cliErr.code === "string" ? cliErr.code : cliErr.code != null ? String(cliErr.code) : null,
+              isFreeModel: model.free === true,
+            });
+            lastProviderError = {
+              message: cliErr.message,
+              classification: classified.classification,
+              retryAfterSeconds: classified.retryAfterSeconds,
+            };
+            if (process.env.NODE_ENV !== "test") {
+              console.log("[API] MODEL_ERROR", {
+                pid: continueChild.pid,
+                classification: classified.classification,
+                provider: providerId,
+                model: model.id,
+                message: truncateProviderText(cliErr.message),
+              });
+            }
+            sendEvent("error", {
+              message: cliErr.message,
+              modelError: {
+                classification: classified.classification,
+                provider: providerId,
+                model: model.id,
+                retryAfterSeconds: classified.retryAfterSeconds,
+              },
+            });
+          }
+          continue;
+        }
+
         tokenCount++;
         if (extracted) {
           textExtracted += extracted;
@@ -670,6 +1036,7 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
         console.log("[API] CONTINUATION STDERR", { pid: continueChild.pid, data: text.slice(0, 500) });
       }
       if (/NO_COLOR.*FORCE_COLOR|FORCE_COLOR.*NO_COLOR/.test(text)) return;
+      stashStderrProviderError(text, continueChild.pid);
       sendEvent("stderr", { data: text });
     });
 
@@ -711,6 +1078,7 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
     exitEventReceived = true;
     exitCode = code;
     exitSignal = signal;
+    markTimeline(tl, 'exit');
     if (process.env.NODE_ENV !== "test") {
       console.log("[API] PROCESS EXIT", {
         pid: child?.pid,
@@ -724,6 +1092,7 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
 
   child.on("close", (code, signal) => {
     if (settled) return;
+    markTimeline(tl, 'close');
     const finalCode = exitCode ?? code;
     const finalSignal = exitSignal ?? signal;
 
@@ -751,6 +1120,7 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
     // Genuine terminal completion or failure ΓÇö settle now.
     settled = true;
     runtimeManager.setBusy(false);
+    markTimeline(tl, 'terminal');
     trace("exit", model.id, "OpenCode process exited", { exitCode: finalCode ?? 0, ok: finalCode === 0 });
     if (process.env.NODE_ENV !== "test") {
       console.log("[API] PROCESS CLOSE", {
@@ -766,6 +1136,7 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
         totalLatencyMs: Date.now() - processStart,
         firstTextLatencyMs: firstTextAt ? firstTextAt - processStart : null,
         stepFinishLatencyMs: stepFinishAt ? stepFinishAt - processStart : null,
+        timeline: summarizeTimeline(tl),
         terminalStepFinishReceived,
         decision: finalCode === 0 && textExtracted.length > 0
           ? "SUCCESS"
@@ -783,6 +1154,31 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
     if (isTerminal) {
       sendEvent("done", { terminal: true });
       sendEvent("exit", { code: finalCode ?? 0 });
+    } else if (lastProviderError) {
+      // TASK-082B: a classified provider/model failure was captured during the
+      // run — report it (not a generic exit-code message) so the UI can show a
+      // quota/rate/auth warning instead of an ambiguous runtime failure.
+      if (process.env.NODE_ENV !== "test") {
+        console.log("[API] MODEL_ERROR", {
+          pid: child?.pid,
+          classification: lastProviderError.classification,
+          provider: providerId,
+          model: model.id,
+          terminal: true,
+          message: truncateProviderText(lastProviderError.message),
+        });
+      }
+      sendEvent("done", { terminal: false });
+      sendEvent("error", {
+        message: lastProviderError.message,
+        modelError: {
+          classification: lastProviderError.classification,
+          provider: providerId,
+          model: model.id,
+          retryAfterSeconds: lastProviderError.retryAfterSeconds,
+        },
+      });
+      sendEvent("exit", { code: finalCode ?? 1 });
     } else {
       sendEvent("done", { terminal: false });
       sendEvent(

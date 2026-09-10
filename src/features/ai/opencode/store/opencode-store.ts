@@ -21,6 +21,7 @@ import {
   type WorkspaceInfo,
 } from '../types'
 import { openCodeService } from '../services/opencode-service'
+import { buildProviderErrorWarning } from '@/services/opencode/provider-errors'
 import { markModelUsed } from '../model-preferences'
 import { resolveRuntimeModel } from '@/features/runtime/contract'
 import {
@@ -29,6 +30,7 @@ import {
 } from '@/features/ai/references/contract'
 import { registerResourceLocally } from '@/features/resources/registration'
 import { useResourceStore } from '@/features/resources/resource-store'
+
 import { KEYS, migrateAllKeys } from '@/lib/storage-keys'
 
 /** TASK-OPENCODE-025: Canonical default model when available from OpenCode runtime. */
@@ -191,6 +193,23 @@ interface OpenCodeStore {
   providerRefreshing: boolean
   providerRefreshResult: 'idle' | 'success' | 'error'
 
+  // TASK-085 CORRECTIVE: blocking provider-error modal state.
+  providerErrorModal: {
+    open: boolean
+    headline: string
+    detail: string
+    primaryLabel: string
+    secondaryLabel: string
+    classification: string | null
+    model: string | null
+    provider: string | null
+    errorKey: string | null
+  }
+  // TASK-085R3: key of the last dismissed terminal error. A late duplicate
+  // chunk carrying the same key must not reopen the dialog; a new sendMessage
+  // clears it so a retried failing model still reports.
+  dismissedProviderErrorKey: string | null
+
   usageSummary: UsageStats | null
   compacting: boolean
   compactResult: CompactResult | null
@@ -206,6 +225,7 @@ interface OpenCodeStore {
   selectWorkspace: (path: string) => void
   loadModels: (force?: boolean) => Promise<void>
   loadProviders: (force?: boolean) => Promise<void>
+  setProviderErrorModalOpen: (open: boolean) => void
   loadUsageSummary: (days?: number) => Promise<void>
   compactActiveSession: () => Promise<void>
   syncConfigMode: () => Promise<void>
@@ -324,9 +344,7 @@ async function runDetect(
 
     if (terminal) {
       const installed =
-        cliInfo !== null &&
-        cliInfo.installed &&
-        cliInfo.lifecycle !== 'error'
+        cliInfo !== null && cliInfo.installed
       set({
         installed,
         connection: installed ? 'connected' : 'disconnected',
@@ -336,7 +354,9 @@ async function runDetect(
           cliInfo?.resolvedCommand ?? cliInfo?.executablePath ?? null
         get().pushLog(
           'info',
-          `OpenCode detected at "${canonicalPath ?? get().settings.executablePath}".`
+          cliInfo?.lifecycle === 'error'
+            ? `OpenCode detected at "${canonicalPath ?? get().settings.executablePath}" (runtime in error state, but executable is present).`
+            : `OpenCode detected at "${canonicalPath ?? get().settings.executablePath}".`
         )
       } else if (cliInfo) {
         get().pushLog(
@@ -384,6 +404,18 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
   providersLoaded: false,
   providerRefreshing: false,
   providerRefreshResult: 'idle' as const,
+  providerErrorModal: {
+    open: false,
+    headline: '',
+    detail: '',
+    primaryLabel: '',
+    secondaryLabel: '',
+    classification: null,
+    model: null,
+    provider: null,
+    errorKey: null,
+  },
+  dismissedProviderErrorKey: null,
   usageSummary: null,
   compacting: false,
   compactResult: null,
@@ -613,10 +645,15 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
 
   newChat: () => {
     const chat = makeChat()
+    // TASK-085 CORRECTIVE (fresh-session isolation): a New Chat must never
+    // inherit a stale OpenCode ses_* from any previous chat. Abort any
+    // in-flight generation first (frees isStreaming), then switch.
+    get().abortController?.abort()
     set((state) => ({
       chats: [chat, ...state.chats],
       activeChatId: chat.id,
       isStreaming: false,
+      abortController: null,
     }))
     // TASK-OPENCODE-053: Persist the freshly created session (consistent with
     // every other chat mutation) so a new chat survives a reload.
@@ -695,6 +732,9 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
 
   sendMessage: async (prompt, incomingReferences) => {
     if (!prompt.trim() || get().isStreaming) return
+    // TASK-085R3: a new attempt re-arms provider-error reporting — a retried
+    // failing model must open the dialog again even for the same error key.
+    set({ dismissedProviderErrorKey: null })
     // TASK-AIASSISTANT-005: persist reference *metadata* only, never content.
     const references = (incomingReferences ?? []).map(sanitizeReference)
     let { activeChatId, chats } = get()
@@ -771,7 +811,13 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     // TASK-AI-033: Use the real CLI session ID stored on the chat, not the
     // global session object. The global session.id is a client-generated fake.
     // The chat.sessionId is the real ID extracted from CLI output events.
-    const realSessionId = activeChat?.sessionId ?? ''
+    // TASK-085 CORRECTIVE: only a chat that already holds messages may carry a
+    // sessionId into a request. A fresh (message-less) chat must always start
+    // session-less — even if a stale chat object somehow carries a sessionId
+    // (e.g. restored/persisted state) — so a New Chat can never resurrect a
+    // dead ses_* and hit the 60s quiet watchdog on its first prompt.
+    const hasPriorMessages = (activeChat?.messages?.length ?? 0) > 1
+    const realSessionId = hasPriorMessages ? (activeChat?.sessionId ?? '') : ''
 
     // Runtime Contract (TASK-AI-031): resolve the canonical RuntimeModel and
     // pass it to the transport. The transport extracts `.id` — nothing else.
@@ -817,7 +863,10 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     if (realSessionId) {
       get().pushLog('info', `[SESSION] REUSE chatId=${activeChatId} sessionId=${realSessionId}`)
     } else {
-      get().pushLog('info', `[SESSION] CREATE chatId=${activeChatId} sessionId=(new)`)
+      get().pushLog(
+        'info',
+        `[SESSION] CREATE chatId=${activeChatId} sessionId=(new) fresh=${String(!hasPriorMessages)}`
+      )
     }
 
     const executePrompt = async (sessionIdForPrompt: string) => {
@@ -1058,6 +1107,50 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
               return
             }
 
+            // TASK-085 CORRECTIVE: classified provider/model failures render a
+            // blocking modal inside the Alpha One window. Free/paid split is
+            // refined — the store knows the selected model's free flag.
+            // Session-not-found retry above is untouched. No toast duplication.
+            let modelWarning: string | null = null
+            if (chunk.modelError) {
+              const info = chunk.modelError
+              const classification =
+                info.classification === 'PAID_MODEL_USAGE_EXHAUSTED' && selectedModel.free
+                  ? 'FREE_MODEL_LIMIT_EXCEEDED'
+                  : info.classification
+              const warning = buildProviderErrorWarning(classification, {
+                provider: info.provider ?? selectedModel.provider,
+                model: info.model ?? selectedModel.id,
+                modelDisplayName: selectedModel.displayName,
+                ...(info.retryAfterSeconds != null ? { retryAfterSeconds: info.retryAfterSeconds } : {}),
+              })
+              modelWarning = `${warning.headline}\n\n${warning.detail}`
+              // TASK-085R3: exactly one dialog per terminal error. Skip when a
+              // dialog is already open, or when this exact error was already
+              // shown and dismissed (late duplicate SSE chunk). The inline
+              // warning below still lands in chat history either way.
+              const errorKey = `${classification}|${info.provider ?? selectedModel.provider}|${info.model ?? selectedModel.id}`
+              const currentModal = get().providerErrorModal
+              if (!currentModal.open && errorKey !== get().dismissedProviderErrorKey) {
+                set({
+                  providerErrorModal: {
+                    open: true,
+                    headline: warning.headline,
+                    detail: warning.detail,
+                    primaryLabel: warning.primaryLabel ?? 'Close',
+                    secondaryLabel: warning.secondaryLabel ?? 'Close',
+                    classification,
+                    model: info.model ?? selectedModel.id,
+                    provider: info.provider ?? selectedModel.provider,
+                    errorKey,
+                  },
+                })
+              }
+              get().pushLog(
+                'error',
+                `[MODEL_ERROR] classification=${classification} provider=${info.provider ?? selectedModel.provider} model=${info.model ?? selectedModel.id} terminal=true`
+              )
+            }
             get().pushLog('error', `[runtime-trace] error: model=${selectedModel.id} ${chunk.error ?? ''}`)
             if (chunk.referenceErrors?.length) {
               get().pushLog(
@@ -1079,11 +1172,11 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
                             // Only set error status if not already completed
                             status: m.status === 'done' ? 'done' : 'error',
                             executionState: m.status === 'done' ? m.executionState : 'error',
-                            content: m.status === 'done' ? m.content : (m.content || chunk.error || 'Error'),
+                            content: m.status === 'done' ? m.content : (m.content || modelWarning || chunk.error || 'Error'),
                             lifecycle:
                               m.status === 'done'
                                 ? m.lifecycle
-                                : pushStage(m.lifecycle, 'failed', chunk.error || 'Execution failed', 'error'),
+                                : pushStage(m.lifecycle, 'failed', chunk.modelError ? 'Provider limit reached' : (chunk.error || 'Execution failed'), 'error'),
                           }
                         }
                         if (m.role === 'user' && chunk.referenceErrors?.length) {
@@ -1214,6 +1307,13 @@ export const useOpenCodeStore = create<OpenCodeStore>((set, get) => ({
     }))
     saveChats(get().chats)
   },
+
+  setProviderErrorModalOpen: (open) => set((s) => ({
+    providerErrorModal: { ...s.providerErrorModal, open },
+    // TASK-085R3: remember the dismissed key so late duplicate terminal
+    // chunks cannot reopen the dialog after Close/Esc/X/CTA.
+    ...(open ? {} : { dismissedProviderErrorKey: s.providerErrorModal.errorKey }),
+  })),
 
   clearLogs: () => set({ logs: [], runtimeEvents: [] }),
   clearLocalCache: () => {

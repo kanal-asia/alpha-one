@@ -337,6 +337,10 @@ function EmptyState({ onPick }: { onPick: (t: string) => void }) {
           </button>
         ))}
       </div>
+      {/* TASK-085R3: ProviderErrorModal now mounts once in AuthenticatedLayout
+          (permanent mount). It must NOT live here inside EmptyState: the empty
+          state unmounts on the first message, before any provider error can
+          arrive, which was the proven prior failure mode. */}
     </div>
   )
 }

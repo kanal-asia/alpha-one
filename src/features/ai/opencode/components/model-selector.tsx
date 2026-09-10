@@ -25,6 +25,10 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { ConnectProviderDialog } from './connect-provider-dialog'
+import {
+  OPEN_MODEL_PICKER_EVENT,
+  OPEN_PROVIDER_CONNECT_EVENT,
+} from './provider-error-modal'
 import type { ModelInfo } from '../types'
 import {
   loadModelPreferences,
@@ -61,6 +65,20 @@ export function ModelSelector({
   const [query, setQuery] = useState('')
   const [prefs, setPrefs] = useState(() => loadModelPreferences())
   const [providerDialogOpen, setProviderDialogOpen] = useState(false)
+
+  // TASK-085R3: real CTA targets for the provider-error dialog. The dialog
+  // dispatches these window events; the (already mounted) selector opens the
+  // existing popover / provider-auth surfaces. Nothing is auto-selected.
+  useEffect(() => {
+    const openPicker = () => setOpen(true)
+    const openProviderConnect = () => setProviderDialogOpen(true)
+    window.addEventListener(OPEN_MODEL_PICKER_EVENT, openPicker)
+    window.addEventListener(OPEN_PROVIDER_CONNECT_EVENT, openProviderConnect)
+    return () => {
+      window.removeEventListener(OPEN_MODEL_PICKER_EVENT, openPicker)
+      window.removeEventListener(OPEN_PROVIDER_CONNECT_EVENT, openProviderConnect)
+    }
+  }, [])
 
   const display = useMemo<DisplayModel[]>(() => {
     const q = query.trim().toLowerCase()

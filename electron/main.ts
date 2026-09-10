@@ -5,6 +5,7 @@ import {
   allocateLoopbackPort,
 } from '../src/lib/free-port'
 import { join } from 'node:path'
+import { buildPackagedMcpConfig, isPackagedMcpConfigCurrent } from './mcp-config'
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, cpSync, mkdtempSync, appendFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -153,21 +154,10 @@ function ensureOpenCodeMcpConfig(): void {
   const mcpBase = join(process.resourcesPath, 'app', 'mcp-servers-dist')
   const nodeExe = join(process.resourcesPath, 'node.exe')
 
-  const servers = ['google-sheets', 'google-docs', 'google-slides', 'google-drive', 'google-apps-script', 'google-calendar', 'gmail']
-  const mcpEntries: Record<string, unknown> = {}
-  for (const name of servers) {
-    mcpEntries[name] = {
-      type: 'local',
-      command: [nodeExe, join(mcpBase, `${name}.js`)],
-      enabled: true,
-      timeout: 15000,
-    }
-  }
-
-  const config = {
-    '$schema': 'https://opencode.ai/config.json',
-    'mcp': mcpEntries,
-  }
+  // TASK-085 CORRECTIVE: config shape (servers + scoped Slides doom_loop allow)
+  // is built by the pure, unit-tested mcp-config helper. The staleness check
+  // requires the permission rule, so pre-corrective installs get rewritten.
+  const config = buildPackagedMcpConfig(nodeExe, mcpBase, join)
 
   try {
     const { existsSync, mkdirSync, writeFileSync, readFileSync } = require('fs')
@@ -180,10 +170,8 @@ function ensureOpenCodeMcpConfig(): void {
         // Verify paths point to current resources/app/mcp-servers-dist (not old install root)
         // AND verify all expected servers are registered (count check catches stale configs)
         // AND verify node.exe path matches current process.resourcesPath (catches path divergence)
-        const sheetsCmd = parsed?.mcp?.['google-sheets']?.command
-        const hasAllServers = servers.every(name => parsed?.mcp?.[name])
-        const nodePathMatches = sheetsCmd?.[0] === nodeExe
-        if (hasAllServers && nodePathMatches && sheetsCmd?.[1]?.includes('mcp-servers-dist') && sheetsCmd?.[1]?.endsWith('.js')) {
+        // AND verify the Slides doom_loop allow rule (forces rewrite of pre-corrective configs)
+        if (isPackagedMcpConfigCurrent(parsed, nodeExe)) {
           return
         }
       } catch { /* config corrupted, overwrite */ }

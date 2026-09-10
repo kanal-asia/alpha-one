@@ -8,6 +8,7 @@ import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/layout/app-sidebar'
 import { SkipToMain } from '@/components/skip-to-main'
 import { RuntimeStatusBar } from '@/features/runtime'
+import { ProviderErrorModal } from '@/features/ai/opencode/components/provider-error-modal'
 
 type AuthenticatedLayoutProps = {
   children?: React.ReactNode
@@ -38,6 +39,13 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
           >
             {developerMode && <RuntimeStatusBar />}
             {children ?? <Outlet />}
+            {/* TASK-085R3: provider-error blocking dialog. Mounted here (never
+                unmounts during chat) so terminal modelError always has a live
+                AlertDialog subscriber. Never mount inside conditional branches
+                such as empty-state — that was the proven prior failure mode:
+                the empty state unmounts on the first message, before any
+                provider error can arrive. */}
+            <ProviderErrorModal />
           </SidebarInset>
         </SidebarProvider>
       </LayoutProvider>

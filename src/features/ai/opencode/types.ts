@@ -111,6 +111,17 @@ export interface StreamChunk {
   thinking?: boolean
   /** TASK-OPENCODE-050: continuation lifecycle event payload. */
   continuation?: { attempt: number; sessionId?: string }
+  /**
+   * TASK-082B: classified provider/model failure metadata (server-classified
+   * from CLI error events; store renders the warning and ends Working).
+   * Type-only import — provider-errors.ts is dependency-free, no cycle risk.
+   */
+  modelError?: {
+    classification: import('@/services/opencode/provider-errors').ProviderErrorClass
+    provider?: string | null
+    model?: string | null
+    retryAfterSeconds?: number | null
+  }
 }
 
 export interface OpenCodeSession {

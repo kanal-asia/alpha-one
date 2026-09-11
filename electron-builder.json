@@ -1,6 +1,7 @@
 {
     "appId":  "com.kanalasia.alpha-one",
     "productName":  "Alpha One",
+    "artifactName":  "AlphaOne-Setup.${ext}",
     "copyright":  "Copyright © 2026 Kanal Asia",
     "directories":  {
                         "output":  "release"

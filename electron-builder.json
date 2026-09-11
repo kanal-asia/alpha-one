@@ -41,7 +41,7 @@
                        ],
     "win":  {
                 "target":  "nsis",
-                "icon":  "dist/images/favicon.ico",
+                "icon":  "build-installer/assets/alpha-one.ico",
                 "signExecutable":  false
             },
     "nsis":  {

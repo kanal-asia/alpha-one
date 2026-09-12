@@ -29,6 +29,8 @@ export type ProviderErrorClass =
   | 'AUTHENTICATION_REQUIRED'
   | 'TOOL_PERMISSION_DENIED'
   | 'PROVIDER_ERROR'
+  | 'FIRST_RESPONSE_TIMEOUT'
+  | 'STARTUP_TIMEOUT'
 
 export interface ProviderErrorInput {
   /** Raw provider/CLI error text (message, stderr fragment, event payload). */
@@ -201,26 +203,36 @@ export function isQuotaExhaustionClass(c: ProviderErrorClass): boolean {
 }
 
 /**
- * TASK-082B-R1: watchdog silence default (pure, unit-testable).
- * A stashed specific classification always wins (evidence first).
- * Otherwise a TOTAL silence (zero stdout AND zero stderr bytes) on a free-tier
- * model means the free allowance path: the proven exhausted-free-model
- * signature is exactly this — the CLI swallows its internal rate-limit error
- * and hangs with no output. Paid/unknown-tier silence, or silence with any
- * observed bytes, keeps the honest PROVIDER_TEMPORARILY_UNAVAILABLE default
- * (genuine outages stay temporary; never infer from the free flag alone when
- * any evidence exists).
+ * Watchdog timeout classification (pure, unit-testable).
+ *
+ * PROVEN RULE (DNS counterexample): total post-spawn silence alone proves
+ * ONLY that Alpha One observed no qualifying child output before the timer
+ * expired. It must NEVER be diagnosed as quota exhaustion, provider outage,
+ * or authentication failure — a local/network-layer stall (e.g. unresolvable
+ * DNS before OpenCode emits any event) produces the identical silence
+ * envelope on free AND paid models alike. Tier metadata (modelFree) is
+ * context, never diagnosis.
+ *
+ * A stashed specific classification always wins (authoritative upstream/error
+ * evidence observed before the timeout overrides the neutral fallback).
+ * Otherwise the timeout kind selects the neutral observation class:
+ * first-response window → FIRST_RESPONSE_TIMEOUT, startup net → STARTUP_TIMEOUT.
  */
+export type WatchdogTimeoutKind = 'first-response' | 'startup'
+
 export function defaultWatchdogClassification(input: {
   stashedClassification?: ProviderErrorClass | null
+  /** Retained for caller context only — never used for diagnosis. */
   modelFree?: boolean | null
+  /** Retained for caller context only — never used for diagnosis. */
   stdoutBytes?: number | null
+  /** Retained for caller context only — never used for diagnosis. */
   stderrBytes?: number | null
+  /** Which watchdog expired. Defaults to the 20s first-response window. */
+  timeout?: WatchdogTimeoutKind
 }): ProviderErrorClass {
   if (input.stashedClassification) return input.stashedClassification
-  const silent = (input.stdoutBytes ?? 0) === 0 && (input.stderrBytes ?? 0) === 0
-  if (input.modelFree === true && silent) return 'FREE_MODEL_LIMIT_EXCEEDED'
-  return 'PROVIDER_TEMPORARILY_UNAVAILABLE'
+  return input.timeout === 'startup' ? 'STARTUP_TIMEOUT' : 'FIRST_RESPONSE_TIMEOUT'
 }
 
 export interface ExtractedCliError {
@@ -361,6 +373,22 @@ export function buildProviderErrorWarning(
           'Retry the request; trusted packaged tools are pre-approved, other tools may still ask.',
         ].join(' '),
         primaryLabel: 'Retry',
+        secondaryLabel: 'Close',
+      }
+    case 'FIRST_RESPONSE_TIMEOUT':
+      return {
+        headline: 'No response received',
+        detail:
+          'OpenCode produced no output within 20 seconds. The cause could not be determined yet. You can retry.',
+        primaryLabel: 'Choose Another Model',
+        secondaryLabel: 'Close',
+      }
+    case 'STARTUP_TIMEOUT':
+      return {
+        headline: 'No response received',
+        detail:
+          'OpenCode produced no output within 60 seconds. The cause could not be determined yet. You can retry.',
+        primaryLabel: 'Choose Another Model',
         secondaryLabel: 'Close',
       }
     case 'PROVIDER_ERROR':

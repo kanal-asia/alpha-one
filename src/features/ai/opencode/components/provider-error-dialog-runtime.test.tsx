@@ -364,6 +364,8 @@ describe('runtime path: terminal modelError → visible AlertDialog (TASK-085R3)
     expect(primaryTargetFor('RATE_LIMITED')).toBe('open-model-picker')
     expect(primaryTargetFor('PROVIDER_TEMPORARILY_UNAVAILABLE')).toBe('open-model-picker')
     expect(primaryTargetFor('PROVIDER_ERROR')).toBe('open-model-picker')
+    expect(primaryTargetFor('FIRST_RESPONSE_TIMEOUT')).toBe('open-model-picker')
+    expect(primaryTargetFor('STARTUP_TIMEOUT')).toBe('open-model-picker')
     expect(primaryTargetFor(null)).toBe('open-model-picker')
   })
 

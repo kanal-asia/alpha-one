@@ -248,7 +248,7 @@ describe('TASK-082B-R1 — exhausted free-model runtime envelope', () => {
   })
 })
 
-describe('TASK-082B-R1 — defaultWatchdogClassification (silence semantics)', () => {
+describe('watchdog timeout classification (neutral observation, never diagnosis)', () => {
   it('stashed specific classification always wins', () => {
     expect(
       defaultWatchdogClassification({
@@ -259,25 +259,87 @@ describe('TASK-082B-R1 — defaultWatchdogClassification (silence semantics)', (
       })
     ).toBe('RATE_LIMITED')
   })
-  it('total silence on a free-tier model → FREE_MODEL_LIMIT_EXCEEDED', () => {
+  it('A. free model + total silence → FIRST_RESPONSE_TIMEOUT, never FREE_MODEL_LIMIT_EXCEEDED', () => {
     expect(
       defaultWatchdogClassification({ modelFree: true, stdoutBytes: 0, stderrBytes: 0 })
-    ).toBe('FREE_MODEL_LIMIT_EXCEEDED')
+    ).toBe('FIRST_RESPONSE_TIMEOUT')
   })
-  it('silence on paid/unknown-tier models stays PROVIDER_TEMPORARILY_UNAVAILABLE', () => {
+  it('B. paid/Go model + total silence → FIRST_RESPONSE_TIMEOUT, never PROVIDER_TEMPORARILY_UNAVAILABLE', () => {
     expect(
       defaultWatchdogClassification({ modelFree: false, stdoutBytes: 0, stderrBytes: 0 })
-    ).toBe('PROVIDER_TEMPORARILY_UNAVAILABLE')
+    ).toBe('FIRST_RESPONSE_TIMEOUT')
     expect(defaultWatchdogClassification({ stdoutBytes: 0, stderrBytes: 0 })).toBe(
-      'PROVIDER_TEMPORARILY_UNAVAILABLE'
+      'FIRST_RESPONSE_TIMEOUT'
     )
   })
-  it('any observed bytes keep the honest temporary default even for free models', () => {
+  it('observed bytes do not change the neutral timeout fallback', () => {
     expect(
       defaultWatchdogClassification({ modelFree: true, stdoutBytes: 128, stderrBytes: 0 })
-    ).toBe('PROVIDER_TEMPORARILY_UNAVAILABLE')
+    ).toBe('FIRST_RESPONSE_TIMEOUT')
     expect(
       defaultWatchdogClassification({ modelFree: true, stdoutBytes: 0, stderrBytes: 64 })
+    ).toBe('FIRST_RESPONSE_TIMEOUT')
+  })
+  it('G. stashed authoritative error wins over the neutral timeout', () => {
+    expect(
+      defaultWatchdogClassification({
+        stashedClassification: 'AUTHENTICATION_REQUIRED',
+        modelFree: false,
+        stdoutBytes: 0,
+        stderrBytes: 0,
+      })
+    ).toBe('AUTHENTICATION_REQUIRED')
+  })
+  it('H. 60s startup watchdog expiry → neutral STARTUP_TIMEOUT', () => {
+    expect(
+      defaultWatchdogClassification({ modelFree: true, stdoutBytes: 0, stderrBytes: 0, timeout: 'startup' })
+    ).toBe('STARTUP_TIMEOUT')
+    expect(
+      defaultWatchdogClassification({ modelFree: false, stdoutBytes: 0, stderrBytes: 0, timeout: 'startup' })
+    ).toBe('STARTUP_TIMEOUT')
+  })
+  it('neutral timeout copy never mentions quota, outage, or auth', () => {
+    for (const cls of ['FIRST_RESPONSE_TIMEOUT', 'STARTUP_TIMEOUT'] as const) {
+      const { headline, detail } = buildProviderErrorWarning(cls, {
+        provider: 'opencode-go',
+        model: 'opencode-go/mimo-v2.5',
+      })
+      expect(headline).toBe('No response received')
+      expect(detail).not.toMatch(/quota|free limit|unavailable|outage|auth|exhaust/i)
+    }
+    expect(buildProviderErrorWarning('FIRST_RESPONSE_TIMEOUT', {}).detail).toMatch(/20 seconds/)
+    expect(buildProviderErrorWarning('STARTUP_TIMEOUT', {}).detail).toMatch(/60 seconds/)
+  })
+})
+
+describe('explicit evidence classification is preserved (DNS counterexample must not weaken it)', () => {
+  it('C. free model + explicit free-limit/rate evidence → FREE_MODEL_LIMIT_EXCEEDED', () => {
+    expect(
+      classifyProviderError({ message: 'Rate limit exceeded. Please try again later.', isFreeModel: true }).classification
+    ).toBe('FREE_MODEL_LIMIT_EXCEEDED')
+    expect(
+      classifyProviderError({ message: 'Free model limit reached for opencode/mimo-v2.5-free', isFreeModel: true }).classification
+    ).toBe('FREE_MODEL_LIMIT_EXCEEDED')
+  })
+  it('D. paid/Go model + explicit quota evidence → PAID_MODEL_USAGE_EXHAUSTED', () => {
+    expect(
+      classifyProviderError({ message: 'Insufficient credits: account balance depleted', isFreeModel: false }).classification
+    ).toBe('PAID_MODEL_USAGE_EXHAUSTED')
+    expect(
+      classifyProviderError({ message: 'Payment required', statusCode: 402 }).classification
+    ).toBe('PAID_MODEL_USAGE_EXHAUSTED')
+  })
+  it('E. explicit auth evidence → AUTHENTICATION_REQUIRED', () => {
+    expect(
+      classifyProviderError({ message: 'Unauthorized', statusCode: 401 }).classification
+    ).toBe('AUTHENTICATION_REQUIRED')
+  })
+  it('F. explicit temporary-provider evidence → PROVIDER_TEMPORARILY_UNAVAILABLE', () => {
+    expect(
+      classifyProviderError({ message: 'The server is overloaded, try again shortly' }).classification
+    ).toBe('PROVIDER_TEMPORARILY_UNAVAILABLE')
+    expect(
+      classifyProviderError({ message: 'Service temporarily unavailable (503)' }).classification
     ).toBe('PROVIDER_TEMPORARILY_UNAVAILABLE')
   })
 })

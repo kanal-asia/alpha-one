@@ -442,15 +442,17 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
           } catch {
             /* already dead */
           }
-          // TASK-082B-R1: the selected model's free-tier flag travels with the
-          // classification so free-tier rate-limit exhaustion (the proven
-          // exhausted-free-model channel) maps to FREE_MODEL_LIMIT_EXCEEDED
-          // instead of generic RATE_LIMITED. Paid/unknown tiers are unaffected.
+          // Watchdog timeout is a neutral observation, never a provider
+          // diagnosis: total silence alone cannot prove quota exhaustion,
+          // provider outage, or auth failure (a local/network-layer stall
+          // produces the identical envelope). Authoritative stashed evidence
+          // still overrides via lastProviderError.
           const watchdogClassification = defaultWatchdogClassification({
             stashedClassification: lastProviderError?.classification ?? null,
             modelFree: model.free === true,
             stdoutBytes: stdout.length,
             stderrBytes,
+            timeout: 'startup',
           })
           const staleHint = body.sessionId
             ? ` The reused session (${body.sessionId}) may be stale; start a New Chat to continue with a fresh session.`
@@ -569,8 +571,9 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
   // TASK-082B-R2 Phase 4: dedicated first-response watchdog. Fires at
   // FIRST_RESPONSE_QUIET_MS on total post-spawn silence ONLY — any first child
   // byte disarms it, so healthy runs (P50 first activity 37ms, max 7.7s mined)
-  // can never trip it. Classification reuses the TASK-082B-R1 helper, so
-  // free-tier silence still maps to FREE_MODEL_LIMIT_EXCEEDED. The 60s
+  // can never trip it. Timeout classification is neutral (FIRST_RESPONSE_TIMEOUT):
+  // silence alone is an observation, never a quota/provider/auth diagnosis —
+  // authoritative stashed evidence still overrides via lastProviderError. The 60s
   // startup watchdog above stays untouched as the last-resort net.
   const disarmFirstResponse = armFirstResponseWatchdog(child, {
     quietMs: FIRST_RESPONSE_QUIET_MS,
@@ -596,6 +599,7 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
         modelFree: model.free === true,
         stdoutBytes: stdout.length,
         stderrBytes,
+        timeout: 'first-response',
       });
       const staleHint = body.sessionId
         ? ` The reused session (${body.sessionId}) may be stale; start a New Chat to continue with a fresh session.`

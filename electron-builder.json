@@ -16,6 +16,10 @@
                       },
     "extraResources":  [
                            {
+                               "from":  "dist/provenance.json",
+                               "to":  "provenance.json"
+                           },
+                           {
                                "from":  "dist/server",
                                "to":  "app/dist/server"
                            },

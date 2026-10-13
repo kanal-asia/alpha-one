@@ -19,6 +19,16 @@ export const DESIGN_CANVAS = { w: 960, h: 540 } as const
  *  this module stays dependency-free). */
 export const EMU_PER_PT = 12700
 
+/**
+ * TASK-096-R1: authoritative Google Slides default page in PT.
+ * `presentations.create({title})` always yields a 16:9 page of
+ * 9144000x5143500 EMU = 720x405 PT (10 x 5.625 in). The 960x540 design
+ * canvas is the 1.0 scale reference (pixels at 96dpi), NOT points — deck
+ * compilation must use these dimensions so coordinates land 1:1 on the
+ * real page, and the handler verifies them against the live pageSize.
+ */
+export const GOOGLE_DEFAULT_PAGE_PT = { w: 720, h: 405 } as const
+
 export type PageAspect = '16:9' | '4:3' | 'custom'
 
 export interface PageGeometry {
@@ -203,11 +213,26 @@ export type FitClass = 'FIT' | 'TIGHT' | 'OVERFLOW_RISK' | 'OVERFLOW'
 
 const AVG_CHAR_WIDTH_RATIO = 0.52
 const LINE_HEIGHT_RATIO = 1.25
+/**
+ * TASK-094: bold glyphs run wider than regular ones (DERIVED estimate:
+ * ~12% mean advance expansion across the safe system families). Bold-aware
+ * callers pass `{ bold: true }`; omitted opts preserve legacy behavior.
+ */
+const BOLD_WIDTH_MUL = 1.12
+
+export interface TextMeasureOpts {
+  bold?: boolean
+}
 
 /** Greedy word-wrap line count; explicit newlines force breaks. */
-export function estimateLines(text: string, fontPt: number, boxWidthPt: number): number {
+export function estimateLines(
+  text: string,
+  fontPt: number,
+  boxWidthPt: number,
+  opts?: TextMeasureOpts
+): number {
   if (!text || boxWidthPt <= 0 || fontPt <= 0) return 0
-  const charW = AVG_CHAR_WIDTH_RATIO * fontPt
+  const charW = AVG_CHAR_WIDTH_RATIO * fontPt * (opts?.bold === true ? BOLD_WIDTH_MUL : 1)
   // Google breaks lines at spaces AND at '/' and '-' boundaries. Model those
   // secondary opportunities so the estimator matches rendered wrapping
   // (e.g. '(Facebook/Instagram)' may break after the slash).
@@ -253,8 +278,13 @@ export interface TextDemand {
   pathologicalWrap: boolean
 }
 
-export function textDemandPt(text: string, fontPt: number, boxWidthPt: number): TextDemand {
-  const lines = estimateLines(text, fontPt, boxWidthPt)
+export function textDemandPt(
+  text: string,
+  fontPt: number,
+  boxWidthPt: number,
+  opts?: TextMeasureOpts
+): TextDemand {
+  const lines = estimateLines(text, fontPt, boxWidthPt, opts)
   if (!Number.isFinite(lines)) {
     return { lines: Number.POSITIVE_INFINITY, demandHeightPt: Number.POSITIVE_INFINITY, pathologicalWrap: true }
   }
@@ -270,9 +300,10 @@ export interface FitVerdict {
 export function classifyTextFit(
   text: string,
   fontPt: number,
-  box: { w: number; h: number }
+  box: { w: number; h: number },
+  opts?: TextMeasureOpts
 ): FitVerdict {
-  const demand = textDemandPt(text, fontPt, box.w)
+  const demand = textDemandPt(text, fontPt, box.w, opts)
   if (demand.pathologicalWrap || demand.demandHeightPt > box.h + 1) {
     return { fit: 'OVERFLOW', lines: demand.lines, demandHeightPt: demand.demandHeightPt }
   }
@@ -321,6 +352,12 @@ export interface PlacedElement {
   text?: string
   fontPt?: number
   role?: TextRole
+  /** TASK-094: bold glyphs measure wider; containment accounts for it. */
+  bold?: boolean
+  /** TASK-094-R2: solid fill of shape entries (for orphan-container QA). */
+  fillHex?: string
+  /** TASK-094-R3: normalized text color of text entries (for contrast QA). */
+  colorHex?: string
   /** Id of the parent container (card bg) — parent/child never collide. */
   parentId?: string | null
 }
@@ -431,7 +468,7 @@ export function checkTextContainment(
       bad.push(`${el.id}: box too small for padding`)
       continue
     }
-    const verdict = classifyTextFit(el.text, el.fontPt, inner)
+    const verdict = classifyTextFit(el.text, el.fontPt, inner, el.bold === true ? { bold: true } : undefined)
     if (verdict.fit === 'OVERFLOW') {
       bad.push(`${el.id}: ${verdict.fit} lines=${verdict.lines} demand=${verdict.demandHeightPt.toFixed(0)}pt>box${inner.h.toFixed(0)}pt`)
     }
@@ -441,7 +478,7 @@ export function checkTextContainment(
   }
   const risky = elements.filter((el) => {
     if (el.kind !== 'text' || el.text === undefined || el.fontPt === undefined) return false
-    return classifyTextFit(el.text, el.fontPt, { w: el.rect.w, h: el.rect.h }).fit === 'OVERFLOW_RISK'
+    return classifyTextFit(el.text, el.fontPt, { w: el.rect.w, h: el.rect.h }, el.bold === true ? { bold: true } : undefined).fit === 'OVERFLOW_RISK'
   })
   if (risky.length > 0) {
     return finding(
@@ -532,8 +569,22 @@ export function isOrphanPlaceholderText(text: string): boolean {
   return t === '' || ORPHAN_PROMPT_RE.test(t)
 }
 
+/**
+ * TASK-094-R2: normalized meaningful-text predicate for container QA.
+ * A semantic container with no meaningful text is an orphan: it renders as
+ * an empty box (on dark themes, an empty white/light rectangle). Whitespace-
+ * only content counts as empty. (Stored placeholder hints never reach
+ * snapshots, so they cannot satisfy this.)
+ */
+export function isMeaningfulText(text: string | null | undefined): boolean {
+  return (text ?? '').trim().length > 0
+}
+
 function isTitleType(type: string): boolean {
-  return /^(TITLE|CENTER_TITLE)$/i.test((type ?? '').trim())
+  // TASK-090-R1: CENTERED_TITLE is the centered variant some templates report;
+  // an unrecognized title placeholder used to fall through to PRESERVE and
+  // collide with the generated title (slide-1 failure class).
+  return /^(TITLE|CENTER_TITLE|CENTERED_TITLE)$/i.test((type ?? '').trim())
 }
 
 function isBodyType(type: string): boolean {
@@ -617,8 +668,185 @@ export function checkOwnershipCompleteness(
 }
 
 // ---------------------------------------------------------------------------
-// Pre-write QA aggregation
+// Visual-quality QA (TASK-087): measurable composition signals. All findings
+// are WARNING-grade by design — they inform human judgment and NEVER gate
+// GEOMETRY_PROVEN. Only unreadability/bounds/collision/factual-loss stay
+// BLOCKING. Machine QA supports the human verdict; it does not replace it.
 // ---------------------------------------------------------------------------
+
+/** Union bbox area of content elements (text + non-background shapes). */
+export function contentFootprint(elements: PlacedElement[], page: PageGeometry): number {
+  const safe = safeAreaOf(page)
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const el of elements) {
+    if (el.kind === 'background' || el.kind === 'line') continue
+    minX = Math.min(minX, el.rect.x)
+    minY = Math.min(minY, el.rect.y)
+    maxX = Math.max(maxX, el.rect.x + el.rect.w)
+    maxY = Math.max(maxY, el.rect.y + el.rect.h)
+  }
+  if (maxX <= minX || maxY <= minY) return 0
+  const area = (maxX - minX) * (maxY - minY)
+  return area / (safe.w * safe.h)
+}
+
+/**
+ * Peer consistency: elements sharing a role prefix family (e.g. SMV/SML card
+ * pairs, KPIV/KPIL pairs) must share dimensions. Returns dimension groups.
+ */
+export function peerDimensionGroups(elements: PlacedElement[]): Map<string, string> {
+  const groups = new Map<string, string>()
+  for (const el of elements) {
+    const m = /^(SMV|SML|KPIV|KPIL|ITEM|NUMBG|NUM)_?(\d+)/.exec(el.id) ?? /^(SMBG|KPIBG)(\d+)/.exec(el.id)
+    if (!m) continue
+    const family = m[1].replace(/\d+$/, '')
+    const key = `${family}:${el.rect.w.toFixed(1)}x${el.rect.h.toFixed(1)}`
+    groups.set(el.id, key)
+  }
+  return groups
+}
+
+export interface VisualQaInput {
+  page: PageGeometry
+  elements: PlacedElement[]
+  hierarchy: Array<{ role: TextRole; fontPt: number; id: string }>
+  /** Metric values the input carried (empty when the content has none). */
+  inputMetrics: string[],
+  /**
+   * TASK-090: raw source texts for burial analysis. A metric embedded in
+   * a long prose sentence is burial-risk; a short value label (funnel
+   * stage value, KPI card) is already hierarchically surfaced by design.
+   */
+  sourceTexts?: string[],
+  /**
+   * TASK-090: proportional sets — {ids, values} whose rendered widths must
+   * follow value ordering (non-increasing with values, ties allowed).
+   */
+  proportionSets?: Array<{ ids: string[]; values: number[] }>
+}
+
+export function qaVisualQuality(input: VisualQaInput): GeometryFinding[] {
+  const findings: GeometryFinding[] = []
+  const footprint = contentFootprint(input.elements, input.page)
+  findings.push(
+    finding(
+      'VISUAL_FOOTPRINT',
+      footprint >= 0.25,
+      'WARNING',
+      `footprint=${footprint.toFixed(2)} of safe area`
+    )
+  )
+  // Peer consistency across repeated card families.
+  const groups = peerDimensionGroups(input.elements)
+  const byFamily = new Map<string, Set<string>>()
+  for (const [, key] of groups) {
+    const family = key.split(':')[0]
+    if (!byFamily.has(family)) byFamily.set(family, new Set())
+    byFamily.get(family)?.add(key)
+  }
+  const inconsistent = [...byFamily.entries()].filter(([, keys]) => keys.size > 1)
+  findings.push(
+    finding(
+      'VISUAL_PEER_CONSISTENCY',
+      inconsistent.length === 0,
+      'WARNING',
+      inconsistent.length > 0 ? `varying: ${inconsistent.map(([f]) => f).join(', ')}` : undefined
+    )
+  )
+  // KPI hierarchy: metric values buried inside long prose must surface
+  // through a kpiValue role, never as undifferentiated body copy. Short
+  // value labels (funnel stages, KPI cards) are hierarchical by design,
+  // as are values given proportional visual encoding (bar lengths carry
+  // the hierarchy instead of type scale).
+  const kpiRoles = input.hierarchy.filter((h) => h.role === 'kpiValue').length
+  const proportionEncoded = (input.proportionSets ?? []).length > 0
+  const burialRisk = (input.sourceTexts ?? input.inputMetrics).filter((s) => s.length > 30 && numericTokens([s]).length > 0)
+  findings.push(
+    finding(
+      'VISUAL_KPI_HIERARCHY',
+      burialRisk.length === 0 || kpiRoles > 0 || proportionEncoded,
+      'WARNING',
+      burialRisk.length > 0 && kpiRoles === 0 && !proportionEncoded
+        ? `metrics=${burialRisk.length} buried in prose without kpiValue hierarchy`
+        : undefined
+    )
+  )
+  // Typography collapse: every level at the same size means no hierarchy.
+  const sizes = new Set(input.hierarchy.map((h) => h.fontPt))
+  findings.push(
+    finding(
+      'VISUAL_TYPE_HIERARCHY',
+      sizes.size >= 2 || input.hierarchy.length <= 1,
+      'WARNING',
+      sizes.size < 2 && input.hierarchy.length > 1 ? 'all roles share one size' : undefined
+    )
+  )
+  // Proportional order: widths must follow values (ties allowed). A set that
+  // inverts magnitude order fails — the encoding would actively mislead.
+  const byId = new Map(input.elements.map((e) => [e.id, e.rect]))
+  for (const set of input.proportionSets ?? []) {
+    const pairs = set.ids.map((id) => ({ id, v: set.values[set.ids.indexOf(id)], w: byId.get(id)?.w }))
+    const defined = pairs.filter((p) => typeof p.w === 'number')
+    let ordered = true
+    for (let i = 1; i < defined.length; i += 1) {
+      if (defined[i].v < defined[i - 1].v && defined[i].w !== undefined && defined[i - 1].w !== undefined) {
+        if ((defined[i].w as number) > (defined[i - 1].w as number) + 1) ordered = false
+      }
+      if (defined[i].v > defined[i - 1].v) {
+        if ((defined[i].w as number) < (defined[i - 1].w as number) - 1) ordered = false
+      }
+    }
+    findings.push(
+      finding(
+        'VISUAL_PROPORTIONAL_ORDER',
+        ordered && defined.length === set.ids.length,
+        'WARNING',
+        !ordered ? 'rendered widths invert value ordering' : defined.length !== set.ids.length ? 'proportion ids missing from layout' : undefined
+      )
+    )
+  }
+  // Mass balance: content-bbox center far from safe-area center means the
+  // composition leans unintentionally (intentional asymmetry is a human call,
+  // so WARNING-grade evidence, never BLOCKING).
+  const content = input.elements.filter((e) => e.kind !== 'background' && e.kind !== 'line')
+  if (content.length > 0) {
+    const safe = safeAreaOf(input.page)
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (const el of content) {
+      minX = Math.min(minX, el.rect.x)
+      minY = Math.min(minY, el.rect.y)
+      maxX = Math.max(maxX, el.rect.x + el.rect.w)
+      maxY = Math.max(maxY, el.rect.y + el.rect.h)
+    }
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+    const ox = Math.abs(cx - (safe.x + safe.w / 2)) / safe.w
+    const oy = Math.abs(cy - (safe.y + safe.h / 2)) / safe.h
+    const balanced = ox <= 0.3 && oy <= 0.3
+    findings.push(
+      finding(
+        'VISUAL_MASS_BALANCE',
+        balanced,
+        'WARNING',
+        !balanced ? `mass offset x=${ox.toFixed(2)} y=${oy.toFixed(2)} of safe area` : undefined
+      )
+    )
+  }
+  // TASK-094: render-evidence boundary. Every check above is structural
+  // (bounds, containment, collision, order) — no pixel/rendered-image
+  // evidence exists at this layer. State that explicitly so GEOMETRY_PROVEN
+  // can never be mistaken for pixel-level proof.
+  findings.push(
+    finding('VISUAL_RENDER_UNPROVEN', true, 'WARNING', 'structural geometry only; no rendered-pixel evidence')
+  )
+  return findings
+}
 
 export interface PrewriteQaInput {
   page: PageGeometry
@@ -652,15 +880,30 @@ export interface ReadbackElement {
   rectPt?: { x: number; y: number; w: number; h: number } | null
   text?: string
   placeholderType?: string
+  /**
+   * TASK-089: snapshot kind ('group' for group shells). Collision QA pairs
+   * visual LEAF elements only — a group shell's bbox duplicates its members
+   * semantically, so shells are excluded from rect pairing (identity,
+   * ownership, and presence still see them).
+   */
+  kind?: string
 }
 
 export interface ReadbackQaInput {
   page: PageGeometry
   expectedTexts: string[]
+  /**
+   * TASK-090-R1: required facts for READBACK_FACTUAL_COMPLETENESS.
+   * Defaults to expectedTexts (plan facts). Pre-write coverage uses the
+   * same normalized identity against source-owned segments.
+   */
+  requiredFacts?: string[],
   expectedIds: string[]
   clearedIds: string[]
   elements: ReadbackElement[]
   ownership: OwnershipDecision[]
+  /** Compose title for the heading-anchor duplicate rule. */
+  composeTitle?: string
 }
 
 export function qaReadback(input: ReadbackQaInput): GeometryFinding[] {
@@ -683,6 +926,27 @@ export function qaReadback(input: ReadbackQaInput): GeometryFinding[] {
       missingText.length === 0,
       'ERROR',
       missingText.length > 0 ? `missing: ${missingText.slice(0, 3).join(' | ')}` : undefined
+    )
+  )
+  // TASK-090-R1: authoritative factual readback gate (BLOCKING). Every
+  // required fact must be covered by the joined readback texts (same
+  // conservative predicate as ownership: exact, majority word coverage,
+  // numeric subset — no title anchor, so headings never self-satisfy).
+  // This catches projection drops even when pre-write planning passed.
+  const required = input.requiredFacts ?? input.expectedTexts
+  const missingFacts = required.filter((f) => {
+    const norm = normalizeFact(f)
+    if (!norm) return false
+    return !isCoveredSourceText(f, [joined])
+  })
+  findings.push(
+    finding(
+      'READBACK_FACTUAL_COMPLETENESS',
+      missingFacts.length === 0,
+      'BLOCKING',
+      missingFacts.length > 0
+        ? `missing required facts: ${missingFacts.slice(0, 5).map((f) => f.slice(0, 60)).join(' | ')}`
+        : undefined
     )
   )
   // Cleared placeholders must be gone; REUSEd ones must carry content.
@@ -722,6 +986,30 @@ export function qaReadback(input: ReadbackQaInput): GeometryFinding[] {
       dupes.length > 0 ? `dupes: ${dupes.slice(0, 5).join(', ')}` : undefined
     )
   )
+  // TASK-086R2-R1: duplicated SOURCE content. A surviving non-placeholder,
+  // non-composed element whose text the plan reproduces is the reported
+  // failure mode (source textbox stranded next to the AB_* structure).
+  // Authoritative whole-slide check: REUSEd natives are owned, newly created
+  // ids are expected, placeholders stay under the placeholder contract.
+  const reuseIds = new Set(input.ownership.filter((d) => d.decision === 'REUSE').map((d) => d.objectId))
+  const expectedSet = new Set(input.expectedIds)
+  const sourceDupes = input.elements.filter(
+    (e) =>
+      !expectedSet.has(e.objectId) &&
+      !reuseIds.has(e.objectId) &&
+      e.placeholderType === undefined &&
+      (e.objectId.startsWith(COMPOSED_ID_PREFIX) || isCoveredSourceText(e.text ?? '', input.expectedTexts, input.composeTitle))
+  )
+  findings.push(
+    finding(
+      'READBACK_NO_SOURCE_DUPLICATES',
+      sourceDupes.length === 0,
+      'BLOCKING',
+      sourceDupes.length > 0
+        ? `surviving source duplicates: ${sourceDupes.slice(0, 5).map((e) => e.objectId).join(', ')}`
+        : undefined
+    )
+  )
   // Readback bounds on the authoritative rects.
   const outOfBounds = input.elements.filter((e) => {
     if (!e.rectPt) return false
@@ -734,6 +1022,51 @@ export function qaReadback(input: ReadbackQaInput): GeometryFinding[] {
       outOfBounds.length === 0,
       'ERROR',
       outOfBounds.length > 0 ? outOfBounds.slice(0, 5).map((e) => e.objectId).join(', ') : undefined
+    )
+  )
+  // TASK-086R2-R1-C1: effective post-write collisions must include preserved
+  // source survivors. Pre-write checks cover the plan (+native rects) only,
+  // and AB-vs-AB overlaps are already proven there — so this check is scoped
+  // to preserved (non-composed, non-cleared, non-reused) elements against
+  // newly created ids. Designed overlaps (badge number inside its ellipse)
+  // are same-center containment, never flagged: a hit requires genuine
+  // partial overlap (intersection smaller than either box).
+  // TASK-089: leaf-only pairing — group shells (kind 'group') are structural
+  // containers whose bbox re-states member geometry; pairing them would
+  // false-flag every grouped composition. Members pair normally.
+  const preserved = input.elements.filter(
+    (e) =>
+      !expectedSet.has(e.objectId) &&
+      !reuseIds.has(e.objectId) &&
+      !input.clearedIds.includes(e.objectId) &&
+      !e.objectId.startsWith(COMPOSED_ID_PREFIX) &&
+      e.kind !== 'group' &&
+      e.rectPt !== undefined &&
+      e.rectPt !== null
+  )
+  const created = input.elements.filter(
+    (e) =>
+      expectedSet.has(e.objectId) &&
+      e.kind !== 'group' &&
+      e.rectPt !== undefined &&
+      e.rectPt !== null
+  )
+  const collisions: string[] = []
+  for (const p of preserved) {
+    const pr = p.rectPt as { x: number; y: number; w: number; h: number }
+    for (const c of created) {
+      const cr = c.rectPt as { x: number; y: number; w: number; h: number }
+      if (rectsOverlap(pr, cr) && !rectContains(pr, cr) && !rectContains(cr, pr)) {
+        collisions.push(`${p.objectId}×${c.objectId}`)
+      }
+    }
+  }
+  findings.push(
+    finding(
+      'READBACK_EFFECTIVE_COLLISION_FREE',
+      collisions.length === 0,
+      'BLOCKING',
+      collisions.length > 0 ? `preserved-vs-new overlaps: ${collisions.slice(0, 5).join(' | ')}` : undefined
     )
   )
   return findings
@@ -1065,8 +1398,613 @@ export function numericTokens(texts: string[]): string[] {
   return [...out]
 }
 
+/**
+ * TASK-090-R1: required-fact primitives. A fact is a normalized source
+ * string; identity is conservative (exact or normalized-equivalent only).
+ */
+export function normalizeFact(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Split source text into candidate fact segments (sentences/lines).
+ * Decimal points ("2.1B"), abbreviations, and ellipsis never split: a
+ * period splits only before whitespace+capital/end (new sentence).
+ */
+export function splitFactSegments(text: string): string[] {
+  const out: string[] = []
+  for (const chunk of text.split(/[\n;!?]+/)) {
+    let rest = chunk
+    while (rest.length > 0) {
+      // NB: digits excluded from the lookahead so decimals ("2.1B") never split.
+      const m = /\.\s*(?=[A-Z"“(]|$)/.exec(rest)
+      if (!m || m.index === undefined) {
+        out.push(rest)
+        break
+      }
+      const cut = m.index + 1
+      out.push(rest.slice(0, cut))
+      rest = rest.slice(cut).replace(/^\s+/, '')
+    }
+  }
+  return out.map((s) => s.trim()).filter((s) => s.length > 0)
+}
+
+/**
+ * A segment is substantive (fact-bearing) when it carries real wording
+ * (>=4 words) or any numeric token. Stray fragments never gate clearing.
+ */
+export function isSubstantiveSegment(segment: string): boolean {
+  const words = segment.split(/\s+/).filter(Boolean)
+  if (words.length >= 4) return true
+  return numericTokens([segment]).length > 0
+}
+
+/**
+ * TASK-090-R1 pre-write gate helper: FACTUAL_PROJECTION_COMPLETE.
+ * For every source object marked CLEAR, each substantive owned segment must
+ * be covered by the planned projected texts (same conservative predicate as
+ * ownership: exact, title-anchored, or majority word coverage with numeric
+ * subset). Any uncovered segment is BLOCKING — the compose must not write
+ * and the source must not be cleared.
+ */
+export interface FactCoverageTarget {
+  objectId: string
+  text: string
+}
+export function checkFactCoverage(
+  clearTargets: FactCoverageTarget[],
+  projectedTexts: string[],
+  composeTitle?: string
+): GeometryFinding[] {
+  const missing: string[] = []
+  for (const target of clearTargets) {
+    for (const seg of splitFactSegments(target.text)) {
+      if (!isSubstantiveSegment(seg)) continue
+      if (!isCoveredSourceText(seg, projectedTexts, composeTitle)) {
+        missing.push(`${target.objectId}: ${seg.slice(0, 60)}`)
+      }
+      if (missing.length >= 5) break
+    }
+    if (missing.length >= 5) break
+  }
+  return [
+    finding(
+      'FACTUAL_PROJECTION_COMPLETE',
+      missing.length === 0,
+      'BLOCKING',
+      missing.length > 0 ? `unprojected owned facts: ${missing.join(' | ')}` : undefined
+    ),
+  ]
+}
+
+/**
+ * Numeric tokens minus bare 4-digit years. Years locate content in time;
+ * they are never hero KPI values (§19) and must not single-handedly block
+ * summarization coverage. Quarters, months, and full dates stay guarded.
+ */
+export function coverageNumerics(texts: string[]): string[] {
+  return numericTokens(texts).filter((tok) => !/^(19|20)\d{2}$/.test(tok))
+}
+
 /** Tokens present in output but absent from input — fabricated facts. */
 export function findFabricatedNumbers(inputTexts: string[], outputTexts: string[]): string[] {
   const allowed = new Set(numericTokens(inputTexts))
   return numericTokens(outputTexts).filter((t) => !allowed.has(t))
+}
+
+// ---------------------------------------------------------------------------
+// Magnitude parsing + proportional scaling (TASK-090 visual encoding).
+// Deterministic, locale-aware for ID compact formats (Rp 38.500 = 38500).
+// Never invents values: unparseable text yields null (caller falls back).
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Source-element ownership (TASK-086R2-R1, C1 title-anchor upgrade, TASK-089
+// group-aware shells): existing-slide Beautify replaces the source structure,
+// never strands it alongside the composition.
+// ---------------------------------------------------------------------------
+
+/**
+ * Proven gap (human benchmark): composeSlideOnPage inventoried placeholders
+ * ONLY, so a plain source textbox survived EXECUTIVE_SUMMARY composition next
+ * to 11 new AB_* elements while READBACK_NO_DUPLICATES (repeated objectIds)
+ * and OWNERSHIP_COMPLETENESS (placeholders-only) both passed vacuously.
+ *
+ * This section owns the complementary contract for pre-existing
+ * NON-placeholder page elements:
+ * - previous-generation AB_* ids → CLEAR (retry replaces, never accumulates)
+ * - text reproduced by the plan → CLEAR (duplicate-source prevention)
+ * - everything else (images, uncovered content) → PRESERVE, never blind delete
+ * Placeholders keep their decideOwnership contract and are never double-decided.
+ */
+
+/** Pre-existing page element inventory (superset of placeholders). */
+export interface SourceElementInfo {
+  objectId: string
+  text?: string
+  placeholderType?: string
+  kind?: string
+  /** ObjectId of the containing group for group members (TASK-089). */
+  parentGroupId?: string
+}
+
+/** Compose-owned objectId prefix (see beautify nextId: AB_<tag>_<prefix>_<seq>). */
+export const COMPOSED_ID_PREFIX = 'AB_'
+
+/** Minimum word coverage for a source element to count as reproduced. */
+export const SOURCE_CLEAR_COVERAGE = 0.5
+
+/** Normalized fact identity (conservative: exact or normalized-equivalent only). */
+export function normalizeSourceText(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function sourceWords(text: string): string[] {
+  return normalizeSourceText(text)
+    .split(' ')
+    .map((w) => w.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, ''))
+    .filter((w) => w.length > 0)
+}
+
+/**
+ * Fraction of the element’s words present in the composed texts (0..1),
+ * or -1 when the element carries no words (shapes/images/lines).
+ */
+export function sourceCoverage(elementText: string, expectedTexts: string[]): number {
+  const words = sourceWords(elementText)
+  if (words.length === 0) return -1
+  const allowed = new Set(expectedTexts.flatMap(sourceWords))
+  const hit = words.filter((w) => allowed.has(w)).length
+  return hit / words.length
+}
+
+/** True when the composed plan reproduces the element’s content. */
+export function isCoveredSourceText(
+  elementText: string,
+  expectedTexts: string[],
+  composeTitle?: string
+): boolean {
+  const norm = normalizeSourceText(elementText)
+  if (!norm) return false
+  const normExpected = expectedTexts.map(normalizeSourceText).filter((t) => t.length > 0)
+  if (normExpected.some((e) => e === norm)) return true
+  // Heading anchor (TASK-086R2-R1-C1): the element is the old rendering of
+  // this slide when it contains the compose title. Paraphrase-proof: agent
+  // bullets routinely compress/reorder body words (measured 0.769 coverage on
+  // a reproduced slide vs the 0.8 bar), but the required title is stable.
+  const title = normalizeSourceText(composeTitle ?? '')
+  if (title.length >= 3 && norm.includes(title)) return true
+  // Content backstop: majority word coverage AND every numeric token of the
+  // element present in the plan. Numbers are fidelity-stable anchors; the
+  // numeric-subset guard refuses to delete elements carrying facts the plan
+  // dropped (content-loss direction stays fail-closed: PRESERVE).
+  if (sourceCoverage(elementText, expectedTexts) < SOURCE_CLEAR_COVERAGE) return false
+  const elementNumerics = new Set(coverageNumerics([elementText]))
+  const allowedNumerics = new Set(coverageNumerics(expectedTexts))
+  return [...elementNumerics].every((x) => allowedNumerics.has(x))
+}
+
+/**
+ * TASK-089: fully-owned group shell clearing policy (live-proven 2026-09-12,
+ * disposable deck 1Jj54jK3IxBYM0qdmxggvA9bUzKL2PYShJK6IkkvJVYo):
+ * - shell delete CASCADES (deleteObject on the shell removed both members,
+ *   no orphans), and member deletes auto-DISSOLVE the emptied shell (no batch
+ *   errors either direction).
+ * - 'shell' (DEFAULT): delete the shell instead of its members when every
+ *   inventoried member is CLEAR — one request, no double-delete, no leftovers.
+ *   Covered members are re-marked PRESERVE-via-shell (never individually
+ *   deleted); the duplicate check still flags them if they survive.
+ * - 'members-only': delete CLEAR members individually, always preserve the
+ *   shell. Fallback only; may leave an invisible empty shell behind.
+ */
+export type GroupShellClearMode = 'shell' | 'members-only'
+
+/**
+ * Ownership for pre-existing page elements outside the placeholder contract.
+ * `decidedIds` must contain every placeholder id already owned by
+ * decideOwnership so placeholders are never double-decided here.
+ */
+export function decideSourceOwnership(
+  elements: SourceElementInfo[],
+  opts: { expectedTexts: string[]; decidedIds: Set<string>; composeTitle?: string; groupShells?: GroupShellClearMode }
+): OwnershipDecision[] {
+  const mode = opts.groupShells ?? 'shell'
+  // Child→parent links derive shell membership without extra plumbing.
+  const childrenOf = new Map<string, SourceElementInfo[]>()
+  for (const e of elements) {
+    if (e.parentGroupId === undefined) continue
+    const list = childrenOf.get(e.parentGroupId) ?? []
+    list.push(e)
+    childrenOf.set(e.parentGroupId, list)
+  }
+  const decided = new Set(opts.decidedIds)
+  const verdict = new Map<string, OwnershipDecision>()
+  const shells: SourceElementInfo[] = []
+  for (const e of elements) {
+    if (decided.has(e.objectId)) continue
+    decided.add(e.objectId)
+    // Group shells are decided in the second pass from member verdicts — even
+    // an AB_-prefixed shell id must not bypass member analysis (a shell
+    // deletion strands preserved members, so membership always governs).
+    if (e.kind === 'group') {
+      shells.push(e)
+      continue
+    }
+    if (e.objectId.startsWith(COMPOSED_ID_PREFIX)) {
+      verdict.set(e.objectId, { objectId: e.objectId, type: 'COMPOSED', decision: 'CLEAR', reason: 'previous compose generation; retry replaces it deterministically (no accumulation)' })
+      continue
+    }
+    if (e.placeholderType !== undefined) {
+      verdict.set(e.objectId, { objectId: e.objectId, type: e.placeholderType, decision: 'PRESERVE', reason: 'placeholder owned by the placeholder contract, not the source pass' })
+      continue
+    }
+    if (isCoveredSourceText(e.text ?? '', opts.expectedTexts, opts.composeTitle)) {
+      verdict.set(e.objectId, { objectId: e.objectId, type: 'SOURCE_TEXT', decision: 'CLEAR', reason: 'source content reproduced by the composition; cleared to prevent duplication' })
+      continue
+    }
+    verdict.set(e.objectId, { objectId: e.objectId, type: 'SOURCE_TEXT', decision: 'PRESERVE', reason: 'content not covered by the plan; must not delete' })
+  }
+  // Second pass: group shells, decided only from member verdicts. A shell is
+  // CLEAR-worthy iff every inventoried member is CLEAR. Mode 'shell' deletes
+  // the shell instead of its members (no double-delete: covered members are
+  // re-marked PRESERVE-via-shell and stay duplicate-checked if they survive).
+  // Mode 'members-only' deletes CLEAR members individually and always
+  // preserves the shell. A shell holding any PRESERVE member is always PRESERVE.
+  for (const s of shells) {
+    const members = childrenOf.get(s.objectId) ?? []
+    const memberVerdicts = members.map((m) => verdict.get(m.objectId)?.decision)
+    const fullyOwned = members.length > 0 && memberVerdicts.every((d) => d === 'CLEAR')
+    if (fullyOwned && mode === 'shell') {
+      for (const m of members) {
+        const prev = verdict.get(m.objectId)
+        verdict.set(m.objectId, { objectId: m.objectId, type: prev?.type ?? 'SOURCE_TEXT', decision: 'PRESERVE', reason: 'removed via parent shell deletion; duplicate check flags survivors' })
+      }
+      verdict.set(s.objectId, { objectId: s.objectId, type: 'GROUP', decision: 'CLEAR', reason: 'all members replacement-owned; shell deletion removes the generation in one request' })
+    } else {
+      verdict.set(s.objectId, {
+        objectId: s.objectId,
+        type: 'GROUP',
+        decision: 'PRESERVE',
+        reason:
+          members.length === 0
+            ? 'empty or memberless group shell; never blind-delete structure'
+            : mode === 'members-only'
+              ? 'shell retained; CLEAR members are deleted individually (safe default)'
+              : 'group retains preserved member(s); CLEAR members are deleted individually',
+      })
+    }
+  }
+  return elements
+    .filter((e) => verdict.has(e.objectId))
+    .map((e) => verdict.get(e.objectId) as OwnershipDecision)
+}
+
+// ---------------------------------------------------------------------------
+// Magnitude parsing + proportional scaling (TASK-090 visual encoding).
+// Deterministic, locale-aware for ID compact formats (Rp 38.500 = 38500).
+// Never invents values: unparseable text yields null (caller falls back).
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse the first numeric magnitude in free text. Handles prefix currencies
+ * (Rp/USD/$), compact suffixes (K/M/B), percent/x units, and ID thousands
+ * dots ("38.500" → 38500). Bare years ("2026") parse as their face value —
+ * callers use relative ordering only. Returns null when no number exists.
+ */
+export function parseMagnitude(text: string): number | null {
+  const t = text.trim()
+  if (!t) return null
+  const m = /(?:(Rp|USD|\$)\s*)?([+-]?\d[\d.,]*)\s*([BMK]\b|%|percent\b|x\b|Rp\b|USD\b|\$|million\b|billion\b|ribu\b|juta\b|miliar\b)?/i.exec(t)
+  if (!m) return null
+  let digits = m[2]
+  const unit = (m[3] ?? '').toLowerCase()
+  // TASK-093: Indonesian comma-decimal — "Rp6,5" → "6.5". Only when comma
+  // appears as decimal separator (single comma after digits, no trailing digits
+  // after it that would indicate thousands grouping).
+  if (/^\d+,\d$/.test(digits)) {
+    digits = digits.replace(',', '.')
+  }
+  // ID thousands dot: greedy match — "1.200.000" or "200.000" → strip all dots.
+  if (/^\d{1,3}(\.\d{3})+$/.test(digits) && !/[bmk%]/i.test(unit)) {
+    digits = digits.replace(/\./g, '')
+  }
+  const base = Number(digits.replace(/,/g, ''))
+  if (!Number.isFinite(base)) return null
+  if (/^(b)\b/i.test(unit)) return base * 1e9
+  if (/^(miliar|billion)\b/i.test(unit)) return base * 1e9
+  if (/^(m|jt|juta|million)\b/i.test(unit)) return base * 1e6
+  if (/^k\b/i.test(unit)) return base * 1e3
+  if (/^ribu\b/i.test(unit)) return base * 1e3
+  return base
+}
+
+export interface ProportionalWidths {
+  widths: number[]
+  /** True when the visual floor compressed strict ratios (ordering kept). */
+  floored: boolean
+}
+
+/**
+ * Deterministic magnitude→width mapping. Largest value always maps to maxW;
+ * ordering is preserved exactly; a minimum floor keeps tiny values visible.
+ * Zero/negative values clamp to the floor (never invert, never vanish).
+ */
+export function scaleProportional(values: number[], maxW: number, minW: number): ProportionalWidths {
+  if (values.length === 0) return { widths: [], floored: false }
+  const vmax = Math.max(...values.map((v) => (v > 0 ? v : 0)), 0)
+  const span = Math.max(maxW - minW, 0)
+  let floored = false
+  const widths = values.map((v) => {
+    const vv = v > 0 ? v : 0
+    const strict = vmax > 0 ? (maxW * vv) / vmax : maxW
+    const w = minW + span * (vmax > 0 ? vv / vmax : 1)
+    // The floor LIFTS small values above their strict ratio; record when it
+    // does so (ordering is still preserved exactly).
+    if (w > strict + 1e-9) floored = true
+    return Math.round(w * 100) / 100
+  })
+  return { widths, floored }
+}
+
+/**
+ * TASK-090: partition a total width into share-proportional segments that
+ * sum EXACTLY to totalW (stacked whole). A minimum floor keeps tiny shares
+ * visible; the floor deficit is borrowed from the largest segment so the
+ * whole never overflows. Ordering preserved; floored flags the adjustment.
+ */
+export function partitionShares(shares: number[], totalW: number, minW: number): ProportionalWidths {
+  const total = shares.reduce((a, b) => a + b, 0)
+  if (shares.length === 0 || totalW <= 0) return { widths: [], floored: false }
+  let widths = shares.map((s) => (total > 0 ? (totalW * s) / total : totalW / shares.length))
+  let floored = false
+  const deficit = widths.map((w) => Math.max(minW - w, 0)).reduce((a, b) => a + b, 0)
+  if (deficit > 0) {
+    floored = true
+    let rest = deficit
+    const order = widths.map((_, i) => i).sort((a, b) => widths[b] - widths[a])
+    for (const i of order) {
+      const give = Math.min(rest, widths[i] - minW)
+      if (give <= 0) continue
+      widths[i] -= give
+      rest -= give
+      if (rest <= 1e-9) break
+    }
+    if (rest > 1e-9) {
+      // Even the largest segment cannot fund the floors: uniform fallback.
+      widths = shares.map(() => totalW / shares.length)
+    } else {
+      widths = widths.map((w) => Math.max(w, minW))
+    }
+  }
+  const rounded = widths.map((w) => Math.round(w * 100) / 100)
+  // Absorb rounding drift into the largest segment so the sum stays exact.
+  if (rounded.length > 0) {
+    const drift = Math.round((totalW - rounded.reduce((a, b) => a + b, 0)) * 100) / 100
+    let bi = 0
+    for (let i = 1; i < rounded.length; i += 1) if (rounded[i] > rounded[bi]) bi = i
+    rounded[bi] = Math.round((rounded[bi] + drift) * 100) / 100
+  }
+  return { widths: rounded, floored }
+}
+
+// ---------------------------------------------------------------------------
+// Theme-aware color resolution with contrast-safe fallback (TASK-090).
+// ---------------------------------------------------------------------------
+
+function luminance(hex: string): number {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return NaN
+  const c = [0, 2, 4].map((o) => {
+    const v = parseInt(m[1].slice(o, o + 2), 16) / 255
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+  })
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+}
+
+/** WCAG-style contrast ratio between two hex colors (1..21). */
+export function contrastRatio(a: string, b: string): number {
+  const la = luminance(a)
+  const lb = luminance(b)
+  if (!Number.isFinite(la) || !Number.isFinite(lb)) return NaN
+  const [hi, lo] = la >= lb ? [la, lb] : [lb, la]
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+/** Minimum contrast for a theme accent used on light surfaces. */
+export const THEME_ACCENT_MIN_CONTRAST = 3.0
+
+// ---------------------------------------------------------------------------
+// TASK-096-R1: authoritative page-size contract + rendered-image analysis.
+// The presentation's pageSize is authoritative; the engine's design canvas
+// is an assumption that must be verified, never trusted blindly.
+// ---------------------------------------------------------------------------
+
+/** Page size in points, converted once from the authoritative magnitude/unit. */
+export interface AuthoritativePageSize {
+  wPt: number
+  hPt: number
+  unit: 'PT'
+}
+
+/**
+ * Convert one authoritative page dimension to PT. Supports PT (passthrough)
+ * and EMU (÷12700). Anything else (pixels, inches, missing, non-finite)
+ * fails closed — raw pixels must never flow into PT geometry.
+ */
+export function pageDimensionPt(magnitude: unknown, unit: unknown, label: string): number {
+  if (typeof magnitude !== 'number' || !Number.isFinite(magnitude) || magnitude <= 0) {
+    failGeometry(`${label} magnitude must be a positive finite number.`)
+  }
+  if (unit === 'PT') return magnitude
+  if (unit === 'EMU') return magnitude / EMU_PER_PT
+  failGeometry(`${label} unit must be PT or EMU (got ${String(unit)}); raw pixels/inches are never valid page geometry.`)
+}
+
+/** True when two page sizes agree within tolerance (default 0.5pt). */
+export function pageSizeMatches(a: { wPt: number; hPt: number }, b: { wPt: number; hPt: number }, tolPt = 0.5): boolean {
+  return Math.abs(a.wPt - b.wPt) <= tolPt && Math.abs(a.hPt - b.hPt) <= tolPt
+}
+
+export interface RenderedPixelAnalysis {
+  widthPx: number
+  heightPx: number
+  /** Fraction of the border band that is near-white (inset-background signal). */
+  whitePerimeterPct: number
+  /** True when essentially no content pixels exist (blank-slide signal). */
+  blankSlide: boolean
+  /**
+   * Fraction of pixels close to the expected background (when supplied).
+   * Low coverage on a supposedly full-bleed slide means inset background.
+   */
+  backgroundCoveragePct: number | null
+  /** Fraction of pixels that are neither near-white nor near-background. */
+  contentPixelPct: number
+  /**
+   * Always false: glyph clipping cannot be proven from pixels alone without
+   * a glyph/plan reference. Callers must compare against compiled bounds
+   * (see missingContentRegions) instead of claiming pixel proof here.
+   */
+  clippingDetectable: false
+}
+
+function pixelLuminance(r: number, g: number, b: number): number {
+  const c = [r, g, b].map((v) => {
+    const s = v / 255
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
+  })
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+}
+
+function hexToRgb(hex: string): [number, number, number] | null {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return null
+  return [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16)]
+}
+
+function colorDistanceSq(a: [number, number, number], b: [number, number, number]): number {
+  return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2
+}
+
+/**
+ * Analyze a rendered slide image (RGBA bytes, row-major) for structural
+ * visual defects: white perimeter (inset background), blank slides, and
+ * background coverage shortfall. Pixel evidence only — semantic judgments
+ * (clipping, hierarchy, encoding) are explicitly out of scope here.
+ */
+export function analyzeRenderedSlide(
+  pixels: Uint8ClampedArray | number[],
+  widthPx: number,
+  heightPx: number,
+  opts?: { backgroundHex?: string; whiteLuminance?: number; borderBandPx?: number }
+): RenderedPixelAnalysis {
+  if (!Number.isInteger(widthPx) || widthPx <= 0 || !Number.isInteger(heightPx) || heightPx <= 0) {
+    failGeometry('rendered image dimensions must be positive integers.')
+  }
+  if (pixels.length < widthPx * heightPx * 4) {
+    failGeometry('pixel buffer is smaller than width*height*4 bytes.')
+  }
+  const whiteLum = opts?.whiteLuminance ?? 0.92
+  const band = Math.max(1, opts?.borderBandPx ?? Math.max(2, Math.round(Math.min(widthPx, heightPx) * 0.01)))
+  const bgRgb = opts?.backgroundHex !== undefined ? hexToRgb(opts.backgroundHex) : null
+  // Near-background tolerance in RGB distance (~48 units ≈ visibly same tone).
+  const bgTolSq = 48 * 48
+  let borderTotal = 0
+  let borderWhite = 0
+  let bgCount = 0
+  let contentCount = 0
+  const total = widthPx * heightPx
+  for (let y = 0; y < heightPx; y += 1) {
+    for (let x = 0; x < widthPx; x += 1) {
+      const o = (y * widthPx + x) * 4
+      const r = pixels[o] as number
+      const g = pixels[o + 1] as number
+      const b = pixels[o + 2] as number
+      const lum = pixelLuminance(r, g, b)
+      const isWhite = lum >= whiteLum
+      const isBg = bgRgb !== null && colorDistanceSq([r, g, b], bgRgb) <= bgTolSq
+      if (isBg) bgCount += 1
+      else if (!isWhite) contentCount += 1
+      if (x < band || y < band || x >= widthPx - band || y >= heightPx - band) {
+        borderTotal += 1
+        if (isWhite) borderWhite += 1
+      }
+    }
+  }
+  const whitePerimeterPct = borderTotal > 0 ? (borderWhite / borderTotal) * 100 : 0
+  const contentPixelPct = (contentCount / total) * 100
+  return {
+    widthPx,
+    heightPx,
+    whitePerimeterPct: Math.round(whitePerimeterPct * 100) / 100,
+    blankSlide: contentPixelPct < 0.5 && (bgRgb === null || (bgCount / total) * 100 < 50),
+    backgroundCoveragePct: bgRgb === null ? null : Math.round(((bgCount / total) * 100) * 100) / 100,
+    contentPixelPct: Math.round(contentPixelPct * 100) / 100,
+    clippingDetectable: false,
+  }
+}
+
+/**
+ * Compare planned content boxes (pixel rects) against a render: indices of
+ * boxes whose region holds essentially no content pixels. A flagged box is
+ * either missing, fully clipped, or rendered invisible — all three fail the
+ * slide identically, so no distinction is claimed here.
+ */
+export function missingContentRegions(
+  boxesPx: Array<{ x: number; y: number; w: number; h: number }>,
+  pixels: Uint8ClampedArray | number[],
+  widthPx: number,
+  heightPx: number,
+  opts?: { backgroundHex?: string; whiteLuminance?: number; contentThresholdPct?: number }
+): number[] {
+  const whiteLum = opts?.whiteLuminance ?? 0.92
+  const threshold = opts?.contentThresholdPct ?? 1.0
+  const bgRgb = opts?.backgroundHex !== undefined ? hexToRgb(opts.backgroundHex) : null
+  const bgTolSq = 48 * 48
+  const missing: number[] = []
+  boxesPx.forEach((box, i) => {
+    const x0 = Math.max(0, Math.floor(box.x))
+    const y0 = Math.max(0, Math.floor(box.y))
+    const x1 = Math.min(widthPx, Math.ceil(box.x + box.w))
+    const y1 = Math.min(heightPx, Math.ceil(box.y + box.h))
+    // A box fully outside the image is missing by construction.
+    if (x1 <= 0 || y1 <= 0 || x0 >= widthPx || y0 >= heightPx) {
+      missing.push(i)
+      return
+    }
+    let content = 0
+    let total = 0
+    for (let y = y0; y < y1; y += 1) {
+      for (let x = x0; x < x1; x += 1) {
+        const o = (y * widthPx + x) * 4
+        const lum = pixelLuminance(pixels[o] as number, pixels[o + 1] as number, pixels[o + 2] as number)
+        const isWhite = lum >= whiteLum
+        const isBg =
+          bgRgb !== null &&
+          colorDistanceSq([pixels[o] as number, pixels[o + 1] as number, pixels[o + 2] as number], bgRgb) <= bgTolSq
+        total += 1
+        if (!isWhite && !isBg) content += 1
+      }
+    }
+    if (total === 0 || (content / total) * 100 < threshold) missing.push(i)
+  })
+  return missing
+}
+
+/**
+ * Resolve a semantic theme role (e.g. ACCENT1) to a usable hex, else fallback.
+ * A theme color that fails contrast against `onHex` is rejected — legibility
+ * is never sacrificed for theme fidelity.
+ */
+export function resolveThemeRole(
+  theme: Record<string, string> | null | undefined,
+  role: string,
+  fallbackHex: string,
+  onHex = '#FFFFFF'
+): string {
+  const raw = theme?.[role]
+  if (typeof raw === 'string' && /^#[0-9a-f]{6}$/i.test(raw)) {
+    const ratio = contrastRatio(raw, onHex)
+    if (Number.isFinite(ratio) && ratio >= THEME_ACCENT_MIN_CONTRAST) return raw.toUpperCase()
+  }
+  return fallbackHex
 }

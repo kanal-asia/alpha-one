@@ -21,11 +21,13 @@ const EXPECTED_TOOLS = [
   'slides_update_page',
   'slides_create_slide',
   'slides_compose_slide',
+  'slides_list_themes',
+  'slides_compose_deck',
   'slides_batch_update',
 ]
 
 interface RpcResponse {
-  result?: { tools?: Array<{ name?: string }> }
+  result?: { tools?: Array<{ name?: string; description?: string }> }
   error?: unknown
 }
 
@@ -72,7 +74,7 @@ function start(): { proc: ChildProcess; call: (method: string, params?: unknown)
 }
 
 describe('built Slides bundle exposes compose (§11.1–2)', () => {
-  it('tools/list returns 13/13 with slides_compose_slide exactly once', async () => {
+  it('tools/list returns 15/15 with deck-level Alpha Beautify tools exactly once', async () => {
     const { proc, call } = start()
     try {
       await call('initialize', {
@@ -83,9 +85,40 @@ describe('built Slides bundle exposes compose (§11.1–2)', () => {
       const out = await call('tools/list', {})
       expect(out.error).toBeFalsy()
       const names = (out.result?.tools ?? []).map((t) => t.name)
-      expect(names).toHaveLength(13)
+      expect(names).toHaveLength(15)
       for (const name of EXPECTED_TOOLS) expect(names).toContain(name)
       expect(names.filter((n) => n === 'slides_compose_slide')).toHaveLength(1)
+      expect(names.filter((n) => n === 'slides_list_themes')).toHaveLength(1)
+      expect(names.filter((n) => n === 'slides_compose_deck')).toHaveLength(1)
+    } finally {
+      proc.kill()
+    }
+  }, 30000)
+
+  it('routes new multi-slide deck generation to slides_compose_deck', async () => {
+    const { proc, call } = start()
+    try {
+      await call('initialize', {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'compose-routing-test', version: '1' },
+      })
+      const out = await call('tools/list', {})
+      expect(out.error).toBeFalsy()
+      const tools = out.result?.tools ?? []
+      const composeSlide = tools.find((t) => t.name === 'slides_compose_slide')?.description ?? ''
+      const composeDeck = tools.find((t) => t.name === 'slides_compose_deck')?.description ?? ''
+
+      expect(composeSlide).toMatch(/explicit single-slide request/i)
+      expect(composeSlide).toMatch(/new deck with 2 or more slides/i)
+      expect(composeSlide).toMatch(/use slides_compose_deck exactly once/i)
+      expect(composeSlide).toMatch(/do not create deck-generation loops/i)
+
+      expect(composeDeck).toMatch(/new deck with 2 or more slides/i)
+      expect(composeDeck).toMatch(/call it exactly once/i)
+      expect(composeDeck).toMatch(/Do not pre-create the deck/i)
+      expect(composeDeck).toMatch(/call slides_compose_slide per slide/i)
+      expect(composeDeck).toMatch(/agent-driven archetype retries/i)
     } finally {
       proc.kill()
     }

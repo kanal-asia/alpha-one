@@ -11,7 +11,11 @@ import { decideOwnership, qaReadback, resolvePageGeometry, type PlaceholderInfo 
 const PAGE = 'SLIDE_REPRO_01'
 
 const TITLE_SLIDE: PlaceholderInfo[] = [
-  { objectId: 'PH_TITLE', type: 'TITLE', text: '', rect: { x: 48, y: 30, w: 864, h: 84 } },
+  // TASK-093-R2: the reused title carries stored text so the set-text
+  // mutation path (deleteText ALL + insertText) stays pinned here; the
+  // empty-placeholder insert-only path is pinned in task093r2.test.ts
+  // (emitting deleteText against empty text is rejected by Google).
+  { objectId: 'PH_TITLE', type: 'TITLE', text: 'Quarterly Review', rect: { x: 48, y: 30, w: 864, h: 84 } },
   { objectId: 'PH_SUB', type: 'SUBTITLE', text: 'Click to add text', rect: { x: 48, y: 150, w: 864, h: 200 } },
   { objectId: 'PH_FOOT', type: 'FOOTER', text: 'Confidential', rect: { x: 48, y: 510, w: 300, h: 20 } },
   { objectId: 'PH_NUM', type: 'SLIDE_NUMBER', text: '', rect: { x: 880, y: 510, w: 32, h: 20 } },

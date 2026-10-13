@@ -17,7 +17,7 @@
     },
     "google-slides": {
       "type": "local",
-      "command": ["node", "--experimental-strip-types", "mcp-servers/google-slides/server.ts"],
+      "command": ["node", "mcp-servers-dist/google-slides.js"],
       "cwd": ".",
       "enabled": true,
       "timeout": 15000

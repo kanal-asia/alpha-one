@@ -217,7 +217,7 @@ interface GoogleTextRun {
   }
 }
 
-interface GooglePageElement {
+export interface GooglePageElement {
   objectId?: string
   size?: { width?: { magnitude?: number }; height?: { magnitude?: number } }
   transform?: { scaleX?: number; scaleY?: number; translateX?: number; translateY?: number }
@@ -805,16 +805,66 @@ export function buildCreateTable(args: {
 
 export type TextMutationMode = 'set' | 'insert' | 'delete'
 
+/**
+ * TASK-093-R2: normalized deletable text length for a stored text span.
+ * Google Slides text carries a terminal newline that is not independently
+ * deletable address space for our purposes: a span whose only content is
+ * that newline (or nothing at all) has no deletable range, and emitting
+ * `deleteText` for it is rejected by Google
+ * ("startIndex 0 must be less than the endIndex 0").
+ * Visible placeholder hints ("Click to add title") are client UI, never
+ * stored text — they never reach this function.
+ */
+export function deletableTextLength(storedText: string | null | undefined): number {
+  if (typeof storedText !== 'string') return 0
+  const withoutTerminal = storedText.endsWith('\n') ? storedText.slice(0, -1) : storedText
+  return withoutTerminal.length
+}
+
+/**
+ * TASK-093-R2: centralized guarded deleteText builder (the ONLY place a
+ * FIXED_RANGE deleteText payload may be constructed).
+ * Returns [] (no request) for every non-deletable range instead of emitting
+ * an invalid request: non-finite/undefined indexes, negative start, or
+ * endIndex <= startIndex (covers 0..0, 1..1, 5..2).
+ * Callers needing fail-closed planning errors keep throwing on the empty
+ * result (see buildTextMutation); callers with inferred-empty content skip
+ * silently. Either way no invalid range can be emitted.
+ */
+export function buildSafeDeleteText(
+  objectId: string,
+  startIndex: number | undefined,
+  endIndex: number | undefined
+): GoogleRequest[] {
+  if (typeof startIndex !== 'number' || typeof endIndex !== 'number') return []
+  if (!Number.isFinite(startIndex) || !Number.isFinite(endIndex)) return []
+  if (!Number.isInteger(startIndex) || !Number.isInteger(endIndex)) return []
+  if (startIndex < 0 || endIndex <= startIndex) return []
+  if (startIndex > 1_000_000 || endIndex > 1_000_000) return []
+  return [{ deleteText: { objectId, textRange: { type: 'FIXED_RANGE', startIndex, endIndex } } }]
+}
+
 export function buildTextMutation(args: {
   objectId: string
   mode: TextMutationMode
   text?: string
   startIndex?: number
   endIndex?: number
+  /**
+   * TASK-093-R2: stored text already present in the target (e.g. native
+   * placeholder content from the page snapshot). When provided and carrying
+   * no deletable span, mode 'set' omits `deleteText` and emits insert-only —
+   * Google rejects deleting ALL of an empty span. When omitted, legacy
+   * unconditional delete-then-insert applies.
+   */
+  existingText?: string
 }): GoogleRequest[] {
   const { objectId, mode } = args
   if (mode === 'set') {
     const text = asText(args.text, 'text', 5000)
+    if (args.existingText !== undefined && deletableTextLength(args.existingText) === 0) {
+      return [{ insertText: { objectId, insertionIndex: 0, text } }]
+    }
     return [
       { deleteText: { objectId, textRange: { type: 'ALL' } } },
       { insertText: { objectId, insertionIndex: 0, text } },
@@ -829,10 +879,9 @@ export function buildTextMutation(args: {
   if (args.startIndex === undefined || args.endIndex === undefined) {
     fail('delete', 'requires explicit startIndex and endIndex (destructive text deletion is never implicit).')
   }
-  const startIndex = asIntInRange(args.startIndex, 'startIndex', 0, 1_000_000)
-  const endIndex = asIntInRange(args.endIndex, 'endIndex', 0, 1_000_000)
-  if (endIndex <= startIndex) fail('delete', 'requires endIndex > startIndex.')
-  return [{ deleteText: { objectId, textRange: { type: 'FIXED_RANGE', startIndex, endIndex } } }]
+  const guarded = buildSafeDeleteText(objectId, args.startIndex, args.endIndex)
+  if (guarded.length === 0) fail('delete', 'requires endIndex > startIndex.')
+  return guarded
 }
 
 export function buildUpdateTextStyle(args: {
@@ -1036,15 +1085,38 @@ export function buildDeleteObject(objectId: string): GoogleRequest {
 export interface PageBackgroundInput {
   backgroundHex?: string
   backgroundThemeColor?: string
+  /**
+   * TASK-096: stable https image URL for a decorative stretched picture fill
+   * (production gradient surfaces). Mutually exclusive with the solid-fill
+   * options. No authoritative text may live in the image; foreground
+   * contrast is enforced separately by the contrast gate.
+   */
+  backgroundImageUrl?: string
 }
 
-/** TASK-084: native page background (UpdatePagePropertiesRequest, documented mask). */
+/** TASK-096: native page background (UpdatePagePropertiesRequest, documented mask). */
 export function buildUpdatePageBackground(
   pageObjectId: string,
   input: PageBackgroundInput
 ): GoogleRequest {
   if (input.backgroundHex !== undefined && input.backgroundThemeColor !== undefined) {
     fail('backgroundHex/backgroundThemeColor', 'are mutually exclusive — supply literal hex OR a semantic theme color.')
+  }
+  if (input.backgroundImageUrl !== undefined && (input.backgroundHex !== undefined || input.backgroundThemeColor !== undefined)) {
+    fail('backgroundImageUrl', 'is mutually exclusive — supply image URL OR a solid fill, never both.')
+  }
+  if (input.backgroundImageUrl !== undefined) {
+    const url = input.backgroundImageUrl.trim()
+    if (!/^https:\/\//i.test(url) || url.length > 2000) {
+      fail('backgroundImageUrl', 'must be a stable https URL (max 2000 chars).')
+    }
+    return {
+      updatePageProperties: {
+        objectId: pageObjectId,
+        pageProperties: { pageBackgroundFill: { stretchedPictureFill: { contentUrl: url } } },
+        fields: 'pageBackgroundFill.stretchedPictureFill.contentUrl',
+      },
+    }
   }
   let color: Record<string, unknown>
   if (input.backgroundHex !== undefined) {
@@ -1258,12 +1330,45 @@ export interface PageSnapshotElement {
   placeholderType?: string
   placeholderIndex?: number
   text: string
+  /**
+   * TASK-089: objectId of the containing group when this element is a group
+   * member. GoogleSlide groups nest at most one level (groups cannot contain
+   * groups), so a single parent link is a complete relationship — but the
+   * traversal below is still depth-bounded rather than depth-assuming.
+   */
+  parentGroupId?: string
+}
+
+/** Maximum group-nesting depth traversed by snapshot inventory. */
+const SNAPSHOT_GROUP_MAX_DEPTH = 8
+
+function toSnapshotElement(
+  objectId: string,
+  projected: Record<string, unknown>,
+  parentGroupId?: string
+): PageSnapshotElement {
+  const ph = (projected.placeholder ?? {}) as Record<string, unknown>
+  return {
+    objectId,
+    kind: String(projected.kind ?? 'unknown'),
+    rectPt: snapshotRect(projected),
+    ...(typeof ph.type === 'string' ? { placeholderType: ph.type } : {}),
+    ...(typeof ph.index === 'number' ? { placeholderIndex: ph.index } : {}),
+    text: snapshotText(projected),
+    ...(parentGroupId !== undefined ? { parentGroupId } : {}),
+  }
 }
 
 export interface PageSnapshot {
   pageWidthPt: number
   pageHeightPt: number
   elements: PageSnapshotElement[]
+  /**
+   * TASK-090: presentation theme colors ({THEME_ROLE: '#RRGGBB'}) resolved
+   * from the deck masters when available; null when the deck exposes no
+   * usable scheme. Renderers use contrast-safe roles with palette fallback.
+   */
+  themeColors?: Record<string, string> | null
 }
 
 function snapshotRect(projected: Record<string, unknown>): PageSnapshotElement['rectPt'] {
@@ -1309,21 +1414,118 @@ export async function fetchPageSnapshot(
   }
   const slide = (pres.slides ?? []).find((s) => s.objectId === pageObjectId)
   if (!slide) fail('pageObjectId', 'does not match any slide in this presentation.')
-  const elements: PageSnapshotElement[] = []
-  for (const el of slide.pageElements ?? []) {
-    if (!el.objectId) continue
-    const projected = projectPageElement(el)
-    const ph = (projected.placeholder ?? {}) as Record<string, unknown>
-    elements.push({
-      objectId: el.objectId,
-      kind: String(projected.kind ?? 'unknown'),
-      rectPt: snapshotRect(projected),
-      ...(typeof ph.type === 'string' ? { placeholderType: ph.type } : {}),
-      ...(typeof ph.index === 'number' ? { placeholderIndex: ph.index } : {}),
-      text: snapshotText(projected),
+  // TASK-089: group-aware inventory (shells + members, deterministic).
+  const elements = buildSnapshotInventory(slide.pageElements ?? [])
+  // TASK-090: best-effort theme resolution (never throws — palette fallback).
+  const themeColors = await fetchThemeColors(token, presentationId)
+  return { pageWidthPt, pageHeightPt, elements, themeColors }
+}
+
+/**
+ * TASK-090: resolve presentation theme colors ({ROLE: '#RRGGBB'}) from deck
+ * masters. Best-effort: any failure (unknown field shape, API error) yields
+ * null and renderers keep palette tokens. Never throws.
+ */
+export async function fetchThemeColors(
+  token: string,
+  presentationId: string
+): Promise<Record<string, string> | null> {
+  try {
+    const pres = await googleRequest<{
+      masters?: Array<{
+        pageProperties?: {
+          colorScheme?: { colors?: Array<{ type?: string; color?: { rgbColor?: GoogleRgb } }> }
+        }
+      }>
+    }>({
+      method: 'GET',
+      url: `https://slides.googleapis.com/v1/presentations/${presentationId}`,
+      params: { fields: 'masters(pageProperties(colorScheme))' },
+      token,
     })
+    for (const m of pres.masters ?? []) {
+      const out: Record<string, string> = {}
+      for (const entry of m.pageProperties?.colorScheme?.colors ?? []) {
+        if (!entry.type) continue
+        const hex = hexFromRgb(entry.color?.rgbColor)
+        if (hex) out[entry.type] = hex
+      }
+      if (Object.keys(out).length > 0) return out
+    }
+    return null
+  } catch {
+    return null
   }
-  return { pageWidthPt, pageHeightPt, elements }
+}
+
+/**
+ * TASK-090: native page-background request from a theme BACKGROUND1 role.
+ * Only light, non-white tints qualify (luminance gate): ink body text stays
+ * readable by construction. Dark/absent/white themes yield null (no-op) —
+ * renderers must never assume a dark canvas.
+ */
+export function themeBackgroundRequest(
+  pageObjectId: string,
+  theme: Record<string, string> | null | undefined
+): GoogleRequest | null {
+  const bg = theme?.BACKGROUND1
+  if (typeof bg !== 'string' || !/^#[0-9a-f]{6}$/i.test(bg)) return null
+  const hex = bg.toUpperCase()
+  if (hex === '#FFFFFF') return null
+  const lum = themeHexLuminance(hex)
+  if (!Number.isFinite(lum) || lum < 0.5) return null
+  return buildUpdatePageBackground(pageObjectId, { backgroundHex: hex })
+}
+
+/** Relative luminance of #RRGGBB (local copy; see geometry luminance). */
+function themeHexLuminance(hex: string): number {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return NaN
+  const c = [0, 2, 4].map((o) => {
+    const v = parseInt(m[1].slice(o, o + 2), 16) / 255
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+  })
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+}
+
+/**
+ * TASK-089: group-aware snapshot inventory (pure, deterministic, unit-tested).
+ * Every addressable object relevant to compose ownership and QA — top-level
+ * elements AND group members — appears exactly once, shell first then its
+ * members. Members carry parentGroupId; shells keep kind 'group'.
+ */
+export function buildSnapshotInventory(pageElements: GooglePageElement[]): PageSnapshotElement[] {
+  const elements: PageSnapshotElement[] = []
+  const seen = new Set<string>()
+  const pushElement = (objectId: string, projected: Record<string, unknown>, parentGroupId?: string): void => {
+    if (seen.has(objectId)) return
+    seen.add(objectId)
+    elements.push(toSnapshotElement(objectId, projected, parentGroupId))
+  }
+  const pushMembers = (shellId: string, projected: Record<string, unknown>, depth: number): void => {
+    if (depth > SNAPSHOT_GROUP_MAX_DEPTH) return
+    const group = (projected.group ?? {}) as Record<string, unknown>
+    const members = group.members
+    if (!Array.isArray(members)) return
+    for (const m of members) {
+      if (!m || typeof m !== 'object') continue
+      const rec = m as Record<string, unknown>
+      const childId = rec.objectId
+      if (typeof childId !== 'string' || childId.length === 0 || seen.has(childId)) continue
+      seen.add(childId)
+      elements.push(toSnapshotElement(childId, rec, shellId))
+      // Recurse defensively; Google groups cannot nest, so depth > 1 only
+      // triggers on malformed input and terminates via the depth bound.
+      pushMembers(childId, rec, depth + 1)
+    }
+  }
+  for (const el of pageElements) {
+    if (!el.objectId || seen.has(el.objectId)) continue
+    const projected = projectPageElement(el)
+    pushElement(el.objectId, projected)
+    pushMembers(el.objectId, projected, 1)
+  }
+  return elements
 }
 
 /** TASK-084: validate group children against live page kinds (docs exclusions). */

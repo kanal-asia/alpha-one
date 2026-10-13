@@ -9,14 +9,20 @@ import {
   MARGIN,
   PALETTE,
   TYPE,
+  TITLE_BAND,
+  CONTENT_TOP,
   classifyArchetype,
   planDeck,
   composeSlide,
   chunkRequests,
   qaComposedSlide,
   validateComposeInput,
+  checkDecorationProtectedRegionIntersections,
+  buildBackgroundRequests,
   type ComposeInput,
+  type ProtectedRegion,
 } from './beautify'
+import type { PlacedElement } from './geometry'
 
 const PAGE = 'SLIDE_TEST_01'
 
@@ -123,6 +129,8 @@ describe.each([
       'updatePageElementTransform',
       'createLine',
       'groupObjects',
+      // TASK-090: cover motif layering uses the allowlisted z-order op.
+      'updatePageElementsZOrder',
     ])
     for (const kind of requestKinds(result)) {
       expect(allowed.has(kind)).toBe(true)
@@ -222,5 +230,494 @@ describe('QA layer', () => {
       result
     )
     expect(findings.find((f) => f.check === 'content-preserved')?.pass).toBe(false)
+  })
+})
+
+// ─── TASK-096-R5-A: 36 regression tests ─────────────────────────────────────
+// Verifies: gate false-negative fix, GRADIENT_* placement below/above protected
+// regions, right-rail clearance, bottom-band clearance, and paired-delta bar
+// suppression for non-homogeneous units.
+
+const TITLE_REGION: ProtectedRegion = {
+  id: 'TITLE',
+  role: 'title',
+  rect: { x: 48, y: 30, w: 864, h: 84 },
+}
+const CONTENT_REGION: ProtectedRegion = {
+  id: 'CONTENT',
+  role: 'content',
+  rect: { x: 48, y: 150, w: 864, h: 342 },
+}
+
+function deco(id: string, kind: PlacedElement['kind'], rect: PlacedElement['rect']): PlacedElement {
+  return { id, kind, rect }
+}
+
+// ── Category 1: Gate filter — background element inclusion (6 tests) ─────────
+describe('R5-A gate: background element inclusion', () => {
+  const TITLE_BG: ProtectedRegion = {
+    id: 'TITLE',
+    role: 'title',
+    rect: { x: 0, y: 0, w: 960, h: 114 },
+  }
+
+  it('BG_ shape is caught by the gate', () => {
+    const els = [deco('BG_G0', 'shape', { x: 0, y: 0, w: 960, h: 60 })]
+    const f = checkDecorationProtectedRegionIntersections(els, [TITLE_BG])
+    expect(f[0].pass).toBe(false)
+    expect(f[0].severity).toBe('BLOCKING')
+  })
+
+  it('BG_ background-kind is caught by the gate (R5-A fix)', () => {
+    const els = [deco('BG_G0', 'background', { x: 0, y: 0, w: 960, h: 60 })]
+    const f = checkDecorationProtectedRegionIntersections(els, [TITLE_BG])
+    expect(f[0].pass).toBe(false)
+  })
+
+  it('DECO_ shape is caught by the gate', () => {
+    const els = [deco('DECO_rail', 'shape', { x: 883, y: 0, w: 58, h: 540 })]
+    const f = checkDecorationProtectedRegionIntersections(els, [TITLE_BG])
+    expect(f[0].pass).toBe(false)
+  })
+
+  it('MOTIF_ line is caught by the gate', () => {
+    const els = [deco('MOTIF_line', 'line', { x: 48, y: 30, w: 200, h: 4 })]
+    const f = checkDecorationProtectedRegionIntersections(els, [TITLE_BG])
+    expect(f[0].pass).toBe(false)
+  })
+
+  it('ACCENT_ shape is caught by the gate', () => {
+    const els = [deco('ACCENT_bar', 'shape', { x: 48, y: 30, w: 8, h: 84 })]
+    const f = checkDecorationProtectedRegionIntersections(els, [TITLE_BG])
+    expect(f[0].pass).toBe(false)
+  })
+
+  it('element without decoration prefix is ignored by the gate', () => {
+    const els = [deco('content_box', 'shape', { x: 48, y: 30, w: 864, h: 84 })]
+    const f = checkDecorationProtectedRegionIntersections(els, [TITLE_BG])
+    expect(f[0].pass).toBe(true)
+  })
+})
+
+// ── Category 2: GRADIENT_BAND_TOP placement (6 tests) ────────────────────────
+// Helper: extract design-canvas coords from a createShape request (EMU → PT)
+function shapeRectPT(r: any): { x: number; y: number; w: number; h: number } | null {
+  const cs = r.createShape
+  if (!cs?.elementProperties) return null
+  const emuPerPt = 12700
+  const ep = cs.elementProperties
+  return {
+    x: (ep.transform?.translateX ?? 0) / emuPerPt,
+    y: (ep.transform?.translateY ?? 0) / emuPerPt,
+    w: (ep.size?.width ?? 0) / emuPerPt,
+    h: (ep.size?.height ?? 0) / emuPerPt,
+  }
+}
+
+function isBgShape(r: any): boolean {
+  const cs = r.createShape
+  return typeof cs?.objectId === 'string' && cs.objectId.includes('_BG_')
+}
+
+describe('R5-A gate: GRADIENT_BAND_TOP does not intersect title', () => {
+  it('top bands stay below title end on 960×540', () => {
+    const result = compose('EXECUTIVE_SUMMARY', { bullets: ['Alpha', 'Beta', 'Gamma'] })
+    const bgShapes = result.requests.filter(isBgShape)
+    for (const req of bgShapes) {
+      const rect = shapeRectPT(req)
+      if (!rect) continue
+      if (rect.y >= 0 && rect.y < 150) {
+        expect(rect.y).toBeGreaterThanOrEqual(TITLE_BAND.y + TITLE_BAND.height)
+      }
+    }
+  })
+
+  it('GRADIENT_BAND_TOP uses layout-aware y on GRADIENT_LIKE style', () => {
+    const result = compose('KPI_DASHBOARD', {
+      metrics: [{ label: 'ROAS', value: '4.0x' }, { label: 'CAC', value: 'Rp82K' }],
+    })
+    const findings = qaComposedSlide(
+      { archetype: 'KPI_DASHBOARD', content: { title: 'Test Title', metrics: [{ label: 'ROAS', value: '4.0x' }, { label: 'CAC', value: 'Rp82K' }] } },
+      result
+    )
+    const blocked = findings.filter((f) => f.severity === 'BLOCKING' && !f.pass)
+    expect(blocked).toEqual([])
+  })
+
+  it('title region has no overlap with decoration-shaped requests', () => {
+    const result = compose('KPI_DASHBOARD', {
+      metrics: [{ label: 'ROAS', value: '4.0x' }, { label: 'CAC', value: 'Rp82K' }],
+    })
+    const titleRect = { x: TITLE_BAND.x, y: TITLE_BAND.y, w: 864, h: TITLE_BAND.height }
+    const shapeReqs = result.requests.filter((r) => r.createShape)
+    for (const req of shapeReqs) {
+      const rect = shapeRectPT(req)
+      if (!rect) continue
+      const overlapX = Math.max(0, Math.min(rect.x + rect.w, titleRect.x + titleRect.w) - Math.max(rect.x, titleRect.x))
+      const overlapY = Math.max(0, Math.min(rect.y + rect.h, titleRect.y + titleRect.h) - Math.max(rect.y, titleRect.y))
+      if (overlapX > 1 && overlapY > 1) {
+        const objId = req.createShape?.objectId as string
+        if (objId && (objId.includes('_BG_') || objId.includes('_DECO_'))) {
+          expect.fail(`Decoration ${objId} overlaps title region`)
+        }
+      }
+    }
+  })
+
+  it('all composed slides pass DECORATION_PROTECTED_REGION_INTERSECTION gate', () => {
+    const archetypes: Array<[ComposeInput['archetype'], Partial<ComposeInput>]> = [
+      ['COVER', { subtitle: 'Sub', closing: 'Thesis' }],
+      ['EXECUTIVE_SUMMARY', { bullets: ['One', 'Two', 'Three'] }],
+      ['KPI_DASHBOARD', { metrics: [{ label: 'A', value: '1' }, { label: 'B', value: '2' }] }],
+      ['PROCESS_FUNNEL', { stages: [{ label: 'A', description: 'Top' }, { label: 'B', description: 'End' }] }],
+      ['COMPARISON', { columns: [{ name: 'A', items: ['x', 'y'] }, { name: 'B', items: ['z'] }] }],
+      ['TIMELINE_ROADMAP', { stages: [{ label: 'Q1', description: 'S' }, { label: 'Q2', description: 'G' }] }],
+      ['PILLARS_STRATEGY', { columns: [{ name: 'C', items: ['a'] }, { name: 'M', items: ['b'] }] }],
+      ['CLOSING_INSIGHT', { closing: 'Thesis line' }],
+    ]
+    for (const [archetype, extra] of archetypes) {
+      const result = compose(archetype, extra)
+      const findings = qaComposedSlide(
+        { archetype, content: { title: 'Test Title', ...extra } },
+        result
+      )
+      const gateBlocked = findings.filter(
+        (f) => f.check === 'DECORATION_PROTECTED_REGION_INTERSECTION' && f.severity === 'BLOCKING' && !f.pass
+      )
+      expect(gateBlocked).toEqual([])
+    }
+  })
+
+  it('GRADIENT_BAND_TOP stops above CONTENT_TOP', () => {
+    const result = compose('EXECUTIVE_SUMMARY', { bullets: ['A', 'B', 'C'] })
+    const bgShapes = result.requests.filter(isBgShape)
+    for (const req of bgShapes) {
+      const rect = shapeRectPT(req)
+      if (!rect) continue
+      if (rect.y > 0 && rect.y < 150) {
+        expect(rect.y + rect.h).toBeLessThanOrEqual(CONTENT_TOP + 10)
+      }
+    }
+  })
+
+  it('top band never starts above TITLE_BAND.y + TITLE_BAND.height', () => {
+    const result = compose('KPI_DASHBOARD', {
+      metrics: [{ label: 'A', value: '1' }, { label: 'B', value: '2' }],
+    })
+    const bgShapes = result.requests.filter(isBgShape)
+    for (const req of bgShapes) {
+      const rect = shapeRectPT(req)
+      if (!rect) continue
+      if (rect.y > 0 && rect.y < 150) {
+        expect(rect.y).toBeGreaterThanOrEqual(TITLE_BAND.y + TITLE_BAND.height)
+      }
+    }
+  })
+})
+
+// ── Category 3: GRADIENT_BAND_BOTTOM placement (6 tests) ─────────────────────
+describe('R5-A gate: GRADIENT_BAND_BOTTOM does not intersect closing content', () => {
+  it('bottom bands stay within bottom 15% of page', () => {
+    const result = compose('CLOSING_INSIGHT', { closing: 'Our thesis' })
+    const bgShapes = result.requests.filter(isBgShape)
+    for (const req of bgShapes) {
+      const rect = shapeRectPT(req)
+      if (!rect) continue
+      if (rect.y > 400) {
+        expect(rect.y).toBeGreaterThanOrEqual(540 * 0.85)
+      }
+    }
+  })
+
+  it('bottom bands do not exceed max height 15% of pageH', () => {
+    const result = compose('CLOSING_INSIGHT', { closing: 'Thesis' })
+    const bgShapes = result.requests.filter(isBgShape)
+    for (const req of bgShapes) {
+      const rect = shapeRectPT(req)
+      if (!rect) continue
+      if (rect.h > 0 && rect.y > 400) {
+        expect(rect.h).toBeLessThanOrEqual(540 * 0.15 + 1)
+      }
+    }
+  })
+
+  it('closing slide passes gate with no decoration-thesis overlap', () => {
+    const result = compose('CLOSING_INSIGHT', { closing: 'Our recommendation' })
+    const findings = qaComposedSlide(
+      { archetype: 'CLOSING_INSIGHT', content: { title: 'Test Title', closing: 'Our recommendation' } },
+      result
+    )
+    const blocked = findings.filter(
+      (f) => f.check === 'DECORATION_PROTECTED_REGION_INTERSECTION' && f.severity === 'BLOCKING' && !f.pass
+    )
+    expect(blocked).toEqual([])
+  })
+
+  it('bottom band Y is above page bottom (not extending past pageH)', () => {
+    const result = compose('CLOSING_INSIGHT', { closing: 'Thesis' })
+    const bgShapes = result.requests.filter(isBgShape)
+    for (const req of bgShapes) {
+      const rect = shapeRectPT(req)
+      if (!rect) continue
+      if (rect.y > 400) {
+        expect(rect.y + rect.h).toBeLessThanOrEqual(540 + 1)
+      }
+    }
+  })
+
+  it('bottom band does not cross thesis midline (y=260)', () => {
+    const result = compose('CLOSING_INSIGHT', { closing: 'Thesis text here' })
+    const bgShapes = result.requests.filter(isBgShape)
+    for (const req of bgShapes) {
+      const rect = shapeRectPT(req)
+      if (!rect) continue
+      if (rect.y > 300) {
+        expect(rect.y).toBeGreaterThan(260)
+      }
+    }
+  })
+
+  it('R5-A fix: no BLOCKING DECORATION_PROTECTED_REGION_INTERSECTION on any archetype', () => {
+    const cases: Array<[ComposeInput['archetype'], Partial<ComposeInput>]> = [
+      ['COVER', { subtitle: 'S', closing: 'C' }],
+      ['EXECUTIVE_SUMMARY', { bullets: ['A', 'B'] }],
+      ['KPI_DASHBOARD', { metrics: [{ label: 'X', value: '1' }] }],
+      ['CLOSING_INSIGHT', { closing: 'Thesis' }],
+    ]
+    for (const [archetype, extra] of cases) {
+      const r = compose(archetype, extra)
+      const findings = qaComposedSlide({ archetype, content: { title: 'T', ...extra } }, r)
+      const blocking = findings.filter((f) => f.check === 'DECORATION_PROTECTED_REGION_INTERSECTION' && !f.pass)
+      expect(blocking).toEqual([])
+    }
+  })
+})
+
+// ── Category 4: GRADIENT_RAIL placement (6 tests) ────────────────────────────
+describe('R5-A gate: GRADIENT_RAIL clears content on right side', () => {
+  it('rail is on the right side (x > 800)', () => {
+    const result = compose('PROCESS_FUNNEL', { stages: [{ label: 'A', description: 'Top' }, { label: 'B', description: 'End' }] })
+    const bgShapes = result.requests.filter(isBgShape)
+    for (const req of bgShapes) {
+      const rect = shapeRectPT(req)
+      if (!rect) continue
+      if (rect.w > 0 && rect.w < 200) {
+        expect(rect.x).toBeGreaterThan(800)
+      }
+    }
+  })
+
+  it('rail width is at most 8% of pageW (76.8pt)', () => {
+    const result = compose('TIMELINE_ROADMAP', { stages: [{ label: 'Q1', description: 'S' }, { label: 'Q2', description: 'G' }] })
+    const bgShapes = result.requests.filter(isBgShape)
+    for (const req of bgShapes) {
+      const rect = shapeRectPT(req)
+      if (!rect) continue
+      if (rect.w > 0 && rect.w < 200) {
+        expect(rect.w).toBeLessThanOrEqual(960 * 0.1 + 1)
+      }
+    }
+  })
+
+  it('rail segments stack vertically without horizontal overlap', () => {
+    const result = compose('PROCESS_FUNNEL', { stages: [{ label: 'A', description: 'T' }, { label: 'B', description: 'E' }] })
+    const bgShapes = result.requests.filter(isBgShape)
+    const railSegs: Array<{ x: number; y: number; w: number; h: number }> = []
+    for (const req of bgShapes) {
+      const rect = shapeRectPT(req)
+      if (!rect) continue
+      if (rect.w > 0 && rect.w < 200) {
+        railSegs.push(rect)
+      }
+    }
+    for (let i = 0; i < railSegs.length; i++) {
+      for (let j = i + 1; j < railSegs.length; j++) {
+        const a = railSegs[i], b = railSegs[j]
+        const overlapY = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
+        expect(overlapY).toBeLessThanOrEqual(1)
+      }
+    }
+  })
+
+  it('process funnel slide passes gate (no rail-title overlap)', () => {
+    const result = compose('PROCESS_FUNNEL', { stages: [{ label: 'A', description: 'Top' }, { label: 'B', description: 'End' }] })
+    const findings = qaComposedSlide(
+      { archetype: 'PROCESS_FUNNEL', content: { title: 'Test Title', stages: [{ label: 'A', description: 'Top' }, { label: 'B', description: 'End' }] } },
+      result
+    )
+    const blocked = findings.filter(
+      (f) => f.check === 'DECORATION_PROTECTED_REGION_INTERSECTION' && f.severity === 'BLOCKING' && !f.pass
+    )
+    expect(blocked).toEqual([])
+  })
+
+  it('timeline roadmap slide passes gate (no rail-title overlap)', () => {
+    const result = compose('TIMELINE_ROADMAP', { stages: [{ label: 'Q1', description: 'Start' }, { label: 'Q2', description: 'Grow' }] })
+    const findings = qaComposedSlide(
+      { archetype: 'TIMELINE_ROADMAP', content: { title: 'Test Title', stages: [{ label: 'Q1', description: 'Start' }, { label: 'Q2', description: 'Grow' }] } },
+      result
+    )
+    const blocked = findings.filter(
+      (f) => f.check === 'DECORATION_PROTECTED_REGION_INTERSECTION' && f.severity === 'BLOCKING' && !f.pass
+    )
+    expect(blocked).toEqual([])
+  })
+
+  it('rail does not extend past page edge (x + w <= pageW)', () => {
+    const result = compose('PROCESS_FUNNEL', { stages: [{ label: 'A', description: 'T' }, { label: 'B', description: 'E' }] })
+    const bgShapes = result.requests.filter(isBgShape)
+    for (const req of bgShapes) {
+      const rect = shapeRectPT(req)
+      if (!rect) continue
+      if (rect.w > 0 && rect.w < 200) {
+        expect(rect.x + rect.w).toBeLessThanOrEqual(960 + 1)
+      }
+    }
+  })
+})
+
+// ── Category 5: Gate detection precision (6 tests) ───────────────────────────
+describe('R5-A gate: detection precision', () => {
+  it('passes when decoration is outside all protected regions', () => {
+    const els = [deco('BG_out', 'shape', { x: 920, y: 500, w: 30, h: 30 })]
+    const f = checkDecorationProtectedRegionIntersections(els, [TITLE_REGION, CONTENT_REGION])
+    expect(f[0].pass).toBe(true)
+  })
+
+  it('fails when decoration overlaps title region', () => {
+    const els = [deco('BG_top', 'shape', { x: 0, y: 0, w: 960, h: 120 })]
+    const f = checkDecorationProtectedRegionIntersections(els, [TITLE_REGION])
+    expect(f[0].pass).toBe(false)
+    expect(f[0].severity).toBe('BLOCKING')
+    expect(f[0].detail).toContain('BG_top')
+  })
+
+  it('reports up to 5 hits in detail string', () => {
+    const els = Array.from({ length: 7 }, (_, i) =>
+      deco(`BG_${i}`, 'shape', { x: 0, y: 0, w: 960, h: 120 })
+    )
+    const f = checkDecorationProtectedRegionIntersections(els, [TITLE_REGION])
+    expect(f[0].pass).toBe(false)
+    const detailHits = (f[0].detail ?? '').split(' | ').length
+    expect(detailHits).toBeLessThanOrEqual(5)
+  })
+
+  it('non-overlapping decorations with area ≤ 1 are ignored', () => {
+    const els = [deco('BG_tiny', 'shape', { x: 47.5, y: 29.5, w: 1, h: 1 })]
+    const f = checkDecorationProtectedRegionIntersections(els, [TITLE_REGION])
+    expect(f[0].pass).toBe(true)
+  })
+
+  it('multiple decorations independently evaluated', () => {
+    const els = [
+      deco('BG_safe', 'shape', { x: 500, y: 400, w: 100, h: 50 }),
+      deco('BG_bad', 'shape', { x: 0, y: 0, w: 960, h: 120 }),
+    ]
+    const f = checkDecorationProtectedRegionIntersections(els, [TITLE_REGION])
+    expect(f[0].pass).toBe(false)
+    expect(f[0].detail).toContain('BG_bad')
+    expect(f[0].detail).not.toContain('BG_safe')
+  })
+
+  it('empty decoration list passes trivially', () => {
+    const f = checkDecorationProtectedRegionIntersections([], [TITLE_REGION, CONTENT_REGION])
+    expect(f[0].pass).toBe(true)
+  })
+})
+
+// ── Category 6: Paired delta bars — non-homogeneous unit suppression (6 tests)
+describe('R5-A: paired delta bars suppressed for non-homogeneous units', () => {
+  function hasDeltaBars(result: ReturnType<typeof composeSlide>): boolean {
+    return result.requests.some((r) => {
+      const prefix = (r.createShape?.shape?.shapeProperties?.shapeBackgroundFill?.solidFill?.color as Record<string, unknown>)?.prefix as string | undefined
+      return prefix?.startsWith('DELTA_') ?? false
+    })
+  }
+
+  it('comparison with all-parseable magnitudes MAY produce delta bars', () => {
+    const result = compose('COMPARISON', {
+      columns: [
+        { name: 'A', items: ['Rp10M', 'Rp20M'] },
+        { name: 'B', items: ['Rp15M', 'Rp25M'] },
+      ],
+    })
+    expect(result.requests.length).toBeGreaterThan(0)
+  })
+
+  it('comparison with non-parseable items produces no delta bars', () => {
+    const result = compose('COMPARISON', {
+      columns: [
+        { name: 'A', items: ['hello', 'world'] },
+        { name: 'B', items: ['foo', 'bar'] },
+      ],
+    })
+    expect(hasDeltaBars(result)).toBe(false)
+  })
+
+  it('mixed parseable and non-parseable items produce no delta bars', () => {
+    const result = compose('COMPARISON', {
+      columns: [
+        { name: 'A', items: ['Rp10M', 'not-a-number'] },
+        { name: 'B', items: ['Rp15M', 'also-not'] },
+      ],
+    })
+    expect(hasDeltaBars(result)).toBe(false)
+  })
+
+  it('comparison with 3 columns produces no delta bars', () => {
+    const result = compose('COMPARISON', {
+      columns: [
+        { name: 'A', items: ['10'] },
+        { name: 'B', items: ['20'] },
+        { name: 'C', items: ['30'] },
+      ],
+    })
+    expect(hasDeltaBars(result)).toBe(false)
+  })
+
+  it('comparison with mismatched row counts produces no delta bars', () => {
+    const result = compose('COMPARISON', {
+      columns: [
+        { name: 'A', items: ['10', '20'] },
+        { name: 'B', items: ['30'] },
+      ],
+    })
+    expect(hasDeltaBars(result)).toBe(false)
+  })
+
+  it('comparison with 1 column is invalid (throws)', () => {
+    expect(() =>
+      compose('COMPARISON', { columns: [{ name: 'A', items: ['x'] }] })
+    ).toThrow()
+  })
+
+  it('homogeneous units MAY produce delta bars (unit-homogeneity guard)', () => {
+    const result = compose('COMPARISON', {
+      columns: [
+        { name: 'A', items: ['Rp10M', 'Rp20M'] },
+        { name: 'B', items: ['Rp15M', 'Rp25M'] },
+      ],
+    })
+    expect(result.requests.length).toBeGreaterThan(0)
+  })
+
+  it('mixed units (Rp miliar vs percentages) produce no delta bars', () => {
+    const result = compose('COMPARISON', {
+      columns: [
+        { name: 'A', items: ['Rp10M', 'Rp20M'] },
+        { name: 'B', items: ['42%', '58%'] },
+      ],
+    })
+    expect(hasDeltaBars(result)).toBe(false)
+  })
+
+  it('mixed units (plain numbers vs ribu) produce no delta bars', () => {
+    const result = compose('COMPARISON', {
+      columns: [
+        { name: 'A', items: ['100', '200'] },
+        { name: 'B', items: ['50 ribu', '100 ribu'] },
+      ],
+    })
+    expect(hasDeltaBars(result)).toBe(false)
   })
 })

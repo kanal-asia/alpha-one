@@ -27,6 +27,7 @@ import {
   MAX_BATCH_OPS,
 } from './visual'
 import { handleComposeSlide, ARCHETYPES } from './beautify'
+import { handleComposeDeck, listThemeCatalog } from './deck'
 
 // ---------------------------------------------------------------------------
 // Validation helpers
@@ -361,7 +362,7 @@ const TOOLS: McpTool[] = [
   },
   {
     name: 'slides_create_presentation',
-    description: 'Create a new Google Slides presentation with the given title.',
+    description: 'Create a new EMPTY Google Slides presentation with the given title. For any new deck with 2 or more slides, do not build it with this tool plus slides_create_slide/slides_compose_slide loops — use slides_compose_deck exactly once instead.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -541,7 +542,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'slides_compose_slide',
     description:
-      'Compose one professional slide from a structured plan (Alpha Beautify). Archetypes: COVER, EXECUTIVE_SUMMARY, KPI_DASHBOARD, PROCESS_FUNNEL, COMPARISON, TIMELINE_ROADMAP, PILLARS_STRATEGY, CLOSING_INSIGHT. Provide title plus archetype content (bullets/metrics/stages/columns). Renders native editable shapes/text with the professional design system, then runs structural QA. Verify with slides_get_page.',
+      'Compose one professional slide from a structured plan (Alpha Beautify). Use only for an explicit single-slide request, compatibility with one-slide flows, or editing/composing one existing slide. For any new deck with 2 or more slides, use slides_compose_deck exactly once instead; do not create deck-generation loops with slides_create_presentation, slides_create_slide, and slides_compose_slide. Archetypes: COVER, EXECUTIVE_SUMMARY, KPI_DASHBOARD, PROCESS_FUNNEL, COMPARISON, TIMELINE_ROADMAP, PILLARS_STRATEGY, CLOSING_INSIGHT. KPI_DASHBOARD = independent business KPIs ONLY (not channel rankings, budget allocations, or percentage distributions — use COMPARISON for those). PROCESS_FUNNEL = ordered conversion stages. PILLARS_STRATEGY = peer pillars; sharedGoal is optional, but when provided it is rendered as a foundation and never dropped. Provide title plus archetype content (bullets/metrics/stages/columns). Renders native editable shapes/text with the professional design system, then runs structural QA. Verify with slides_get_page.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -553,7 +554,7 @@ const TOOLS: McpTool[] = [
         bullets: { type: 'array', items: { type: 'string' }, description: 'Bullets (summary/pillar content).' },
         metrics: {
           type: 'array',
-          description: 'KPI metrics (KPI_DASHBOARD, max 6): {label, value, note?}.',
+          description: 'KPI metrics (KPI_DASHBOARD only, max 6): {label, value, note?}. Do NOT use for channel rankings or budget allocations — use COMPARISON columns instead.',
           items: { type: 'object' },
         },
         stages: {
@@ -567,8 +568,75 @@ const TOOLS: McpTool[] = [
           items: { type: 'object' },
         },
         closing: { type: 'string', maxLength: 300, description: 'Closing statement (CLOSING_INSIGHT).' },
+        sharedGoal: { type: 'string', maxLength: 300, description: 'Optional shared goal statement rendered as foundation (PILLARS_STRATEGY). When source states one, include it; it is never dropped.' },
+        themeId: { type: 'string', maxLength: 60, description: 'Alpha theme ID (e.g. EXECUTIVE_NAVY, MODERN_GRADIENT, BOLD_TECH). Optional; inferred from context if absent.' },
+        userPrompt: { type: 'string', maxLength: 500, description: 'Original user prompt text for theme inference. Optional; used when themeId is absent to infer theme from user intent.' },
+        sourceFacts: {
+          type: 'array',
+          description: 'Authoritative per-slide source lines, verbatim from the user (max 8 lines, 300 chars each). Optional; when present the engine gates compose input against these facts BEFORE any write and blocks merges, omissions, renames, and value changes. Narrative-only lines are flexible and never compared. Never style instructions, credentials, or prompts.',
+          items: { type: 'string', maxLength: 300 },
+          maxItems: 8,
+        },
       },
       required: ['presentationId', 'pageObjectId', 'archetype', 'title'],
+    },
+  },
+  {
+    name: 'slides_list_themes',
+    description:
+      'List the installed Alpha Beautify theme catalog. Returns themeId, displayName, version, tone, supported archetypes, palette, background technique, image support, template source, and production/disabled status. Use this before deck generation when the user has not already selected a themeId.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        locale: { type: 'string', description: 'Optional locale hint.' },
+        includePreviewUrls: { type: 'boolean', description: 'Include previewUrl fields when available.' },
+        includeCapabilities: { type: 'boolean', description: 'Include per-theme capability flags.' },
+      },
+    },
+  },
+  {
+    name: 'slides_compose_deck',
+    description:
+      'Create and populate a complete new Google Slides deck from one semantic Alpha Beautify DeckSpec. Use this for any new deck with 2 or more slides; call it exactly once with the complete typed topology. Do not pre-create the deck, create slides, call slides_compose_slide per slide, or run agent-driven archetype retries for deck generation. The agent supplies intent, themeId, slide narratives, items, aggregate facts, headline metrics, annotations, source notes, and approved media URLs; the engine selects archetypes/variants, separates aggregates from peer items, preflights all slides, writes the deck in one atomic content batch, performs structural readback, and returns honest proof statuses. Default failurePolicy is ALL_OR_NOTHING; rendered visual QA remains a separate proof scope.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', maxLength: 200 },
+        purpose: { type: 'string', maxLength: 300 },
+        audience: { type: 'string', maxLength: 300 },
+        locale: { type: 'string', maxLength: 40 },
+        themeId: { type: 'string', maxLength: 80, description: 'Alpha catalog themeId, e.g. ALPHA_LIGHT_EXECUTIVE.' },
+        slideCount: { type: 'integer', minimum: 1, maximum: 20 },
+        requestedSlideCount: { type: 'integer', minimum: 1, maximum: 20 },
+        outputFolderId: { type: 'string', description: 'Reserved for Drive move/copy support.' },
+        failurePolicy: { type: 'string', enum: ['ALL_OR_NOTHING', 'STAGING_REPAIR', 'PARTIAL_EXPLICIT'] },
+        visualQaPolicy: { type: 'string', enum: ['STRUCTURAL_ONLY', 'RENDERED_REQUIRED', 'HUMAN_REQUIRED'] },
+        slides: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 20,
+          items: {
+            type: 'object',
+            properties: {
+              slideKey: { type: 'string' },
+              narrativeRole: { type: 'string' },
+              title: { type: 'string' },
+              subtitle: { type: 'string' },
+              items: { type: 'array', items: { type: 'object' } },
+              aggregate: { type: 'object' },
+              headlineMetrics: { type: 'array', items: { type: 'object' } },
+              annotations: { type: 'array', items: { type: 'string' } },
+              sharedGoal: { type: 'string' },
+              sourceNotes: { type: 'array', items: { type: 'string' } },
+              media: { type: 'array', items: { type: 'object' } },
+              preferredArchetype: { type: 'string', enum: [...ARCHETYPES] },
+              importance: { type: 'string', enum: ['low', 'normal', 'high'] },
+            },
+            required: ['slideKey', 'title'],
+          },
+        },
+      },
+      required: ['title', 'slides'],
     },
   },
   {
@@ -598,6 +666,9 @@ startMcpServer({
   tools: TOOLS,
   callTool: async (name, args) => {
     try {
+      if (name === 'slides_list_themes') {
+        return listThemeCatalog(args)
+      }
       const token = await import('../shared/google/auth').then((m) => m.getAccessToken())
       switch (name) {
         case 'slides_get_presentation':
@@ -624,6 +695,8 @@ startMcpServer({
           return await handleCreateSlide(token, args)
         case 'slides_compose_slide':
           return await handleComposeSlide(token, args)
+        case 'slides_compose_deck':
+          return await handleComposeDeck(token, args)
         case 'slides_batch_update':
           return await handleBatchUpdate(token, args)
         default:

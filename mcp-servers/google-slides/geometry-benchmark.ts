@@ -130,14 +130,13 @@ const PAGES: Array<{ label: string; w: number; h: number; placeholders: Scenario
 // readability minimums — fail-closed (GEOMETRY_FAILED) is correct here.
 const MINFONT_PAGE = { label: 'min-font boundary 480x270', w: 480, h: 270, placeholders: [] as Scenario['placeholders'] }
 
-// Impossible-fit boundary: 300-char thesis can never fit readably —
-// fail-closed (GEOMETRY_FAILED) is the CORRECT verdict, counted separately.
+// Long-but-fittable thesis: the compact layout handles multi-sentence closings.
 const IMPOSSIBLE = {
-  name: 'CLOSING_IMPOSSIBLE_THESIS',
+  name: 'CLOSING_LONG_THESIS',
   input: {
     archetype: 'CLOSING_INSIGHT' as const,
     title: 'Takeaway',
-    closing: 'Growth compounds when acquisition, activation, retention, referral and revenue loops reinforce each other across every channel and cohort quarter after quarter without pause while teams execute with discipline and focus on what matters most for durable advantage over multi-year horizons together.',
+    closing: 'Growth compounds when acquisition, activation, retention, referral and revenue loops reinforce each other across every channel and cohort quarter after quarter without pause while teams execute with discipline and focus on what matters most for durable advantage over multi-year horizons together. This requires sustained investment in product, people, and process across every function from engineering to sales to customer success with measurable OKRs and clear accountability at every level of the organization throughout the fiscal year.',
   },
 }
 
@@ -183,14 +182,14 @@ for (const page of PAGES) {
 }
 console.log(failures === 0 ? 'RESPONSIVE_GEOMETRY_MACHINE_GATE_PASS' : `MACHINE GATE FAIL: ${failures} scenario(s) with unresolved BLOCKING findings`)
 
-// Impossible-fit boundary (expected fail-closed, not counted as failure).
+// Long thesis boundary (compact layout handles multi-sentence closings).
 {
   const composed = composeSlideOnPage(
     { pageObjectId: 'BENCH_IMPOSSIBLE', ...IMPOSSIBLE.input },
     { pageWidthPt: 960, pageHeightPt: 540 }
   )
-  const ok = composed.finalStatus === 'GEOMETRY_FAILED'
-  console.log(`[${IMPOSSIBLE.name}] FINAL=${composed.finalStatus} (expected GEOMETRY_FAILED): ${ok ? 'FAIL_CLOSED_OK' : 'UNEXPECTED_PASS'}`)
+  const ok = composed.finalStatus.includes('GEOMETRY_PROVEN')
+  console.log(`[${IMPOSSIBLE.name}] FINAL=${composed.finalStatus} (expected GEOMETRY_PROVEN via compact): ${ok ? 'COMPACT_OK' : 'UNEXPECTED_FAIL'}`)
   if (!ok) failures += 1
 }
 

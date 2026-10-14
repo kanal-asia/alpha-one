@@ -298,6 +298,29 @@ function makeToolEvent(
   }
 }
 
+// TASK-ALPHA-SUBSCRIPTION-002: product session token carriage.
+ //
+ // When a real provider session exists, its access token is attached as
+ // `Authorization: Bearer` on execution requests so the server trust boundary
+ // (auth-context.ts) can resolve the canonical product identity. Rules:
+ // - unset by default: requests carry no Authorization header (unchanged behavior);
+ // - set ONLY with a real provider token via setProductSessionToken — NEVER
+ //   forward the legacy mock access token: the server fails closed on
+ //   unverifiable credentials, so a mock token would break execution;
+ // - the token is never copied into message bodies, prompts, or logs here.
+let productSessionToken: string | null = null
+
+export function setProductSessionToken(token: string | null): void {
+  productSessionToken =
+    typeof token === 'string' && token.length > 0 ? token : null
+}
+
+function productAuthHeaders(): Record<string, string> {
+  return productSessionToken !== null
+    ? { Authorization: `Bearer ${productSessionToken}` }
+    : {}
+}
+
 export class HTTPTransport implements OpenCodeTransport {
   private baseUrl: string
 
@@ -519,7 +542,9 @@ export class HTTPTransport implements OpenCodeTransport {
     }))
     const res = await fetch(`${this.baseUrl}${API_BASE}/chat/stream`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // Trusted identity travels ONLY here (Authorization header); the body
+      // carries no identity fields and the server ignores any it receives.
+      headers: { 'Content-Type': 'application/json', ...productAuthHeaders() },
       body: JSON.stringify({
         model: modelId,
         message: prompt,

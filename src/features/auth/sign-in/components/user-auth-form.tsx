@@ -32,6 +32,16 @@ interface UserAuthFormProps extends React.HTMLAttributes<HTMLFormElement> {
   redirectTo?: string
 }
 
+// TASK-ALPHA-SUBSCRIPTION-002: mock sign-in gate. The legacy mock success
+// path (mockUser + mock-access-token) must never silently grant access in a
+// production build. It stays available ONLY in dev builds or when explicitly
+// enabled with VITE_ALLOW_MOCK_AUTH=true (local development / automated UI
+// tests). Packaged production builds fail closed with an actionable error.
+export function isMockSignInAllowed(): boolean {
+  if (import.meta.env.DEV === true) return true
+  return import.meta.env.VITE_ALLOW_MOCK_AUTH === 'true'
+}
+
 export function UserAuthForm({
   className,
   redirectTo,
@@ -51,6 +61,15 @@ export function UserAuthForm({
 
   function onSubmit(data: z.infer<typeof formSchema>) {
     setIsLoading(true)
+
+    // Fail closed when no real provider is configured: never mint a session.
+    if (!isMockSignInAllowed()) {
+      setIsLoading(false)
+      toast.error(
+        'Sign-in is not configured in this build. Connect a supported identity provider to continue.'
+      )
+      return
+    }
 
     toast.promise(sleep(2000), {
       loading: 'Signing in...',

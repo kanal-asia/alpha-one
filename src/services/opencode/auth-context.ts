@@ -16,13 +16,12 @@
  * - Tokens are never logged, never attached to prompts/CLI env/provider
  *   payloads, and never persisted by this module.
  *
- * Clerk readiness (PROVEN gap): the Clerk scaffold (`src/routes/clerk`,
- * `@clerk/react`) has no credentials configured anywhere (no .env, no
- * `.env.example` entry) and no backend JWT/JWKS library is installed, so
- * `verifyClerkToken` fails closed until TASK-ALPHA-SUBSCRIPTION-002's
- * documented follow-up wires JWKS verification with real credentials.
- * The interface below is exactly what that follow-up implements — no
- * second auth system, no speculative verification.
+ * Clerk readiness (SUPERSEDED by TASK-ALPHA-SUBSCRIPTION-002A): the founder
+ * directed Google OpenID Connect as the product identity provider instead
+ * of Clerk — no Clerk application is created. The Clerk scaffold
+ * (`src/routes/clerk`, `@clerk/react`) remains inert UI. Verification below
+ * is Google ID-token verification (google-id-token.ts); the interface is
+ * unchanged — no second auth system, no speculative verification.
  */
 
 export type AuthContextKind = 'verified' | 'anonymous'
@@ -31,7 +30,7 @@ export interface ProductAuthContext {
   kind: AuthContextKind
   /** Stable product user id from verified credentials; null when anonymous. */
   productUserId: string | null
-  /** Identity provider that vouched for the subject (e.g. 'clerk'); null when anonymous. */
+  /** Identity provider that vouched for the subject ('google'); null when anonymous. */
   provider: string | null
   /** Explicit marker so downstream code can distinguish "no login" from "verified". */
   verified: boolean
@@ -42,7 +41,7 @@ export interface TokenVerification {
   productUserId?: string
   provider?: string
   /** Machine-readable failure reason (never includes token material). */
-  reason?: 'CLERK_NOT_CONFIGURED' | 'AUTHENTICATION_INVALID' | 'AUTHENTICATION_EXPIRED'
+  reason?: 'CLERK_NOT_CONFIGURED' | 'GOOGLE_NOT_CONFIGURED' | 'AUTHENTICATION_INVALID' | 'AUTHENTICATION_EXPIRED'
 }
 
 const BEARER_RE = /^Bearer\s+(\S+)$/i
@@ -57,32 +56,37 @@ export function extractBearerToken(
 }
 
 /**
- * Provider token verification entry point. Clerk path fails closed until
- * real JWKS verification is configured (see module doc). Returns a failure
- * — never anonymous — for any presented credential it cannot verify.
+ * Provider token verification entry point.
+ *
+ * TASK-ALPHA-SUBSCRIPTION-002A: Google OpenID Connect is the product identity
+ * provider (founder decision — no Clerk application). A presented Bearer
+ * token is verified as a Google ID token (google-id-token.ts): RS256
+ * signature against Google's JWKS, issuer, audience (= this app's
+ * GOOGLE_CLIENT_ID), and expiry. The canonical product identity is the
+ * verified `sub` claim — never email, never a body field.
+ *
+ * Fails closed: unverifiable tokens and missing configuration both return
+ * ok:false, which resolveAuthContext turns into rejection — never into an
+ * anonymous success.
  */
+import { verifyGoogleIdToken } from './google-id-token'
+
 export function verifyProviderToken(token: string): TokenVerification {
   void token
-  // No Clerk credentials are configured in any environment (PROVEN:
-  // no VITE_CLERK_PUBLISHABLE_KEY / CLERK_SECRET_KEY anywhere in repo or
-  // env examples), so no token can be verified yet. Fail closed.
-  return { ok: false, reason: 'CLERK_NOT_CONFIGURED' }
+  // Synchronous interface preserved for the existing contract tests; the
+  // async Google verification runs in resolveAuthContextAsync below.
+  // Any use of this sync path means "cannot verify" → fail closed.
+  return { ok: false, reason: 'GOOGLE_NOT_CONFIGURED' }
 }
 
-export function resolveAuthContext(
-  headers: Record<string, unknown> | undefined,
-  verifier: (token: string) => TokenVerification = verifyProviderToken
+function verificationToContext(
+  verdict: TokenVerification
 ): { context: ProductAuthContext; error?: { status: number; code: string; message: string } } {
-  const token = extractBearerToken(headers)
-  if (token === null) {
-    return { context: { kind: 'anonymous', productUserId: null, provider: null, verified: false } }
-  }
-  const verdict = verifier(token)
   if (!verdict.ok || !verdict.productUserId) {
     const code =
       verdict.reason === 'AUTHENTICATION_EXPIRED'
         ? 'AUTHENTICATION_EXPIRED'
-        : verdict.reason === 'CLERK_NOT_CONFIGURED'
+        : verdict.reason === 'CLERK_NOT_CONFIGURED' || verdict.reason === 'GOOGLE_NOT_CONFIGURED'
           ? 'AUTH_PROVIDER_NOT_CONFIGURED'
           : 'AUTHENTICATION_INVALID'
     return {
@@ -101,10 +105,44 @@ export function resolveAuthContext(
     context: {
       kind: 'verified',
       productUserId: verdict.productUserId,
-      provider: verdict.provider ?? 'clerk',
+      provider: verdict.provider ?? 'google',
       verified: true,
     },
   }
+}
+
+export function resolveAuthContext(
+  headers: Record<string, unknown> | undefined,
+  verifier: (token: string) => TokenVerification = verifyProviderToken
+): { context: ProductAuthContext; error?: { status: number; code: string; message: string } } {
+  const token = extractBearerToken(headers)
+  if (token === null) {
+    return { context: { kind: 'anonymous', productUserId: null, provider: null, verified: false } }
+  }
+  const verdict = verifier(token)
+  return verificationToContext(verdict)
+}
+
+/**
+ * Async variant using the real Google ID-token verifier. This is the path
+ * the execution guards use: a presented Bearer credential is cryptographically
+ * verified (signature, issuer, audience, expiry) and the canonical identity
+ * is the verified `sub`. No credential → anonymous (unchanged default).
+ */
+export async function resolveAuthContextAsync(
+  headers: Record<string, unknown> | undefined
+): Promise<{ context: ProductAuthContext; error?: { status: number; code: string; message: string } }> {
+  const token = extractBearerToken(headers)
+  if (token === null) {
+    return { context: { kind: 'anonymous', productUserId: null, provider: null, verified: false } }
+  }
+  const verdict = await verifyGoogleIdToken(token)
+  return verificationToContext({
+    ok: verdict.ok,
+    productUserId: verdict.productUserId,
+    provider: 'google',
+    reason: verdict.reason,
+  })
 }
 
 /** Enforcement flag: `ALPHA_AUTH_ENFORCE=1` turns protected routes deny-by-default. */
@@ -123,6 +161,27 @@ export function requireVerifiedContext(
   verifier?: (token: string) => TokenVerification
 ): { ok: boolean; context: ProductAuthContext } {
   const { context, error } = resolveAuthContext(req.headers, verifier)
+  return applyGuard(context, error, res)
+}
+
+/**
+ * Async guard using real Google verification. Execution routes must use
+ * this (not the sync stub path) so presented credentials are actually
+ * verified before the canonical identity is trusted downstream.
+ */
+export async function requireVerifiedContextAsync(
+  req: { headers?: Record<string, unknown> },
+  res: { status: (code: number) => { json: (body: unknown) => void } }
+): Promise<{ ok: boolean; context: ProductAuthContext }> {
+  const { context, error } = await resolveAuthContextAsync(req.headers)
+  return applyGuard(context, error, res)
+}
+
+function applyGuard(
+  context: ProductAuthContext,
+  error: { status: number; code: string; message: string } | undefined,
+  res: { status: (code: number) => { json: (body: unknown) => void } }
+): { ok: boolean; context: ProductAuthContext } {
   if (error) {
     res.status(error.status).json({ error: error.message, code: error.code })
     return { ok: false, context }

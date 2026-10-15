@@ -37,7 +37,7 @@ import {
 } from "./provider-errors";
 import { RuntimeManager, detectWorkspace } from "./runtime";
 import {
-  requireVerifiedContext,
+  requireVerifiedContextAsync,
   type ProductAuthContext,
 } from "./auth-context";
 import { openCodeRuntimeProvider, toRuntimeModelAdapter } from "./runtime-model";
@@ -257,7 +257,9 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
   // userId/email (if any) is never identity evidence and is ignored. The
   // resolved productUserId below is what a future Usage Ledger will attribute
   // this run to; it is threaded through trace/spawn/diagnostic records.
-  const authGate = requireVerifiedContext(req, res);
+  // TASK-ALPHA-SUBSCRIPTION-002A: async Google ID-token verification — the
+  // presented credential is cryptographically verified before trusting it.
+  const authGate = await requireVerifiedContextAsync(req, res);
   if (!authGate.ok) return;
   const authContext: ProductAuthContext = authGate.context;
   trace("payload", model.id, "chat stream request", {
@@ -1366,7 +1368,7 @@ app.post("/api/opencode/session/:id/compact", async (req: Request, res: Response
   if (!id) return res.status(400).json({ error: "session id is required" });
   // TASK-ALPHA-SUBSCRIPTION-002: same trust boundary as chat/stream —
   // session compaction spawns CLI execution server-side.
-  const authGate = requireVerifiedContext(req, res);
+  const authGate = await requireVerifiedContextAsync(req, res);
   if (!authGate.ok) return;
   const result = await compactSession(id);
   return res.json(result);

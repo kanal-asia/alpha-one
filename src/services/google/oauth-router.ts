@@ -8,6 +8,10 @@ import { Router, type Request, type Response } from 'express'
 import {
   generateAuthUrl,
   handleOAuthCallback,
+  generateProductLoginUrl,
+  handleProductLoginCallback,
+  completeProductLogin,
+  peekProductLoginState,
   getConnection,
   disconnectGoogle,
   isConfigured,
@@ -17,6 +21,53 @@ import {
 
 export function createGoogleOAuthRouter(): Router {
   const router = Router()
+
+  /**
+   * POST /api/google/oauth/login
+   * Starts the product-login flow (OpenID Connect, `openid email profile`
+   * only — zero Workspace permissions). Returns the Google authorization URL.
+   */
+  router.post('/login', async (req: Request, res: Response) => {
+    try {
+      if (!isConfigured()) {
+        return res.status(503).json({
+          error: 'Product login is not configured.',
+          code: 'AUTH_PROVIDER_NOT_CONFIGURED',
+        })
+      }
+      const returnTo = req.body?.returnTo as string | undefined
+      const { url } = await generateProductLoginUrl(returnTo)
+      return res.json({ url })
+    } catch (err) {
+      return res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to start product login.',
+      })
+    }
+  })
+
+  /**
+   * POST /api/google/oauth/login/complete
+   * Redeems a one-time product-login completion code for the verified
+   * identity + ID token. Single-use: the stored completion is deleted on
+   * read, so a captured code cannot be replayed.
+   */
+  router.post('/login/complete', async (req: Request, res: Response) => {
+    try {
+      const { code } = req.body as { code?: string }
+      const result = await completeProductLogin(code ?? '')
+      if (!result) {
+        return res.status(403).json({
+          error: 'Invalid or expired login code. Please sign in again.',
+          code: 'AUTHENTICATION_INVALID',
+        })
+      }
+      return res.json(result)
+    } catch (err) {
+      return res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to complete product login.',
+      })
+    }
+  })
 
   /**
    * GET /api/google/oauth/status
@@ -58,7 +109,9 @@ export function createGoogleOAuthRouter(): Router {
 
   /**
    * GET /api/google/oauth/callback
-   * Handles the OAuth callback from Google.
+   * Handles the OAuth callback from Google (Workspace connector AND product
+   * login share this endpoint and the registered redirect URI; the flows are
+   * distinguished by OAuth state, stored in separate stores).
    */
   router.get('/callback', async (req: Request, res: Response) => {
     try {
@@ -79,6 +132,22 @@ export function createGoogleOAuthRouter(): Router {
         return res.redirect(
           `${clientUrl}/settings?google_error=missing_params`
         )
+      }
+
+      // TASK-ALPHA-SUBSCRIPTION-002A: product-login branch. The Workspace
+      // path below is untouched; this branch only runs for states issued by
+      // generateProductLoginUrl. Verified identity is handed to the SPA via
+      // a one-time completion code (tokens never travel in the redirect URL).
+      if (await peekProductLoginState(state)) {
+        try {
+          const { completionCode } = await handleProductLoginCallback(code, state)
+          return res.redirect(`${clientUrl}/sign-in?product_login=${completionCode}`)
+        } catch (err) {
+          const message = encodeURIComponent(
+            err instanceof Error ? err.message : 'Product login failed.'
+          )
+          return res.redirect(`${clientUrl}/sign-in?product_login_error=${message}`)
+        }
       }
 
       const userId = getUserId(req)

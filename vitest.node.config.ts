@@ -23,6 +23,8 @@ export default defineConfig({
       'src/lib/profile-resolve.test.ts',
       'src/services/opencode/artifact-correspondence.test.ts',
       'src/services/opencode/mcp-guidance.test.ts',
+      'src/services/opencode/auth-context.test.ts',
+      'src/services/opencode/google-id-token.test.ts',
     ],
   },
 })

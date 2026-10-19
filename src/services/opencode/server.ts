@@ -36,6 +36,10 @@ import {
   type ClassifiedProviderError,
 } from "./provider-errors";
 import { RuntimeManager, detectWorkspace } from "./runtime";
+import {
+  requireVerifiedContextAsync,
+  type ProductAuthContext,
+} from "./auth-context";
 import { openCodeRuntimeProvider, toRuntimeModelAdapter } from "./runtime-model";
 import {
   assertCanonicalModelId,
@@ -248,12 +252,25 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
       error: err instanceof Error ? err.message : "Model must be in the form `provider/id`.",
     });
   }
+  // TASK-ALPHA-SUBSCRIPTION-002: trusted product identity for this execution.
+  // Derived ONLY from the verified Authorization context — a frontend-supplied
+  // userId/email (if any) is never identity evidence and is ignored. The
+  // resolved productUserId below is what a future Usage Ledger will attribute
+  // this run to; it is threaded through trace/spawn/diagnostic records.
+  // TASK-ALPHA-SUBSCRIPTION-002A: async Google ID-token verification — the
+  // presented credential is cryptographically verified before trusting it.
+  const authGate = await requireVerifiedContextAsync(req, res);
+  if (!authGate.ok) return;
+  const authContext: ProductAuthContext = authGate.context;
   trace("payload", model.id, "chat stream request", {
     payload: {
       model: model.id,
       message,
       sessionId: body.sessionId ?? null,
       agent: isExecutionMode(body.agent) ? body.agent : null,
+      // Trusted execution identity (server-resolved; never a body field).
+      authKind: authContext.kind,
+      productUserId: authContext.productUserId,
       project: body.project
         ? { type: body.project.type ?? null, name: body.project.name ?? null, hasPath: Boolean(body.project.path) }
         : null,
@@ -416,7 +433,7 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
       env: { ...process.env, OPENCODE_NO_TUI: "1", CI: "1", NO_COLOR: "1" },
     });
     activeChild = child;
-    if (process.env.NODE_ENV !== "test") console.log('[API] PROCESS SPAWNED', { pid: child.pid, cwd: chatCwd });
+    if (process.env.NODE_ENV !== "test") console.log('[API] PROCESS SPAWNED', { pid: child.pid, cwd: chatCwd, authKind: authContext.kind, productUserId: authContext.productUserId });
     // TASK-082-RUNTIME-CORRECTIVE (R04): quiet-only watchdog. A proven stale
     // `--session` resume hangs with zero output forever (fresh spawns emit
     // step_start almost immediately, so healthy runs can never trip this).
@@ -453,6 +470,7 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
             stdoutBytes: stdout.length,
             stderrBytes,
             timeout: 'startup',
+            productUserId: authContext.productUserId,
           })
           const staleHint = body.sessionId
             ? ` The reused session (${body.sessionId}) may be stale; start a New Chat to continue with a fresh session.`
@@ -464,6 +482,7 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
             console.log('[API] STARTUP_WATCHDOG_DIAG', {
               ts: new Date().toISOString(),
               pid: watched.pid,
+              productUserId: authContext.productUserId,
               quietMs: STARTUP_QUIET_MS,
               sessionId: body.sessionId ?? null,
               stdoutBytes: stdout.length,
@@ -1347,6 +1366,10 @@ app.get("/api/opencode/stats", async (req: Request, res: Response) => {
 app.post("/api/opencode/session/:id/compact", async (req: Request, res: Response) => {
   const id = req.params.id.trim();
   if (!id) return res.status(400).json({ error: "session id is required" });
+  // TASK-ALPHA-SUBSCRIPTION-002: same trust boundary as chat/stream —
+  // session compaction spawns CLI execution server-side.
+  const authGate = await requireVerifiedContextAsync(req, res);
+  if (!authGate.ok) return;
   const result = await compactSession(id);
   return res.json(result);
 });

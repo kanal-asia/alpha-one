@@ -72,6 +72,7 @@
     "dotenv": "^17.4.2",
     "express": "^4.19.2",
     "input-otp": "^1.4.2",
+    "jose": "^6.2.12",
     "lucide-react": "^1.8.0",
     "opencode-ai": "1.18.21",
     "pptxgenjs": "^4.0.1",

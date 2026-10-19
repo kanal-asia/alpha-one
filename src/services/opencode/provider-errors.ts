@@ -230,6 +230,8 @@ export function defaultWatchdogClassification(input: {
   stderrBytes?: number | null
   /** Which watchdog expired. Defaults to the 20s first-response window. */
   timeout?: WatchdogTimeoutKind
+  /** Retained for caller context only — server-resolved execution identity. */
+  productUserId?: string | null
 }): ProviderErrorClass {
   if (input.stashedClassification) return input.stashedClassification
   return input.timeout === 'startup' ? 'STARTUP_TIMEOUT' : 'FIRST_RESPONSE_TIMEOUT'

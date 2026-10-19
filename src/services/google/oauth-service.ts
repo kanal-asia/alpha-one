@@ -32,6 +32,8 @@ export interface GoogleTokens {
   expires_in: number
   token_type: string
   scope: string
+  /** OpenID Connect identity token — present only when `openid` was requested. */
+  id_token?: string
 }
 
 export interface GoogleConnection {
@@ -359,4 +361,198 @@ export function isConfigured(): boolean {
     process.env.GOOGLE_CLIENT_SECRET &&
     process.env.GOOGLE_OAUTH_REDIRECT_URI
   )
+}
+
+// ---------------------------------------------------------------------------
+// Product Login (OpenID Connect) — TASK-ALPHA-SUBSCRIPTION-002A
+//
+// A SEPARATE, minimal authentication flow for Alpha One product identity.
+// It requests `openid email profile` ONLY: zero Workspace permissions, a
+// distinct consent screen, and no connection to the Workspace connector
+// scopes above. The returned ID token is cryptographically verified
+// (google-id-token.ts); the canonical product identity is the verified
+// `sub`. No Workspace connection is created, no tokens are persisted
+// server-side — the verified ID token is handed to the SPA once, via a
+// one-time completion code, and the SPA attaches it as Bearer on execution
+// requests (see setProductSessionToken + auth-context.ts).
+// ---------------------------------------------------------------------------
+
+/** Minimal OIDC scopes for product login — deliberately NOT the Workspace set. */
+export const PRODUCT_LOGIN_SCOPES = ['openid', 'email', 'profile']
+
+const LOGIN_STATES_DIR = join(DATA_ROOT, '.alpha', 'google', 'login-states')
+
+export interface ProductLoginIdentity {
+  /** Canonical product user id (verified Google `sub`). */
+  productUserId: string
+  email: string | null
+  name: string | null
+  picture: string | null
+}
+
+interface ProductLoginState {
+  state: string
+  codeVerifier: string
+  returnTo?: string
+  createdAt: string
+}
+
+interface ProductLoginCompletion {
+  identity: ProductLoginIdentity
+  /** Verified ID token — handed to the SPA exactly once. */
+  idToken: string
+  /** Seconds until the ID token expires (informational for the SPA). */
+  expiresIn: number
+  createdAt: string
+}
+
+async function saveProductLoginState(state: ProductLoginState): Promise<void> {
+  await mkdir(LOGIN_STATES_DIR, { recursive: true })
+  await writeFile(join(LOGIN_STATES_DIR, `${state.state}.json`), JSON.stringify(state, null, 2))
+}
+
+async function loadAndDeleteProductLoginState(state: string): Promise<ProductLoginState | null> {
+  try {
+    const filePath = join(LOGIN_STATES_DIR, `${state}.json`)
+    const data = await readFile(filePath, 'utf-8')
+    await unlink(filePath).catch(() => {})
+    const parsed = JSON.parse(data) as ProductLoginState
+    // 10-minute TTL, same as the Workspace flow.
+    if (Date.now() - new Date(parsed.createdAt).getTime() > 10 * 60 * 1000) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+async function saveLoginCompletion(code: string, completion: ProductLoginCompletion): Promise<void> {
+  await mkdir(LOGIN_STATES_DIR, { recursive: true })
+  await writeFile(join(LOGIN_STATES_DIR, `complete-${code}.json`), JSON.stringify(completion, null, 2))
+}
+
+async function loadAndDeleteLoginCompletion(code: string): Promise<ProductLoginCompletion | null> {
+  try {
+    const filePath = join(LOGIN_STATES_DIR, `complete-${code}.json`)
+    const data = await readFile(filePath, 'utf-8')
+    await unlink(filePath).catch(() => {})
+    const parsed = JSON.parse(data) as ProductLoginCompletion
+    if (Date.now() - new Date(parsed.createdAt).getTime() > 10 * 60 * 1000) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Build the Google product-login authorization URL (OIDC, minimal scopes).
+ *
+ * Uses the SAME registered redirect URI as the Workspace flow — no Google
+ * Cloud console change is required. The two flows share the callback
+ * endpoint and are distinguished by OAuth state: product-login states live
+ * in a separate store (`peekProductLoginState`), so the Workspace callback
+ * path is untouched.
+ */
+export async function generateProductLoginUrl(
+  returnTo?: string
+): Promise<{ url: string; state: string }> {
+  const config = getConfig()
+  const state = generateState()
+  const codeVerifier = generateCodeVerifier()
+  await saveProductLoginState({ state, codeVerifier, returnTo, createdAt: new Date().toISOString() })
+  const params = new URLSearchParams({
+    client_id: config.clientId,
+    redirect_uri: config.redirectUri,
+    response_type: 'code',
+    scope: PRODUCT_LOGIN_SCOPES.join(' '),
+    state,
+    code_challenge: generateCodeChallenge(codeVerifier),
+    code_challenge_method: 'S256',
+  })
+  return { url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, state }
+}
+
+/**
+ * Non-destructive check: does this OAuth state belong to a product login?
+ * The router uses this to route the shared callback without touching the
+ * Workspace flow. Returns false for missing/expired states (same fail-closed
+ * outcome as the Workspace path).
+ */
+export async function peekProductLoginState(state: string): Promise<boolean> {
+  if (typeof state !== 'string' || state.length < 16) return false
+  try {
+    const data = await readFile(join(LOGIN_STATES_DIR, `${state}.json`), 'utf-8')
+    const parsed = JSON.parse(data) as ProductLoginState
+    if (Date.now() - new Date(parsed.createdAt).getTime() > 10 * 60 * 1000) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Exchange a product-login code, verify the ID token, and mint a one-time
+ * completion code. Returns the code plus where the SPA should continue.
+ * Never persists a Workspace connection; never stores tokens server-side.
+ */
+export async function handleProductLoginCallback(
+  code: string,
+  state: string
+): Promise<{ completionCode: string; returnTo?: string }> {
+  const config = getConfig()
+  const savedState = await loadAndDeleteProductLoginState(state)
+  if (!savedState) {
+    throw new Error('Invalid or expired product login state. Please try again.')
+  }
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      redirect_uri: config.redirectUri,
+      grant_type: 'authorization_code',
+      code_verifier: savedState.codeVerifier,
+    }),
+  })
+  if (!tokenResponse.ok) {
+    throw new Error('Product login token exchange failed.')
+  }
+  const tokens = (await tokenResponse.json()) as GoogleTokens
+  if (!tokens.id_token) {
+    throw new Error('Product login did not return an identity token.')
+  }
+  // Verify before trusting anything in the token. Dynamic import keeps the
+  // Workspace-only bundle free of the verifier; failure here is fail-closed.
+  const { verifyGoogleIdToken } = await import('../opencode/google-id-token')
+  const verdict = await verifyGoogleIdToken(tokens.id_token)
+  if (!verdict.ok || !verdict.productUserId) {
+    throw new Error('Product login identity could not be verified.')
+  }
+  const completionCode = generateState()
+  await saveLoginCompletion(completionCode, {
+    identity: {
+      productUserId: verdict.productUserId,
+      email: verdict.email ?? null,
+      name: verdict.name ?? null,
+      picture: verdict.picture ?? null,
+    },
+    idToken: tokens.id_token,
+    expiresIn: 3600,
+    createdAt: new Date().toISOString(),
+  })
+  return { completionCode, returnTo: savedState.returnTo }
+}
+
+/**
+ * Redeem a one-time product-login completion code. Single-use: the stored
+ * completion is deleted on read, so a captured code cannot be replayed.
+ */
+export async function completeProductLogin(
+  completionCode: string
+): Promise<{ identity: ProductLoginIdentity; idToken: string; expiresIn: number } | null> {
+  if (typeof completionCode !== 'string' || completionCode.length < 16) return null
+  const completion = await loadAndDeleteLoginCompletion(completionCode)
+  if (!completion) return null
+  return { identity: completion.identity, idToken: completion.idToken, expiresIn: completion.expiresIn }
 }

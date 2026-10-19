@@ -25,6 +25,7 @@ export default defineConfig({
       'src/services/opencode/mcp-guidance.test.ts',
       'src/services/opencode/auth-context.test.ts',
       'src/services/opencode/google-id-token.test.ts',
+      'src/services/google/oauth-router-product-login.test.ts',
     ],
   },
 })

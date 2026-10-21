@@ -25,6 +25,11 @@ export default defineConfig({
     'cors',
     'dotenv',
     'pptxgenjs',
+    // TASK-ALPHA-RELEASE-002: jose must be bundled. The installed app ships
+    // no node_modules (electron-builder excludes them), so any bare external
+    // import left in dist/server/*.js crashes the packaged backend with
+    // ERR_MODULE_NOT_FOUND before it can listen (proven 2026-10-20).
+    'jose',
   ],
   define: {
     'import.meta.url': 'import.meta.url',

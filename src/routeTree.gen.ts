@@ -26,6 +26,10 @@ import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedSettingsRouteRouteImport } from './routes/_authenticated/settings/route'
 import { Route as ClerkauthRouteRouteImport } from './routes/clerk/(auth)/route'
 import { Route as ClerkAuthenticatedRouteRouteImport } from './routes/clerk/_authenticated/route'
+import { Route as AuthenticatedAccountIndexRouteImport } from './routes/_authenticated/account/index'
+import { Route as AuthenticatedAccountBillingRouteImport } from './routes/_authenticated/account/billing'
+import { Route as AuthenticatedAccountPlansRouteImport } from './routes/_authenticated/account/plans'
+import { Route as AuthenticatedAccountUsageRouteImport } from './routes/_authenticated/account/usage'
 import { Route as AuthenticatedAiKiloCodeRouteImport } from './routes/_authenticated/ai/kilo-code'
 import { Route as AuthenticatedAiOpencodeRouteImport } from './routes/_authenticated/ai/opencode'
 import { Route as AuthenticatedAiPromptLibraryRouteImport } from './routes/_authenticated/ai/prompt-library'
@@ -67,6 +71,7 @@ import { Route as AuthenticatedSettingsAccountRouteImport } from './routes/_auth
 import { Route as AuthenticatedSettingsAppearanceRouteImport } from './routes/_authenticated/settings/appearance'
 import { Route as AuthenticatedSettingsDisplayRouteImport } from './routes/_authenticated/settings/display'
 import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes/_authenticated/settings/notifications'
+import { Route as AuthenticatedStudioIndexRouteImport } from './routes/_authenticated/studio/index'
 import { Route as AuthenticatedTasksIndexRouteImport } from './routes/_authenticated/tasks/index'
 import { Route as AuthenticatedToolsIndexRouteImport } from './routes/_authenticated/tools/index'
 import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authenticated/users/index'
@@ -176,6 +181,30 @@ const ClerkAuthenticatedRouteRoute = ClerkAuthenticatedRouteRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => ClerkRouteRoute,
 } as any)
+const AuthenticatedAccountIndexRoute =
+  AuthenticatedAccountIndexRouteImport.update({
+    id: '/account/',
+    path: '/account/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAccountBillingRoute =
+  AuthenticatedAccountBillingRouteImport.update({
+    id: '/account/billing',
+    path: '/account/billing',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAccountPlansRoute =
+  AuthenticatedAccountPlansRouteImport.update({
+    id: '/account/plans',
+    path: '/account/plans',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAccountUsageRoute =
+  AuthenticatedAccountUsageRouteImport.update({
+    id: '/account/usage',
+    path: '/account/usage',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAiKiloCodeRoute = AuthenticatedAiKiloCodeRouteImport.update({
   id: '/ai/kilo-code',
   path: '/ai/kilo-code',
@@ -417,6 +446,12 @@ const AuthenticatedSettingsNotificationsRoute =
     path: '/notifications',
     getParentRoute: () => AuthenticatedSettingsRouteRoute,
   } as any)
+const AuthenticatedStudioIndexRoute =
+  AuthenticatedStudioIndexRouteImport.update({
+    id: '/studio/',
+    path: '/studio/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedTasksIndexRoute = AuthenticatedTasksIndexRouteImport.update({
   id: '/tasks/',
   path: '/tasks/',
@@ -578,6 +613,9 @@ export interface FileRoutesByFullPath {
   '/500': typeof errors500Route
   '/503': typeof errors503Route
   '/history': typeof AuthenticatedHistoryRoute
+  '/account/billing': typeof AuthenticatedAccountBillingRoute
+  '/account/plans': typeof AuthenticatedAccountPlansRoute
+  '/account/usage': typeof AuthenticatedAccountUsageRoute
   '/ai/kilo-code': typeof AuthenticatedAiKiloCodeRoute
   '/ai/opencode': typeof AuthenticatedAiOpencodeRouteWithChildren
   '/ai/prompt-library': typeof AuthenticatedAiPromptLibraryRoute
@@ -623,12 +661,14 @@ export interface FileRoutesByFullPath {
   '/clerk/sign-in': typeof ClerkauthSignInRoute
   '/clerk/sign-up': typeof ClerkauthSignUpRoute
   '/clerk/user-management': typeof ClerkAuthenticatedUserManagementRoute
+  '/account/': typeof AuthenticatedAccountIndexRoute
   '/apps/': typeof AuthenticatedAppsIndexRoute
   '/big-deals/': typeof AuthenticatedBigDealsIndexRoute
   '/chats/': typeof AuthenticatedChatsIndexRoute
   '/google/': typeof AuthenticatedGoogleIndexRoute
   '/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
+  '/studio/': typeof AuthenticatedStudioIndexRoute
   '/tasks/': typeof AuthenticatedTasksIndexRoute
   '/tools/': typeof AuthenticatedToolsIndexRoute
   '/users/': typeof AuthenticatedUsersIndexRoute
@@ -659,6 +699,9 @@ export interface FileRoutesByTo {
   '/503': typeof errors503Route
   '/history': typeof AuthenticatedHistoryRoute
   '/': typeof AuthenticatedIndexRoute
+  '/account/billing': typeof AuthenticatedAccountBillingRoute
+  '/account/plans': typeof AuthenticatedAccountPlansRoute
+  '/account/usage': typeof AuthenticatedAccountUsageRoute
   '/ai/kilo-code': typeof AuthenticatedAiKiloCodeRoute
   '/ai/prompt-library': typeof AuthenticatedAiPromptLibraryRoute
   '/ai/providers': typeof AuthenticatedAiProvidersRoute
@@ -703,12 +746,14 @@ export interface FileRoutesByTo {
   '/clerk/sign-in': typeof ClerkauthSignInRoute
   '/clerk/sign-up': typeof ClerkauthSignUpRoute
   '/clerk/user-management': typeof ClerkAuthenticatedUserManagementRoute
+  '/account': typeof AuthenticatedAccountIndexRoute
   '/apps': typeof AuthenticatedAppsIndexRoute
   '/big-deals': typeof AuthenticatedBigDealsIndexRoute
   '/chats': typeof AuthenticatedChatsIndexRoute
   '/google': typeof AuthenticatedGoogleIndexRoute
   '/help-center': typeof AuthenticatedHelpCenterIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
+  '/studio': typeof AuthenticatedStudioIndexRoute
   '/tasks': typeof AuthenticatedTasksIndexRoute
   '/tools': typeof AuthenticatedToolsIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
@@ -744,6 +789,9 @@ export interface FileRoutesById {
   '/(errors)/503': typeof errors503Route
   '/_authenticated/history': typeof AuthenticatedHistoryRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/account/billing': typeof AuthenticatedAccountBillingRoute
+  '/_authenticated/account/plans': typeof AuthenticatedAccountPlansRoute
+  '/_authenticated/account/usage': typeof AuthenticatedAccountUsageRoute
   '/_authenticated/ai/kilo-code': typeof AuthenticatedAiKiloCodeRoute
   '/_authenticated/ai/opencode': typeof AuthenticatedAiOpencodeRouteWithChildren
   '/_authenticated/ai/prompt-library': typeof AuthenticatedAiPromptLibraryRoute
@@ -789,12 +837,14 @@ export interface FileRoutesById {
   '/clerk/(auth)/sign-in': typeof ClerkauthSignInRoute
   '/clerk/(auth)/sign-up': typeof ClerkauthSignUpRoute
   '/clerk/_authenticated/user-management': typeof ClerkAuthenticatedUserManagementRoute
+  '/_authenticated/account/': typeof AuthenticatedAccountIndexRoute
   '/_authenticated/apps/': typeof AuthenticatedAppsIndexRoute
   '/_authenticated/big-deals/': typeof AuthenticatedBigDealsIndexRoute
   '/_authenticated/chats/': typeof AuthenticatedChatsIndexRoute
   '/_authenticated/google/': typeof AuthenticatedGoogleIndexRoute
   '/_authenticated/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
+  '/_authenticated/studio/': typeof AuthenticatedStudioIndexRoute
   '/_authenticated/tasks/': typeof AuthenticatedTasksIndexRoute
   '/_authenticated/tools/': typeof AuthenticatedToolsIndexRoute
   '/_authenticated/users/': typeof AuthenticatedUsersIndexRoute
@@ -828,6 +878,9 @@ export interface FileRouteTypes {
     | '/500'
     | '/503'
     | '/history'
+    | '/account/billing'
+    | '/account/plans'
+    | '/account/usage'
     | '/ai/kilo-code'
     | '/ai/opencode'
     | '/ai/prompt-library'
@@ -873,12 +926,14 @@ export interface FileRouteTypes {
     | '/clerk/sign-in'
     | '/clerk/sign-up'
     | '/clerk/user-management'
+    | '/account/'
     | '/apps/'
     | '/big-deals/'
     | '/chats/'
     | '/google/'
     | '/help-center/'
     | '/settings/'
+    | '/studio/'
     | '/tasks/'
     | '/tools/'
     | '/users/'
@@ -909,6 +964,9 @@ export interface FileRouteTypes {
     | '/503'
     | '/history'
     | '/'
+    | '/account/billing'
+    | '/account/plans'
+    | '/account/usage'
     | '/ai/kilo-code'
     | '/ai/prompt-library'
     | '/ai/providers'
@@ -953,12 +1011,14 @@ export interface FileRouteTypes {
     | '/clerk/sign-in'
     | '/clerk/sign-up'
     | '/clerk/user-management'
+    | '/account'
     | '/apps'
     | '/big-deals'
     | '/chats'
     | '/google'
     | '/help-center'
     | '/settings'
+    | '/studio'
     | '/tasks'
     | '/tools'
     | '/users'
@@ -993,6 +1053,9 @@ export interface FileRouteTypes {
     | '/(errors)/503'
     | '/_authenticated/history'
     | '/_authenticated/'
+    | '/_authenticated/account/billing'
+    | '/_authenticated/account/plans'
+    | '/_authenticated/account/usage'
     | '/_authenticated/ai/kilo-code'
     | '/_authenticated/ai/opencode'
     | '/_authenticated/ai/prompt-library'
@@ -1038,12 +1101,14 @@ export interface FileRouteTypes {
     | '/clerk/(auth)/sign-in'
     | '/clerk/(auth)/sign-up'
     | '/clerk/_authenticated/user-management'
+    | '/_authenticated/account/'
     | '/_authenticated/apps/'
     | '/_authenticated/big-deals/'
     | '/_authenticated/chats/'
     | '/_authenticated/google/'
     | '/_authenticated/help-center/'
     | '/_authenticated/settings/'
+    | '/_authenticated/studio/'
     | '/_authenticated/tasks/'
     | '/_authenticated/tools/'
     | '/_authenticated/users/'
@@ -1196,6 +1261,34 @@ declare module '@tanstack/react-router' {
       fullPath: '/clerk'
       preLoaderRoute: typeof ClerkAuthenticatedRouteRouteImport
       parentRoute: typeof ClerkRouteRoute
+    }
+    '/_authenticated/account/': {
+      id: '/_authenticated/account/'
+      path: '/account'
+      fullPath: '/account/'
+      preLoaderRoute: typeof AuthenticatedAccountIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/account/billing': {
+      id: '/_authenticated/account/billing'
+      path: '/account/billing'
+      fullPath: '/account/billing'
+      preLoaderRoute: typeof AuthenticatedAccountBillingRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/account/plans': {
+      id: '/_authenticated/account/plans'
+      path: '/account/plans'
+      fullPath: '/account/plans'
+      preLoaderRoute: typeof AuthenticatedAccountPlansRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/account/usage': {
+      id: '/_authenticated/account/usage'
+      path: '/account/usage'
+      fullPath: '/account/usage'
+      preLoaderRoute: typeof AuthenticatedAccountUsageRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/ai/kilo-code': {
       id: '/_authenticated/ai/kilo-code'
@@ -1484,6 +1577,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsNotificationsRouteImport
       parentRoute: typeof AuthenticatedSettingsRouteRoute
     }
+    '/_authenticated/studio/': {
+      id: '/_authenticated/studio/'
+      path: '/studio'
+      fullPath: '/studio/'
+      preLoaderRoute: typeof AuthenticatedStudioIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/tasks/': {
       id: '/_authenticated/tasks/'
       path: '/tasks'
@@ -1722,6 +1822,9 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSettingsRouteRoute: typeof AuthenticatedSettingsRouteRouteWithChildren
   AuthenticatedHistoryRoute: typeof AuthenticatedHistoryRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedAccountBillingRoute: typeof AuthenticatedAccountBillingRoute
+  AuthenticatedAccountPlansRoute: typeof AuthenticatedAccountPlansRoute
+  AuthenticatedAccountUsageRoute: typeof AuthenticatedAccountUsageRoute
   AuthenticatedAiKiloCodeRoute: typeof AuthenticatedAiKiloCodeRoute
   AuthenticatedAiOpencodeRoute: typeof AuthenticatedAiOpencodeRouteWithChildren
   AuthenticatedAiPromptLibraryRoute: typeof AuthenticatedAiPromptLibraryRoute
@@ -1759,11 +1862,13 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedWorkspaceRuntimeRoute: typeof AuthenticatedWorkspaceRuntimeRoute
   AuthenticatedWorkspaceSdksRoute: typeof AuthenticatedWorkspaceSdksRoute
   AuthenticatedWorkspaceSkillsRoute: typeof AuthenticatedWorkspaceSkillsRoute
+  AuthenticatedAccountIndexRoute: typeof AuthenticatedAccountIndexRoute
   AuthenticatedAppsIndexRoute: typeof AuthenticatedAppsIndexRoute
   AuthenticatedBigDealsIndexRoute: typeof AuthenticatedBigDealsIndexRoute
   AuthenticatedChatsIndexRoute: typeof AuthenticatedChatsIndexRoute
   AuthenticatedGoogleIndexRoute: typeof AuthenticatedGoogleIndexRoute
   AuthenticatedHelpCenterIndexRoute: typeof AuthenticatedHelpCenterIndexRoute
+  AuthenticatedStudioIndexRoute: typeof AuthenticatedStudioIndexRoute
   AuthenticatedTasksIndexRoute: typeof AuthenticatedTasksIndexRoute
   AuthenticatedToolsIndexRoute: typeof AuthenticatedToolsIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
@@ -1782,6 +1887,9 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSettingsRouteRoute: AuthenticatedSettingsRouteRouteWithChildren,
   AuthenticatedHistoryRoute: AuthenticatedHistoryRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedAccountBillingRoute: AuthenticatedAccountBillingRoute,
+  AuthenticatedAccountPlansRoute: AuthenticatedAccountPlansRoute,
+  AuthenticatedAccountUsageRoute: AuthenticatedAccountUsageRoute,
   AuthenticatedAiKiloCodeRoute: AuthenticatedAiKiloCodeRoute,
   AuthenticatedAiOpencodeRoute: AuthenticatedAiOpencodeRouteWithChildren,
   AuthenticatedAiPromptLibraryRoute: AuthenticatedAiPromptLibraryRoute,
@@ -1824,11 +1932,13 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedWorkspaceRuntimeRoute: AuthenticatedWorkspaceRuntimeRoute,
   AuthenticatedWorkspaceSdksRoute: AuthenticatedWorkspaceSdksRoute,
   AuthenticatedWorkspaceSkillsRoute: AuthenticatedWorkspaceSkillsRoute,
+  AuthenticatedAccountIndexRoute: AuthenticatedAccountIndexRoute,
   AuthenticatedAppsIndexRoute: AuthenticatedAppsIndexRoute,
   AuthenticatedBigDealsIndexRoute: AuthenticatedBigDealsIndexRoute,
   AuthenticatedChatsIndexRoute: AuthenticatedChatsIndexRoute,
   AuthenticatedGoogleIndexRoute: AuthenticatedGoogleIndexRoute,
   AuthenticatedHelpCenterIndexRoute: AuthenticatedHelpCenterIndexRoute,
+  AuthenticatedStudioIndexRoute: AuthenticatedStudioIndexRoute,
   AuthenticatedTasksIndexRoute: AuthenticatedTasksIndexRoute,
   AuthenticatedToolsIndexRoute: AuthenticatedToolsIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,

@@ -2,6 +2,7 @@ import {
   Activity,
   Archive,
   Boxes,
+  Briefcase,
   Clock,
   Cpu,
   Folder,
@@ -40,6 +41,16 @@ export const sidebarData: SidebarData = {
           url: '/workspace/assistant',
           icon: AlphaWorkspaceIcon,
           className: 'font-semibold',
+        },
+      ],
+    },
+    {
+      title: 'Business Studio',
+      items: [
+        {
+          title: 'Studio Home',
+          url: '/studio',
+          icon: Briefcase,
         },
       ],
     },

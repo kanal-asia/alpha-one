@@ -72,6 +72,16 @@ const KNOWN_STATES: ReadonlySet<string> = new Set([
   'expired',
 ])
 
+/** Narrow an unknown stored status to a lifecycle state (fail-closed). */
+export function isLifecycleState(value: string): value is LifecycleState {
+  return (
+    value === 'active' ||
+    value === 'past_due' ||
+    value === 'canceled' ||
+    value === 'expired'
+  )
+}
+
 function parseInstant(value: string): number | null {
   const ms = Date.parse(value)
   return Number.isFinite(ms) ? ms : null

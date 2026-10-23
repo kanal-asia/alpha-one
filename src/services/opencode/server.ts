@@ -36,6 +36,7 @@ import {
   type ClassifiedProviderError,
 } from "./provider-errors";
 import { RuntimeManager, detectWorkspace } from "./runtime";
+import { observeSlidesComposeUsage } from "../subscription/entitlement";
 import {
   requireVerifiedContextAsync,
   type ProductAuthContext,
@@ -772,7 +773,14 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
           | { tool?: string; state?: { input?: Record<string, unknown>; metadata?: Record<string, unknown> } }
           | undefined;
         const toolName = toolPart?.tool;
-        if (toolName === "write" || toolName === "edit") {
+        // TASK-ALPHA-SUBSCRIBER-008: warning-only Slides entitlement
+      // observation. The CLI's structured compose events are the proven
+      // server-side generation boundary with a reliable owner (authContext).
+      // Fire-and-forget: never blocks generation, never alters the response.
+      if (toolName === "slides_compose_deck" || toolName === "slides_compose_slide") {
+        observeSlidesComposeUsage(toolName, authContext);
+      }
+      if (toolName === "write" || toolName === "edit") {
           const input = toolPart?.state?.input ?? {};
           const metadata = toolPart?.state?.metadata ?? {};
           const filePath = String(input.filePath ?? metadata.filepath ?? "");

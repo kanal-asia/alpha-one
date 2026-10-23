@@ -38,6 +38,7 @@ export default defineConfig({
       'src/services/subscription/usage.test.ts',
       'src/services/subscription/usage-endpoint.test.ts',
       'src/services/subscription/usage-unavailable.test.ts',
+      'src/features/ai/opencode/services/http-transport-session.test.ts',
       'src/services/subscription/migration.test.ts',
       'src/services/subscription/migration-legacy.test.ts',
       'src/services/account/enforcement.test.ts',

@@ -1,5 +1,6 @@
 import { useNavigate, useLocation } from '@tanstack/react-router'
 import { useAuthStore } from '@/stores/auth-store'
+import { setProductSessionToken } from '@/features/ai/opencode/services/http-transport'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 
 interface SignOutDialogProps {
@@ -14,6 +15,11 @@ export function SignOutDialog({ open, onOpenChange }: SignOutDialogProps) {
 
   const handleSignOut = () => {
     auth.reset()
+    // TASK-ALPHA-SUBSCRIBER-013: the verified product identity lives in the
+    // in-memory session token, not in the auth store. Resetting the store
+    // alone would leave execution requests authenticated as the previous
+    // user — logout must clear both.
+    setProductSessionToken(null)
     // Preserve current location for redirect after sign-in
     const currentPath = location.href
     navigate({

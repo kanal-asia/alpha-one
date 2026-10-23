@@ -114,6 +114,48 @@ export interface SubscriptionRecord {
 }
 
 // ---------------------------------------------------------------------------
+// TASK-ALPHA-SUBSCRIBER-009: account-enforcement records.
+//
+// Account access status is independent of subscription lifecycle: billing
+// failure or expiry must never write here. Owner is the verified product
+// identity (same rule as subscriptions). No row means effective `active`
+// (backward compatible). Unknown persisted statuses fail closed at the
+// enforcement boundary. Reason/operator/review metadata is the audit trail
+// for warnings, restrictions, suspensions, bans, and appeals.
+// ---------------------------------------------------------------------------
+
+export interface AccountStatusRecord {
+  /** Verified product user id (Google `sub`). Primary key: one row per owner. */
+  ownerSub: string
+  /** Account access status: active | restricted | suspended | banned. */
+  status: string
+  /** Machine-readable reason code (e.g. ABUSE_SPAM, EMERGENCY_THREAT). */
+  reasonCode: string | null
+  /** Short human note documenting the reason. No sensitive payloads. */
+  note: string | null
+  /** Verified sub of the applying operator, or a system marker. */
+  operatorSub: string | null
+  appliedAt: string
+  updatedAt: string
+  /** ISO-8601 review deadline (required for emergency suspension: +72h). */
+  reviewDueAt: string | null
+  /** ISO-8601 appeal submission deadline (permanent ban: +14 days). */
+  appealDeadline: string | null
+}
+
+export interface EnforcementEvent {
+  id: number
+  ownerSub: string
+  prevStatus: string | null
+  newStatus: string
+  reasonCode: string | null
+  operatorSub: string | null
+  createdAt: string
+  reviewDueAt: string | null
+  appealDeadline: string | null
+}
+
+// ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
 
@@ -213,6 +255,29 @@ function getDb(): InstanceType<typeof DatabaseSync> {
         updated_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_subscriptions_plan_id ON subscriptions(plan_id);
+      CREATE TABLE IF NOT EXISTS account_status (
+        owner_sub TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'active',
+        reason_code TEXT,
+        note TEXT,
+        operator_sub TEXT,
+        applied_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        review_due_at TEXT,
+        appeal_deadline TEXT
+      );
+      CREATE TABLE IF NOT EXISTS account_enforcement_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_sub TEXT NOT NULL,
+        prev_status TEXT,
+        new_status TEXT NOT NULL,
+        reason_code TEXT,
+        operator_sub TEXT,
+        created_at TEXT NOT NULL,
+        review_due_at TEXT,
+        appeal_deadline TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_enforcement_events_owner ON account_enforcement_events(owner_sub);
     `)
 
     // TASK-ALPHA-SUBSCRIBER-007: lifecycle period columns on DBs created by
@@ -881,6 +946,139 @@ export async function saveSubscription(
       record.createdAt,
       record.updatedAt
     )
+}
+
+// ---------------------------------------------------------------------------
+// Account-enforcement record operations (TASK-ALPHA-SUBSCRIBER-009).
+//
+// Reads never create rows (no record = effective `active`). Writes happen
+// only through saveAccountStatus / recordEnforcementEvent — no HTTP mutation
+// is wired in this task because no trusted admin/operator identity exists.
+// Owner isolation is structural: every query binds owner_sub from the
+// verified product identity.
+// ---------------------------------------------------------------------------
+
+export async function getAccountByOwner(
+  ownerSub: string
+): Promise<AccountStatusRecord | null> {
+  const database = getDb()
+  const row = database
+    .prepare('SELECT * FROM account_status WHERE owner_sub = ?')
+    .all(ownerSub)[0] as
+    | {
+        owner_sub: string
+        status: string | null
+        reason_code: string | null
+        note: string | null
+        operator_sub: string | null
+        applied_at: string
+        updated_at: string
+        review_due_at: string | null
+        appeal_deadline: string | null
+      }
+    | undefined
+
+  if (!row) return null
+
+  return {
+    ownerSub: row.owner_sub,
+    status: row.status ?? 'active',
+    reasonCode: row.reason_code ?? null,
+    note: row.note ?? null,
+    operatorSub: row.operator_sub ?? null,
+    appliedAt: row.applied_at,
+    updatedAt: row.updated_at,
+    reviewDueAt: row.review_due_at ?? null,
+    appealDeadline: row.appeal_deadline ?? null,
+  }
+}
+
+export async function saveAccountStatus(
+  record: AccountStatusRecord
+): Promise<void> {
+  const database = getDb()
+  database
+    .prepare(
+      `INSERT OR REPLACE INTO account_status
+         (owner_sub, status, reason_code, note, operator_sub,
+          applied_at, updated_at, review_due_at, appeal_deadline)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      record.ownerSub,
+      record.status,
+      record.reasonCode,
+      record.note,
+      record.operatorSub,
+      record.appliedAt,
+      record.updatedAt,
+      record.reviewDueAt,
+      record.appealDeadline
+    )
+}
+
+export async function recordEnforcementEvent(input: {
+  ownerSub: string
+  prevStatus: string | null
+  newStatus: string
+  reasonCode: string | null
+  operatorSub: string | null
+  createdAt: string
+  reviewDueAt?: string | null
+  appealDeadline?: string | null
+}): Promise<number> {
+  const database = getDb()
+  const result = database
+    .prepare(
+      `INSERT INTO account_enforcement_events
+         (owner_sub, prev_status, new_status, reason_code, operator_sub,
+          created_at, review_due_at, appeal_deadline)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.ownerSub,
+      input.prevStatus,
+      input.newStatus,
+      input.reasonCode,
+      input.operatorSub,
+      input.createdAt,
+      input.reviewDueAt ?? null,
+      input.appealDeadline ?? null
+    )
+  return Number(result.lastInsertRowid)
+}
+
+export async function listEnforcementEvents(
+  ownerSub: string
+): Promise<EnforcementEvent[]> {
+  const database = getDb()
+  const rows = database
+    .prepare(
+      'SELECT * FROM account_enforcement_events WHERE owner_sub = ? ORDER BY id ASC'
+    )
+    .all(ownerSub) as Array<{
+    id: number
+    owner_sub: string
+    prev_status: string | null
+    new_status: string
+    reason_code: string | null
+    operator_sub: string | null
+    created_at: string
+    review_due_at: string | null
+    appeal_deadline: string | null
+  }>
+
+  return rows.map((row) => ({
+    id: row.id,
+    ownerSub: row.owner_sub,
+    prevStatus: row.prev_status,
+    newStatus: row.new_status,
+    reasonCode: row.reason_code,
+    operatorSub: row.operator_sub,
+    createdAt: row.created_at,
+    reviewDueAt: row.review_due_at,
+    appealDeadline: row.appeal_deadline,
+  }))
 }
 
 export function closeDb(): void {

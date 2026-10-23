@@ -36,6 +36,7 @@ export default defineConfig({
       'src/services/subscription/entitlement.test.ts',
       'src/services/subscription/migration.test.ts',
       'src/services/subscription/migration-legacy.test.ts',
+      'src/services/account/enforcement.test.ts',
     ],
   },
 })

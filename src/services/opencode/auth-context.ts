@@ -70,6 +70,7 @@ export function extractBearerToken(
  * anonymous success.
  */
 import { verifyGoogleIdToken } from './google-id-token'
+import { checkAccountAccess } from '../account/enforcement'
 
 export function verifyProviderToken(token: string): TokenVerification {
   void token
@@ -168,12 +169,35 @@ export function requireVerifiedContext(
  * Async guard using real Google verification. Execution routes must use
  * this (not the sync stub path) so presented credentials are actually
  * verified before the canonical identity is trusted downstream.
+ *
+ * TASK-ALPHA-SUBSCRIBER-009: verified identities additionally pass the
+ * account-enforcement boundary (suspended/banned deny with stable codes).
+ * Anonymous contexts skip the check (no record can exist); subscription
+ * state is never consulted here and is never modified.
  */
 export async function requireVerifiedContextAsync(
   req: { headers?: Record<string, unknown> },
   res: { status: (code: number) => { json: (body: unknown) => void } }
 ): Promise<{ ok: boolean; context: ProductAuthContext }> {
   const { context, error } = await resolveAuthContextAsync(req.headers)
+  if (!error && context.verified && context.productUserId) {
+    const access = await checkAccountAccess(context.productUserId)
+    if (!access.allowed) {
+      const denied = access
+      res.status(403).json({
+        error:
+          denied.code === 'ACCOUNT_BANNED'
+            ? 'Account access has been permanently revoked.'
+            : denied.code === 'ACCOUNT_SUSPENDED'
+              ? 'Account access is temporarily suspended.'
+              : 'Account access cannot be verified right now.',
+        code: denied.code,
+        ...(denied.reviewDueAt ? { reviewDueAt: denied.reviewDueAt } : {}),
+        ...(denied.appealBy ? { appealBy: denied.appealBy } : {}),
+      })
+      return { ok: false, context }
+    }
+  }
   return applyGuard(context, error, res)
 }
 

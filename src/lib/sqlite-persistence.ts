@@ -1220,6 +1220,14 @@ export async function listUsageRuns(
   }))
 }
 
+export async function countUsageRuns(ownerSub: string): Promise<number> {
+  const database = getDb()
+  const rows = database
+    .prepare('SELECT COUNT(*) AS total FROM usage_runs WHERE owner_sub = ?')
+    .all(ownerSub) as Array<{ total: number }>
+  return Number(rows[0]?.total ?? 0)
+}
+
 export function closeDb(): void {
   if (db) {
     db.close()

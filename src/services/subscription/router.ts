@@ -24,9 +24,12 @@
 import { Router, type Request, type Response } from 'express'
 import { resolveAuthContextAsync } from '../opencode/auth-context'
 import {
+  countUsageRuns,
   getSubscriptionByOwner,
+  listUsageRuns,
   saveSubscription,
   type SubscriptionRecord,
+  type UsageRun,
 } from '../../lib/sqlite-persistence'
 import { SUBSCRIPTION_PLANS } from '../../lib/subscription-plans'
 import { isLifecycleState, transitionSubscription } from './transitions'
@@ -42,6 +45,46 @@ export interface SubscriptionStatus {
 }
 
 export const EFFECTIVE_FREE_PLAN_ID = 'free'
+
+/**
+ * Presentation-safe usage entry: ledger facts only (model, token counts,
+ * outcome, timestamps). No prompts, payloads, or secrets — the ledger
+ * stores none of those by design.
+ */
+export interface UsageRunView {
+  runId: string
+  model: string
+  agent: string | null
+  sessionId: string | null
+  tokenCount: number
+  textLen: number
+  terminal: boolean
+  exitCode: number | null
+  continuationCount: number
+  durationMs: number | null
+  createdAt: string
+}
+
+export interface UsageResponse {
+  runs: UsageRunView[]
+  total: number
+}
+
+function toUsageView(row: UsageRun): UsageRunView {
+  return {
+    runId: row.runId,
+    model: row.model,
+    agent: row.agent,
+    sessionId: row.sessionId,
+    tokenCount: row.tokenCount,
+    textLen: row.textLen,
+    terminal: row.terminal,
+    exitCode: row.exitCode,
+    continuationCount: row.continuationCount,
+    durationMs: row.durationMs,
+    createdAt: row.createdAt,
+  }
+}
 
 /** Plan ids known to the static catalog (single source of truth). */
 export function isKnownPlanId(planId: string): boolean {
@@ -244,6 +287,67 @@ export function createSubscriptionRouter(): Router {
             ? err.message
             : 'Failed to cancel subscription.',
         code: 'SUBSCRIPTION_CANCEL_FAILED',
+      })
+    }
+  })
+
+  /**
+   * GET /api/subscription/usage — recorded usage for the caller (read-only).
+   *
+   * Owner comes exclusively from the verified product identity; anonymous
+   * callers read rows recorded under the shared 'anonymous' owner (same
+   * device, no cross-user boundary exists locally). Forged credentials fail
+   * closed through the shared boundary. Only presentation fields are
+   * returned — never prompts, payloads, or secrets (the ledger stores
+   * none). `?limit=` is clamped to 1..200 (default 50); garbage falls back
+   * to the default rather than failing the read.
+   */
+  router.get('/usage', async (req: Request, res: Response) => {
+    try {
+      const { context, error } = await resolveAuthContextAsync(
+        req.headers as Record<string, unknown>
+      )
+
+      if (error) {
+        return res
+          .status(error.status)
+          .json({ error: error.message, code: error.code })
+      }
+      const ownerSub =
+        context.verified && context.productUserId
+          ? context.productUserId
+          : 'anonymous'
+
+      const rawLimit = Array.isArray(req.query.limit)
+        ? req.query.limit[0]
+        : req.query.limit
+      const parsed = typeof rawLimit === 'string' ? Number.parseInt(rawLimit, 10) : NaN
+      const limit = Number.isFinite(parsed)
+        ? Math.min(200, Math.max(1, parsed))
+        : 50
+
+      let runs: UsageRunView[]
+      let total: number
+      try {
+        const [rows, count] = await Promise.all([
+          listUsageRuns(ownerSub, limit),
+          countUsageRuns(ownerSub),
+        ])
+        runs = rows.map(toUsageView)
+        total = count
+      } catch (err) {
+        return res.status(500).json({
+          error:
+            err instanceof Error ? err.message : 'Failed to load usage.',
+          code: 'SUBSCRIPTION_USAGE_FAILED',
+        })
+      }
+
+      return res.json({ runs, total })
+    } catch (err) {
+      return res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to load usage.',
+        code: 'SUBSCRIPTION_USAGE_FAILED',
       })
     }
   })

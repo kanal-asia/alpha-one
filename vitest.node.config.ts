@@ -28,6 +28,9 @@ export default defineConfig({
       'src/services/google/oauth-router-product-login.test.ts',
       'src/server/packaged-bundle.test.ts',
       'src/lib/subscription-plans.test.ts',
+      'src/lib/subscription-status.test.ts',
+      'src/services/subscription/router.test.ts',
+      'src/services/subscription/router-unavailable.test.ts',
     ],
   },
 })

@@ -87,6 +87,27 @@ export interface DownloadEvent {
 }
 
 // ---------------------------------------------------------------------------
+// TASK-ALPHA-SUBSCRIBER-003: subscription records (local product subscriptions).
+//
+// Owner is the verified product identity (`sub` from Google OIDC ID-token
+// verification, see auth-context.ts) — never an email, never a client-sent
+// field, and never the shared Drive-OAuth 'local-user' id. Anonymous callers
+// receive the effective Free default without any row (see subscription
+// router); no row is created by reads.
+// ---------------------------------------------------------------------------
+
+export interface SubscriptionRecord {
+  /** Verified product user id (Google `sub`). Primary key: one row per owner. */
+  ownerSub: string
+  /** Plan id from the static catalog (subscription-plans.ts). */
+  planId: string
+  /** Stored lifecycle status. Never assumed 'active' by readers. */
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+// ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
 
@@ -175,6 +196,14 @@ function getDb(): InstanceType<typeof DatabaseSync> {
         cf_ray TEXT,
         downloaded_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        owner_sub TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_subscriptions_plan_id ON subscriptions(plan_id);
     `)
 
     // TASK-ALPHA-VPS-071: ensure telemetry columns on pre-existing DBs.
@@ -756,6 +785,60 @@ export async function recordDownloadEvent(input: {
       input.downloadedAt
     )
   return Number(result.lastInsertRowid)
+}
+
+// ---------------------------------------------------------------------------
+// Subscription record operations (TASK-ALPHA-SUBSCRIBER-003).
+//
+// Reads never create rows. Writes happen only through saveSubscription
+// (no HTTP mutation is wired in this task). Owner isolation is structural:
+// every query binds owner_sub from the verified product identity.
+// ---------------------------------------------------------------------------
+
+export async function getSubscriptionByOwner(
+  ownerSub: string
+): Promise<SubscriptionRecord | null> {
+  const database = getDb()
+  const row = database
+    .prepare('SELECT * FROM subscriptions WHERE owner_sub = ?')
+    .all(ownerSub)[0] as
+    | {
+        owner_sub: string
+        plan_id: string
+        status: string | null
+        created_at: string
+        updated_at: string
+      }
+    | undefined
+
+  if (!row) return null
+
+  return {
+    ownerSub: row.owner_sub,
+    planId: row.plan_id,
+    status: row.status ?? 'active',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+export async function saveSubscription(
+  record: SubscriptionRecord
+): Promise<void> {
+  const database = getDb()
+  database
+    .prepare(
+      `INSERT OR REPLACE INTO subscriptions
+         (owner_sub, plan_id, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+    .run(
+      record.ownerSub,
+      record.planId,
+      record.status,
+      record.createdAt,
+      record.updatedAt
+    )
 }
 
 export function closeDb(): void {

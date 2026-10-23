@@ -13,6 +13,7 @@ import { bootstrapPlatform } from '../platform/server/bootstrap'
 import { createWorkspaceRouter } from '../platform/server/router'
 import { createWorkspaceService } from '../platform/workspace/service'
 import { createFsRouter } from '../services/fs/fs-router'
+import { createSubscriptionRouter } from '../services/subscription/router'
 import { DATA_ROOT } from '../lib/data-root'
 
 const workspaceRoot = process.cwd()
@@ -25,6 +26,7 @@ const kernel = bootstrapPlatform({
 const service = createWorkspaceService(kernel)
 app.use('/api/ws', createWorkspaceRouter(service))
 app.use('/api/fs', createFsRouter())
+app.use('/api/subscription', createSubscriptionRouter())
 
 // ---------------------------------------------------------------------------
 // Production frontend serving — serve the built SPA from dist/.

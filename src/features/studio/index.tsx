@@ -11,9 +11,16 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { DEFAULT_PLAN_ID, getPlan } from '@/lib/subscription-plans'
+import { useSubscriptionStatus } from '@/hooks/use-subscription-status'
+import { getPlan, type PlanId } from '@/lib/subscription-plans'
 
-const currentPlan = getPlan(DEFAULT_PLAN_ID)
+function planDisplayName(planId: string): string {
+  try {
+    return getPlan(planId as PlanId).name
+  } catch {
+    return planId
+  }
+}
 
 /**
  * TASK-ALPHA-SUBSCRIBER-002: Business Studio home.
@@ -25,6 +32,8 @@ const currentPlan = getPlan(DEFAULT_PLAN_ID)
  * entirely (no false capability).
  */
 export function StudioHome() {
+  const { model, retry } = useSubscriptionStatus()
+
   return (
     <>
       <PageHeader />
@@ -43,20 +52,58 @@ export function StudioHome() {
                 <BadgeCheck className='size-4' />
                 Current Plan
               </CardTitle>
-              <CardDescription>Local default until subscription backend ships.</CardDescription>
+              <CardDescription>Read live from the subscription backend.</CardDescription>
             </CardHeader>
             <CardContent className='space-y-3'>
-              <div className='flex items-center gap-2'>
-                <span className='text-lg font-semibold'>{currentPlan.name}</span>
-                <Badge variant='secondary'>Local default</Badge>
-              </div>
-              <p className='text-sm text-muted-foreground'>{currentPlan.positioning}</p>
-              <Button variant='outline' size='sm' asChild>
-                <Link to='/account'>
-                  View account
-                  <ArrowRight className='size-4' />
-                </Link>
-              </Button>
+              {model.kind === 'loading' && (
+                <p className='text-sm text-muted-foreground'>Loading plan…</p>
+              )}
+              {model.kind === 'default' && (
+                <>
+                  <div className='flex items-center gap-2'>
+                    <span className='text-lg font-semibold'>
+                      {planDisplayName(model.planId)}
+                    </span>
+                    <Badge variant='secondary'>Default plan</Badge>
+                  </div>
+                  <p className='text-sm text-muted-foreground'>
+                    Default plan until a subscription record exists.
+                  </p>
+                </>
+              )}
+              {model.kind === 'record' && (
+                <>
+                  <div className='flex items-center gap-2'>
+                    <span className='text-lg font-semibold'>
+                      {planDisplayName(model.planId)}
+                    </span>
+                    <Badge variant='secondary'>Subscription</Badge>
+                  </div>
+                  {model.status !== 'active' && (
+                    <p className='text-sm text-muted-foreground'>
+                      Status: {model.status}
+                    </p>
+                  )}
+                </>
+              )}
+              {model.kind === 'error' && (
+                <>
+                  <p className='text-sm text-muted-foreground'>
+                    Plan status could not be loaded: {model.message}
+                  </p>
+                  <Button variant='outline' size='sm' onClick={retry}>
+                    Retry
+                  </Button>
+                </>
+              )}
+              {model.kind !== 'error' && (
+                <Button variant='outline' size='sm' asChild>
+                  <Link to='/account'>
+                    View account
+                    <ArrowRight className='size-4' />
+                  </Link>
+                </Button>
+              )}
             </CardContent>
           </Card>
 

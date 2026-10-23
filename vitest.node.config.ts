@@ -31,6 +31,9 @@ export default defineConfig({
       'src/lib/subscription-status.test.ts',
       'src/services/subscription/router.test.ts',
       'src/services/subscription/router-unavailable.test.ts',
+      'src/services/subscription/transitions.test.ts',
+      'src/services/subscription/migration.test.ts',
+      'src/services/subscription/migration-legacy.test.ts',
     ],
   },
 })

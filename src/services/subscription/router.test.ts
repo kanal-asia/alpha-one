@@ -139,6 +139,9 @@ describe('GET /api/subscription/status', () => {
       ownerSub: 'verified-sub-pro',
       planId: 'pro',
       status: 'active',
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      canceledAt: null,
       createdAt: now,
       updatedAt: now,
     })
@@ -170,6 +173,9 @@ describe('GET /api/subscription/status', () => {
       ownerSub: 'verified-sub-corrupt',
       planId: 'ultra-mega-plan',
       status: 'active',
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      canceledAt: null,
       createdAt: now,
       updatedAt: now,
     })

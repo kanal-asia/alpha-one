@@ -103,6 +103,12 @@ export interface SubscriptionRecord {
   planId: string
   /** Stored lifecycle status. Never assumed 'active' by readers. */
   status: string
+  /** ISO-8601 end of the current paid period. Null for legacy rows. */
+  currentPeriodEnd: string | null
+  /** True when cancellation takes effect at period end (paid access continues). */
+  cancelAtPeriodEnd: boolean
+  /** ISO-8601 timestamp of the cancellation action. Null unless canceled. */
+  canceledAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -200,11 +206,20 @@ function getDb(): InstanceType<typeof DatabaseSync> {
         owner_sub TEXT PRIMARY KEY,
         plan_id TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'active',
+        current_period_end TEXT,
+        cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
+        canceled_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_subscriptions_plan_id ON subscriptions(plan_id);
     `)
+
+    // TASK-ALPHA-SUBSCRIBER-007: lifecycle period columns on DBs created by
+    // the SUBSCRIBER-003 schema (which lacked them). Additive, idempotent,
+    // no backfill — legacy rows keep NULL/0 and are handled by fail-safe
+    // read rules, never by fabricated period dates.
+    migrateSubscriptions(db)
 
     // TASK-ALPHA-VPS-071: ensure telemetry columns on pre-existing DBs.
     migrateConnectionTelemetry(db)
@@ -787,6 +802,23 @@ export async function recordDownloadEvent(input: {
   return Number(result.lastInsertRowid)
 }
 
+// TASK-ALPHA-SUBSCRIBER-007: additive lifecycle columns for pre-existing
+// subscriptions tables (NULL-able period end / canceled-at; flag defaults 0).
+function migrateSubscriptions(database: InstanceType<typeof DatabaseSync>): void {
+  const columns = database.prepare('PRAGMA table_info(subscriptions)').all() as Array<{ name: string }>
+  const columnNames = new Set(columns.map((c) => c.name))
+  const wanted: Array<[string, string]> = [
+    ['current_period_end', 'TEXT'],
+    ['cancel_at_period_end', 'INTEGER NOT NULL DEFAULT 0'],
+    ['canceled_at', 'TEXT'],
+  ]
+  for (const [name, type] of wanted) {
+    if (!columnNames.has(name)) {
+      database.exec(`ALTER TABLE subscriptions ADD COLUMN ${name} ${type}`)
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Subscription record operations (TASK-ALPHA-SUBSCRIBER-003).
 //
@@ -806,6 +838,9 @@ export async function getSubscriptionByOwner(
         owner_sub: string
         plan_id: string
         status: string | null
+        current_period_end: string | null
+        cancel_at_period_end: number | null
+        canceled_at: string | null
         created_at: string
         updated_at: string
       }
@@ -817,6 +852,9 @@ export async function getSubscriptionByOwner(
     ownerSub: row.owner_sub,
     planId: row.plan_id,
     status: row.status ?? 'active',
+    currentPeriodEnd: row.current_period_end ?? null,
+    cancelAtPeriodEnd: (row.cancel_at_period_end ?? 0) !== 0,
+    canceledAt: row.canceled_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -829,13 +867,17 @@ export async function saveSubscription(
   database
     .prepare(
       `INSERT OR REPLACE INTO subscriptions
-         (owner_sub, plan_id, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`
+         (owner_sub, plan_id, status, current_period_end, cancel_at_period_end,
+          canceled_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       record.ownerSub,
       record.planId,
       record.status,
+      record.currentPeriodEnd,
+      record.cancelAtPeriodEnd ? 1 : 0,
+      record.canceledAt,
       record.createdAt,
       record.updatedAt
     )

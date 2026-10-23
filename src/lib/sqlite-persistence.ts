@@ -156,6 +156,46 @@ export interface EnforcementEvent {
 }
 
 // ---------------------------------------------------------------------------
+// TASK-ALPHA-SUBSCRIBER-010: append-only usage ledger (metering foundation).
+//
+// One row per completed chat execution. No quotas or limits are derived here:
+// plan numbers were never decided, so this module records facts only. Writes
+// are append-only (INSERT OR IGNORE on run_id); reads are owner-scoped.
+// Owner is the verified product sub or the literal 'anonymous'.
+// ---------------------------------------------------------------------------
+
+export interface UsageRun {
+  id: number
+  runId: string
+  ownerSub: string
+  model: string
+  agent: string | null
+  sessionId: string | null
+  tokenCount: number
+  textLen: number
+  terminal: boolean
+  exitCode: number | null
+  continuationCount: number
+  durationMs: number | null
+  createdAt: string
+}
+
+export interface UsageRunInput {
+  runId: string
+  ownerSub: string
+  model: string
+  agent?: string | null
+  sessionId?: string | null
+  tokenCount?: number
+  textLen?: number
+  terminal?: boolean
+  exitCode?: number | null
+  continuationCount?: number
+  durationMs?: number | null
+  createdAt?: string
+}
+
+// ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
 
@@ -278,6 +318,22 @@ function getDb(): InstanceType<typeof DatabaseSync> {
         appeal_deadline TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_enforcement_events_owner ON account_enforcement_events(owner_sub);
+      CREATE TABLE IF NOT EXISTS usage_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL UNIQUE,
+        owner_sub TEXT NOT NULL,
+        model TEXT NOT NULL,
+        agent TEXT,
+        session_id TEXT,
+        token_count INTEGER NOT NULL DEFAULT 0,
+        text_len INTEGER NOT NULL DEFAULT 0,
+        terminal INTEGER NOT NULL DEFAULT 0,
+        exit_code INTEGER,
+        continuation_count INTEGER NOT NULL DEFAULT 0,
+        duration_ms INTEGER,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_usage_runs_owner ON usage_runs(owner_sub);
     `)
 
     // TASK-ALPHA-SUBSCRIBER-007: lifecycle period columns on DBs created by
@@ -1078,6 +1134,89 @@ export async function listEnforcementEvents(
     createdAt: row.created_at,
     reviewDueAt: row.review_due_at,
     appealDeadline: row.appeal_deadline,
+  }))
+}
+
+// ---------------------------------------------------------------------------
+// Usage ledger operations (TASK-ALPHA-SUBSCRIBER-010).
+//
+// Append-only: run_id is UNIQUE so a retried write can never double-count.
+// Synchronous by design — the chat settle path calls this inline and must
+// never delay the response on a microtask queue. Never throws: failures
+// return null so metering can never break execution.
+// ---------------------------------------------------------------------------
+
+export function recordUsageRun(input: UsageRunInput): number | null {
+  try {
+    const database = getDb()
+    const result = database
+      .prepare(
+        `INSERT OR IGNORE INTO usage_runs
+           (run_id, owner_sub, model, agent, session_id, token_count,
+            text_len, terminal, exit_code, continuation_count, duration_ms,
+            created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        input.runId,
+        input.ownerSub,
+        input.model,
+        input.agent ?? null,
+        input.sessionId ?? null,
+        input.tokenCount ?? 0,
+        input.textLen ?? 0,
+        input.terminal === true ? 1 : 0,
+        input.exitCode ?? null,
+        input.continuationCount ?? 0,
+        input.durationMs ?? null,
+        input.createdAt ?? new Date().toISOString()
+      )
+    if (result.changes === 0) return null
+    return Number(result.lastInsertRowid)
+  } catch {
+    return null
+  }
+}
+
+export async function listUsageRuns(
+  ownerSub: string,
+  limit = 100
+): Promise<UsageRun[]> {
+  const database = getDb()
+  const rows = database
+    .prepare(
+      'SELECT * FROM usage_runs WHERE owner_sub = ? ORDER BY id ASC LIMIT ?'
+    )
+    .all(ownerSub, limit) as Array<{
+    id: number
+    run_id: string
+    owner_sub: string
+    model: string
+    agent: string | null
+    session_id: string | null
+    token_count: number
+    text_len: number
+    terminal: number
+    exit_code: number | null
+    continuation_count: number
+    duration_ms: number | null
+    created_at: string
+  }>
+
+  return rows.map((row) => ({
+    id: row.id,
+    runId: row.run_id,
+    ownerSub: row.owner_sub,
+    model: row.model,
+    agent: row.agent,
+    sessionId: row.session_id,
+    tokenCount: row.token_count,
+    textLen: row.text_len,
+    terminal: row.terminal !== 0,
+    exitCode: row.exit_code,
+    continuationCount: row.continuation_count,
+    durationMs: row.duration_ms,
+    createdAt: row.created_at,
   }))
 }
 

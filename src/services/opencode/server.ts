@@ -17,6 +17,7 @@ import {
   getOpenCodeGoData,
 } from "./opencode-go";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { resolve as resolvePath, isAbsolute } from "node:path";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { ensureDataRoot } from "../../lib/data-root";
@@ -36,6 +37,7 @@ import {
   type ClassifiedProviderError,
 } from "./provider-errors";
 import { RuntimeManager, detectWorkspace } from "./runtime";
+import { recordUsageRun } from "../../lib/sqlite-persistence";
 import { observeSlidesComposeUsage } from "../subscription/entitlement";
 import {
   requireVerifiedContextAsync,
@@ -578,6 +580,10 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
     }
   };
   const processStart = Date.now();
+  // TASK-ALPHA-SUBSCRIBER-010: stable per-request usage identity. Recorded
+  // exactly once at terminal settle (guarded by `settled`); the UNIQUE
+  // constraint is a backstop against double counting.
+  const usageRunId = randomUUID();
   let firstTextAt: number | null = null;
   let stepFinishAt: number | null = null;
   // TASK-082B-R2 Phase 1: per-request lifecycle timeline (elapsed-ms markers,
@@ -871,6 +877,26 @@ app.post("/api/opencode/chat/stream", async (req: Request, res: Response) => {
     // TASK-082B-R2: terminal resolution wins over every timer (idempotent).
     disarmFirstResponse();
     markTimeline(tl, 'terminal');
+    // TASK-ALPHA-SUBSCRIBER-010: append-only usage record, once per request.
+    // Synchronous and failure-proof (recordUsageRun never throws): metering
+    // can neither delay nor break the response. Owner is the verified sub or
+    // 'anonymous'; no prompts, payloads, or secrets are stored.
+    recordUsageRun({
+      runId: usageRunId,
+      ownerSub:
+        authContext.verified && authContext.productUserId
+          ? authContext.productUserId
+          : 'anonymous',
+      model: model.id,
+      agent: isExecutionMode(body.agent) ? body.agent : null,
+      sessionId: extractedSessionId,
+      tokenCount,
+      textLen: textExtracted.length,
+      terminal,
+      exitCode: code,
+      continuationCount,
+      durationMs: Date.now() - processStart,
+    });
     sendEvent("done", { terminal });
     sendEvent("exit", { code });
     res.end();

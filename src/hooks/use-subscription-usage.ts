@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { UsageResponse } from '@/services/subscription/router'
+import { getProductAuthHeaders } from '@/features/ai/opencode/services/http-transport'
 
 /**
  * TASK-ALPHA-SUBSCRIBER-012: shared recorded-usage consumer.
@@ -12,13 +13,19 @@ export type UsageModel =
   | { kind: 'ready'; total: number; runs: UsageResponse['runs'] }
   | { kind: 'error'; message: string }
 
-async function fetchUsage(): Promise<{
+/**
+ * Fetch recorded usage. Exported for contract tests; the hook below is the
+ * UI entry point. Never throws.
+ */
+export async function fetchUsage(): Promise<{
   data: UsageResponse | null
   error: string | null
 }> {
   try {
+    // TASK-ALPHA-SUBSCRIBER-014: same verified session as subscription
+    // status — logged-out callers read their device-local anonymous rows.
     const res = await fetch('/api/subscription/usage', {
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', ...getProductAuthHeaders() },
     })
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as {

@@ -321,6 +321,16 @@ function productAuthHeaders(): Record<string, string> {
     : {}
 }
 
+/**
+ * TASK-ALPHA-SUBSCRIBER-014: shared product-identity headers for non-chat
+ * subscriber API calls (subscription status, usage). Same token, same trust
+ * boundary as execution requests — one carriage mechanism, no duplicates.
+ * Returns `{}` when logged out, preserving anonymous behavior.
+ */
+export function getProductAuthHeaders(): Record<string, string> {
+  return productAuthHeaders()
+}
+
 export class HTTPTransport implements OpenCodeTransport {
   private baseUrl: string
 

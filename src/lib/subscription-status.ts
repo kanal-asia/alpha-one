@@ -6,6 +6,7 @@
  * render its error state instead of fabricating plan data.
  */
 import type { SubscriptionStatus } from '@/services/subscription/router'
+import { getProductAuthHeaders } from '@/features/ai/opencode/services/http-transport'
 
 export type { SubscriptionStatus }
 
@@ -42,8 +43,11 @@ export async function fetchSubscriptionStatus(): Promise<{
   error: string | null
 }> {
   try {
+    // TASK-ALPHA-SUBSCRIBER-014: carry the verified product session so the
+    // backend resolves the caller's own record. Logged-out callers send no
+    // Authorization header and receive the anonymous effective Free default.
     const res = await fetch('/api/subscription/status', {
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', ...getProductAuthHeaders() },
     })
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as {

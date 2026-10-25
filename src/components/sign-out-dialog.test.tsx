@@ -3,9 +3,11 @@ import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
 import { SignOutDialog } from './sign-out-dialog'
 
-const navigate = vi.fn()
-const reset = vi.fn()
-const setProductSessionToken = vi.fn()
+const { navigate, reset, setProductSessionToken } = vi.hoisted(() => ({
+  navigate: vi.fn(),
+  reset: vi.fn(),
+  setProductSessionToken: vi.fn(),
+}))
 
 const MOCK_HREF = 'https://app.test/dashboard?tab=1'
 

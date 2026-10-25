@@ -58,7 +58,7 @@ const ISSUER = 'https://accounts.google.com'
 const REAL_FETCH = globalThis.fetch
 
 let signingKey: CryptoKey
-let keyId = 'product-login-kid-1'
+const keyId = 'product-login-kid-1'
 let server: Server
 let baseUrl: string
 let mintedIdTokens: string[] = []
@@ -480,5 +480,104 @@ describe('product login: completion redemption', () => {
     const location = res.headers.get('location') ?? ''
     expect(location).toContain('product_login_error=')
     expect(location).not.toContain('product_login=')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TASK-ALPHA-SUBSCRIBER-017: dynamic loopback return base.
+// The packaged backend serves the SPA at a dynamic port, so the OAuth
+// callback must return to the per-request origin - never to a static default
+// that points at nothing. Evil origins must fall back, never redirect.
+// ---------------------------------------------------------------------------
+
+async function startLoginWithReturnTo(
+  returnTo: string
+): Promise<{ url: URL; state: string }> {
+  const res = await fetch(`${baseUrl}/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ returnTo }),
+  })
+  expect(res.status).toBe(200)
+  const body = (await res.json()) as { url: string }
+  const url = new URL(body.url)
+  const state = url.searchParams.get('state')
+  expect(state).toBeTruthy()
+  return { url, state: state as string }
+}
+
+async function callbackLocation(state: string): Promise<string> {
+  programTokenEndpoint({ sub: 'sub-return-base-1' })
+  const res = await fetch(
+    `${baseUrl}/callback?code=google-auth-code&state=${state}`,
+    { redirect: 'manual' }
+  )
+  expect(res.status).toBe(302)
+  return res.headers.get('location') ?? ''
+}
+
+describe('product login: callback return base', () => {
+  it('stored loopback returnTo drives the redirect (dynamic packaged port)', async () => {
+    const { state } = await startLoginWithReturnTo('http://127.0.0.1:58490')
+    const location = await callbackLocation(state)
+    expect(
+      location.startsWith('http://127.0.0.1:58490/sign-in?product_login=')
+    ).toBe(true)
+  })
+
+  it('evil returnTo falls back to the configured client URL', async () => {
+    const { state } = await startLoginWithReturnTo(
+      'https://evil.example/phish'
+    )
+    const location = await callbackLocation(state)
+    expect(location).not.toContain('evil.example')
+    expect(
+      location.startsWith('http://localhost:3001/sign-in?product_login=')
+    ).toBe(true)
+  })
+
+  it('javascript: returnTo falls back instead of executing', async () => {
+    const { state } = await startLoginWithReturnTo(
+      'javascript:alert(document.domain)'
+    )
+    const location = await callbackLocation(state)
+    expect(location.startsWith('http://localhost:3001/sign-in?')).toBe(true)
+  })
+})
+
+describe('resolveSafeReturnBase', () => {
+  it('accepts loopback origins and returns their origin', async () => {
+    const { resolveSafeReturnBase } = await import('./oauth-service')
+    expect(
+      resolveSafeReturnBase('http://127.0.0.1:64621/some/path?q=1', 'http://localhost:3000')
+    ).toBe('http://127.0.0.1:64621')
+    expect(
+      resolveSafeReturnBase('http://localhost:3001', 'http://localhost:3000')
+    ).toBe('http://localhost:3001')
+  })
+
+  it('rejects non-loopback, non-URL, and empty candidates', async () => {
+    const { resolveSafeReturnBase } = await import('./oauth-service')
+    const fallback = 'http://localhost:3000'
+    for (const bad of [
+      'https://evil.example/phish',
+      'javascript:alert(1)',
+      'not-a-url',
+      '',
+      null,
+      undefined,
+    ]) {
+      expect(resolveSafeReturnBase(bad as string, fallback)).toBe(fallback)
+    }
+  })
+
+  it('accepts the configured CLIENT_URL origin for non-loopback deployments', async () => {
+    const { resolveSafeReturnBase } = await import('./oauth-service')
+    expect(
+      resolveSafeReturnBase(
+        'https://alpha.kanal.asia/workspace',
+        'https://alpha.kanal.asia'
+      )
+    ).toBe('https://alpha.kanal.asia')
   })
 })

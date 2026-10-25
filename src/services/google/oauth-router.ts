@@ -17,6 +17,7 @@ import {
   isConfigured,
   getValidAccessToken,
   saveConnection,
+  resolveSafeReturnBase,
 } from './oauth-service'
 
 export function createGoogleOAuthRouter(): Router {
@@ -140,8 +141,23 @@ export function createGoogleOAuthRouter(): Router {
       // a one-time completion code (tokens never travel in the redirect URL).
       if (await peekProductLoginState(state)) {
         try {
-          const { completionCode } = await handleProductLoginCallback(code, state)
-          return res.redirect(`${clientUrl}/sign-in?product_login=${completionCode}`)
+          const { completionCode, returnTo } =
+            await handleProductLoginCallback(code, state)
+          // TASK-ALPHA-SUBSCRIBER-017: the packaged backend serves the SPA at
+          // a dynamic loopback port, so the per-request return base (stored
+          // at /login time, else this request's Origin) wins over the static
+          // CLIENT_URL fallback — after loopback allowlist validation.
+          const origin =
+            typeof req.headers.origin === 'string'
+              ? req.headers.origin
+              : null
+          const baseUrl = resolveSafeReturnBase(
+            returnTo ?? origin,
+            clientUrl
+          )
+          return res.redirect(
+            `${baseUrl}/sign-in?product_login=${completionCode}`
+          )
         } catch (err) {
           const message = encodeURIComponent(
             err instanceof Error ? err.message : 'Product login failed.'
@@ -288,7 +304,7 @@ export function createGoogleOAuthRouter(): Router {
             error: 'Identity does not match OAuth session',
           })
         }
-      } catch (err) {
+      } catch {
         // If production server is unreachable, reject the request
         return res.status(503).json({
           error: 'Unable to verify OAuth session with production server',

@@ -23,7 +23,15 @@ export interface ProductLoginIdentity {
 }
 
 export async function startProductLogin(): Promise<void> {
-  const res = await fetch('/api/google/oauth/login', { method: 'POST' })
+  // TASK-ALPHA-SUBSCRIBER-017: tell the backend where this SPA instance
+  // lives. The packaged app serves the frontend at a dynamic loopback port,
+  // so the OAuth callback must return to this origin — not to a static
+  // CLIENT_URL default. The server allowlists the value before using it.
+  const res = await fetch('/api/google/oauth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ returnTo: window.location.origin }),
+  })
   if (!res.ok) {
     const err = (await res.json().catch(() => ({}))) as { error?: string }
     throw new Error(err.error ?? 'Product login is unavailable right now.')

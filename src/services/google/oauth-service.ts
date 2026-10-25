@@ -444,6 +444,43 @@ async function loadAndDeleteLoginCompletion(code: string): Promise<ProductLoginC
 }
 
 /**
+ * TASK-ALPHA-SUBSCRIBER-017: loopback-safe OAuth return base.
+ *
+ * The packaged backend serves the SPA at a dynamic loopback port, so the
+ * static CLIENT_URL fallback cannot address post-login redirects. A
+ * per-request return base (stored in the state record, else the request
+ * Origin header) is used when present — but ONLY when it parses as an
+ * `http(s)` URL on a loopback host (or exactly the configured CLIENT_URL
+ * origin). Anything else falls back, closing the open-redirect path that
+ * could otherwise leak the one-time login code to an attacker origin.
+ */
+export function resolveSafeReturnBase(
+  candidate: string | null | undefined,
+  fallback: string
+): string {
+  const pick = (value: string | null | undefined): string | null => {
+    if (typeof value !== 'string' || value.length === 0) return null
+    let url: URL
+    try {
+      url = new URL(value)
+    } catch {
+      return null
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    if (url.hostname === '127.0.0.1' || url.hostname === 'localhost') {
+      return url.origin
+    }
+    try {
+      if (value === new URL(fallback).origin) return url.origin
+    } catch {
+      // Fall through to null below.
+    }
+    return null
+  }
+  return pick(candidate) ?? fallback
+}
+
+/**
  * Build the Google product-login authorization URL (OIDC, minimal scopes).
  *
  * Uses the SAME registered redirect URI as the Workspace flow — no Google

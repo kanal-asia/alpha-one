@@ -249,3 +249,19 @@ to the first execution (01/02/13/14 PASS; 03–12 unexecuted). The resumption
 adds conclusive diagnosis: the remaining phases require an agent session on
 the Windows builder; no reachable Windows execution environment exists from
 this session's topology.
+
+---
+
+## Handoff from TASK-ALPHA-SUBSCRIBER-024 (appended 2026-10-30, historical evidence above preserved)
+
+The Windows packaging blocker recorded in the Resumption section is now
+resolved by `spint/TASK-ALPHA-SUBSCRIBER-024.md`
+(`WINDOWS_PACKAGING_CI_VERIFIED`): GitHub Actions run **41031835852** built
+this task's exact implementation commit `3a02c6e` on `windows-latest`.
+**Installer artifact:** `alpha-one-windows-3a02c6e` — `AlphaOne-Setup.exe`,
+160,159,836 bytes, SHA-256
+`c3563367ae6168c3c406a539f65cf7ce1d2899cf453df6b2110e02bd4f106395`,
+security inspection PASSED. AC-03…AC-12 of THIS task remain to be proven by
+the next phase: download the artifact (authenticated GitHub session), verify
+the SHA-256, install/run (Phase 3), then interactive consent with the
+dedicated test account (Phases 4-5).

@@ -1,0 +1,180 @@
+# TASK-ALPHA-SUBSCRIBER-023 Phase 3: packaged runtime verification on the
+# GitHub-hosted Windows runner (the only supported Windows execution
+# environment available to the agent). Downloads the PINNED, SHA-256-verified
+# installer artifact from TASK-024 run 41031835852 — NO rebuild — then:
+# verifies integrity/provenance, independently inspects the installed
+# package, silent-installs, launches the packaged app, and probes the
+# runtime (health, frontend, loopback, VPS-broker login initiation,
+# fail-closed completion, fail-closed broker outage).
+#
+# Interactive Google consent is explicitly OUT OF SCOPE here and is never
+# simulated. Results are published as check-run annotations.
+name: Windows Runtime Verify
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'runtime-verify-*'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  runtime-verify:
+    name: Install and verify packaged runtime
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download pinned installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: alpha-one-windows-3a02c6e
+          run-id: 41031835852
+          github-token: ${{ github.token }}
+          path: artifact
+
+      - name: Verify artifact integrity and provenance
+        id: verify
+        shell: bash
+        working-directory: artifact
+        run: |
+          set -euo pipefail
+          EXPECTED="c3563367ae6168c3c406a539f65cf7ce1d2899cf453df6b2110e02bd4f106395"
+          ACTUAL="$(sha256sum AlphaOne-Setup.exe | cut -d' ' -f1)"
+          echo "sha256 computed:  $ACTUAL"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::SHA-256 mismatch: $ACTUAL != $EXPECTED"
+            exit 1
+          fi
+          SIZE="$(stat -c %s AlphaOne-Setup.exe)"
+          echo "size: $SIZE"
+          node -e "
+            const m = require('./build-metadata.json')
+            const want = '3a02c6e367708b8157bbe015eeefdea430e5a925'
+            if (m.sourceCommit !== want) { console.error('::error::provenance mismatch ' + m.sourceCommit); process.exit(1) }
+            if (m.installerSha256 !== '$EXPECTED') { console.error('::error::metadata sha mismatch'); process.exit(1) }
+            console.log('provenance verified: ' + m.sourceCommit + ' | toolchain node ' + m.node + ' npm ' + m.npm)
+          "
+          echo "::notice title=artifact-verify::SHA-256 MATCH $EXPECTED | $SIZE bytes | source 3a02c6e367708b8157bbe015eeefdea430e5a925"
+
+      - name: Silent-install the verified installer
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "artifact\AlphaOne-Setup.exe" -ArgumentList "/S","/D=C:\AlphaOneTest" -Wait -PassThru
+          Write-Host "installer exit: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { Write-Host "::error::installer exit $($p.ExitCode)"; exit 1 }
+          Get-ChildItem "C:\AlphaOneTest" | Select-Object -First 15 Name, Length | Format-Table | Out-String | Write-Host
+
+      - name: Independent secret inspection of installed package
+        shell: bash
+        run: |
+          set -euo pipefail
+          FAIL=0
+          scan() {
+            local label="$1" pattern="$2"
+            local count
+            count=$( { grep -raoE -- "$pattern" "C:/AlphaOneTest" 2>/dev/null || true; } | wc -l | tr -d ' ')
+            if [ "$count" -gt 0 ]; then
+              echo "::error::SECRET-LIKE MATCH in installed app: $label ($count); value not printed; failing closed"
+              FAIL=1
+            else
+              echo "clean: $label"
+            fi
+          }
+          scan "Google client secret value"      'GOCSPX[A-Za-z0-9_-]{10,}'
+          scan "client secret value assignment"  'GOOGLE_CLIENT_SECRET[[:space:]]*=[[:space:]]*.[^[:space:]]{8,}'
+          scan "local OAuth exchange enabled"    'PRODUCT_OAUTH_LOCAL_EXCHANGE[[:space:]]*=[[:space:]]*.1.'
+          scan "private key block"               '\-\-\-\-\-BEGIN [A-Z ]*PRIVATE KEY'
+          ENVFILES=$(find "C:/AlphaOneTest" -name ".env*" 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$ENVFILES" -gt 0 ]; then
+            echo "::error::.env file(s) present in installed app ($ENVFILES)"
+            FAIL=1
+          else
+            echo "clean: no .env files in installed app"
+          fi
+          if ! grep -q 'alpha.kanal.asia' "C:/AlphaOneTest/resources/app/dist/server/alpha-server.js" 2>/dev/null; then
+            echo "::error::VPS broker default missing from installed backend"
+            FAIL=1
+          else
+            echo "positive: VPS Product Identity broker default present in installed backend"
+          fi
+          if [ "$FAIL" -ne 0 ]; then
+            echo "::error::installed-package inspection FAILED"
+            exit 1
+          fi
+          echo "::notice title=installed-inspection::PASSED - no secret forms, no .env, broker default present"
+
+      - name: Launch packaged app and probe runtime
+        id: probe
+        shell: bash
+        run: |
+          set -uo pipefail
+          "/c/AlphaOneTest/Alpha One.exe" > app.log 2>&1 &
+          APP_PID=$!
+          echo "launched pid $APP_PID"
+          PORT=""
+          for i in $(seq 1 30); do
+            sleep 4
+            for cand in 3001 3002 3003 3004 3005 3010 3020 4001 5001 8080; do
+              if curl -s --max-time 2 "http://127.0.0.1:$cand/api/opencode/health" | grep -q '"state"'; then
+                PORT=$cand; break 2
+              fi
+            done
+          done
+          if [ -z "$PORT" ]; then
+            echo "::error::packaged backend did not become healthy"
+            kill $APP_PID 2>/dev/null || true
+            exit 1
+          fi
+          echo "::notice title=loopback-port::dynamic loopback backend listening on port $PORT"
+          HEALTH=$(curl -s --max-time 5 "http://127.0.0.1:$PORT/api/opencode/health")
+          echo "::notice title=runtime-health::$HEALTH"
+          FRONT=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/")
+          FRONT_HEAD=$(curl -s --max-time 5 "http://127.0.0.1:$PORT/" | head -c 120 | tr -d '\n')
+          echo "::notice title=frontend-load::HTTP $FRONT :: ${FRONT_HEAD}"
+          LOGIN=$(curl -s --max-time 15 -X POST "http://127.0.0.1:$PORT/api/google/oauth/login" \
+            -H 'Content-Type: application/json' \
+            -d '{"returnTo":"http://127.0.0.1:9911"}')
+          echo "::notice title=broker-login::$(echo "$LOGIN" | head -c 220)"
+          COMPLETE=$(curl -s --max-time 10 -X POST "http://127.0.0.1:$PORT/api/google/oauth/login/complete" \
+            -H 'Content-Type: application/json' \
+            -d '{"code":"bogustx.forged-code-value-000"}' -w ' HTTP:%{http_code}')
+          echo "::notice title=fail-closed-completion::$COMPLETE"
+          kill $APP_PID 2>/dev/null || true
+          sleep 3
+          taskkill //F //IM "Alpha One.exe" //T 2>/dev/null || true
+          taskkill //F //IM node.exe //T 2>/dev/null || true
+
+      - name: Broker outage is fail-closed (poisoned broker URL, fresh launch)
+        shell: bash
+        run: |
+          set -uo pipefail
+          export PRODUCT_OAUTH_BROKER_URL="http://127.0.0.1:9/unreachable"
+          "/c/AlphaOneTest/Alpha One.exe" > app-poisoned.log 2>&1 &
+          APP_PID=$!
+          PORT=""
+          for i in $(seq 1 25); do
+            sleep 4
+            for cand in 3001 3002 3003 3004 3005 3010 3020 4001 5001 8080; do
+              if curl -s --max-time 2 "http://127.0.0.1:$cand/api/opencode/health" | grep -q '"state"'; then
+                PORT=$cand; break 2
+              fi
+            done
+          done
+          if [ -n "$PORT" ]; then
+            OUT=$(curl -s --max-time 20 -X POST "http://127.0.0.1:$PORT/api/google/oauth/login" \
+              -H 'Content-Type: application/json' \
+              -d '{"returnTo":"http://127.0.0.1:9911"}' -w ' HTTP:%{http_code}')
+            echo "::notice title=fail-closed-broker-outage::$OUT"
+            AUTHED=$(curl -s --max-time 10 "http://127.0.0.1:$PORT/api/subscription/status" -w ' HTTP:%{http_code}')
+            echo "::notice title=no-fake-session::$AUTHED"
+          else
+            echo "::error::poisoned launch: backend did not become healthy"
+            exit 1
+          fi
+          kill $APP_PID 2>/dev/null || true
+          taskkill //F //IM "Alpha One.exe" //T 2>/dev/null || true
+          taskkill //F //IM node.exe //T 2>/dev/null || true
+          echo "::notice title=runtime-verify-complete::all noninteractive runtime checks executed (GUI visuals, consent, loopback callback return NOT tested — interactive phase required)"

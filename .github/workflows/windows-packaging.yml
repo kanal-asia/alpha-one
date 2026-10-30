@@ -50,6 +50,11 @@ jobs:
           else
             CANDIDATE="${{ github.sha }}"
           fi
+          # packaging-<sha>[-rN] triggers: a trailing revision segment used to
+          # re-trigger the same source target is stripped before resolution.
+          if ! git rev-parse --verify --quiet "${CANDIDATE}^{commit}" >/dev/null; then
+            CANDIDATE="${CANDIDATE%-*}"
+          fi
           FULL="$(git rev-parse --verify "${CANDIDATE}^{commit}")"
           echo "sha=$FULL" >> "$GITHUB_OUTPUT"
           echo "Build source commit resolved: $FULL (candidate: $CANDIDATE)"
@@ -103,8 +108,34 @@ jobs:
         run: |
           set -euo pipefail
           START=$(date +%s)
-          npx electron-builder build --win
+          npx electron-builder build --win 2>&1 | tee electron-builder.log
           echo "electron-builder exit=0 duration=$(( $(date +%s) - START ))s"
+
+      - name: Failure diagnostics (public via step summary)
+        if: failure()
+        shell: bash
+        run: |
+          set -uo pipefail
+          {
+            echo "## Windows Packaging — failure diagnostics"
+            echo "source commit: ${{ steps.resolve.outputs.sha }}"
+            echo '```'
+            echo "--- versions"
+            node --version; npm --version
+            npx electron-builder --version 2>&1 | head -3
+            echo "--- electron-builder.log (tail 80)"
+            tail -80 electron-builder.log 2>/dev/null || echo "(no log captured)"
+            echo "--- release/ listing"
+            ls -la release/ 2>&1 | head -15
+            echo "--- build-installer/runtime"
+            ls -la build-installer/runtime/ 2>&1 | head -10
+            echo "--- electron-builder cache"
+            find "$LOCALAPPDATA/electron-builder" -maxdepth 2 2>&1 | head -20
+            echo "--- disk free"
+            df -h . 2>/dev/null | tail -1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::electron-builder failed — see job summary for captured diagnostics"
 
       - name: Validate installer output
         id: artifact

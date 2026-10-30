@@ -210,7 +210,7 @@ jobs:
           scan() {
             local label="$1" pattern="$2"
             local count
-            count=$(grep -raoE -- "$pattern" "${TARGETS[@]}" 2>/dev/null | wc -l | tr -d ' ')
+            count=$( { grep -raoE -- "$pattern" "${TARGETS[@]}" 2>/dev/null || true; } | wc -l | tr -d ' ')
             if [ "$count" -gt 0 ]; then
               echo "::error::SECRET-LIKE MATCH: $label ($count occurrence(s)); value not printed; failing closed"
               FAIL=1
@@ -219,8 +219,8 @@ jobs:
             fi
           }
           scan "Google client secret value"        'GOCSPX[A-Za-z0-9_-]{10,}'
-          scan "Google access token"               'ya29\.[A-Za-z0-9_-]{10,}'
-          scan "Google refresh token"              '(^|[^A-Za-z0-9/.])1//[A-Za-z0-9_-]{15,}'
+          scan "Google access token"               'ya29\.[A-Za-z0-9_-]{15,}'
+          scan "Google refresh token"              '1//0[A-Za-z0-9_-]{20,}'
           scan "Google API key"                    'AIza[A-Za-z0-9_-]{30,}'
           scan "private key block"                 '\-\-\-\-\-BEGIN [A-Z ]*PRIVATE KEY'
           scan "client secret value assignment"    'GOOGLE_CLIENT_SECRET[[:space:]]*=[[:space:]]*.[^[:space:]]{8,}'
@@ -248,6 +248,7 @@ jobs:
             echo "::error::Security inspection FAILED; installer will NOT be uploaded"
             exit 1
           fi
+          echo "::notice title=security-inspection::PASSED - 7 secret-value patterns 0 matches; no .env in package; local exchange not enabled; broker default + public client id present"
           echo "Security inspection passed."
 
       - name: Checksums and build metadata

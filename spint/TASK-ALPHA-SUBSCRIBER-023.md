@@ -1,6 +1,6 @@
 # TASK-ALPHA-SUBSCRIBER-023 — Windows Packaging & Product Identity Interactive E2E
 
-**Status:** COMPLETE — `PRODUCT_IDENTITY_OAUTH_BROKER_PARTIAL` (created 2026-10-30; resumption 2026-10-30 blocked: no Windows execution environment reachable from agent session — see Resumption section)
+**Status:** COMPLETE — `PRODUCT_IDENTITY_PACKAGED_RUNTIME_VERIFIED_INTERACTIVE_BLOCKED` (created 2026-10-30; final resumption verified installer + packaged runtime via windows-latest; interactive consent operator-gated — see FINAL RESUMPTION section)
 **Priority:** P0 — Product Identity Release Verification
 **Type:** Packaging + Security Verification + Interactive E2E
 **Predecessor:** TASK-ALPHA-SUBSCRIBER-022 (`PRODUCT_IDENTITY_OAUTH_BROKER_PARTIAL`)
@@ -43,16 +43,16 @@ Baseline, config, and live-probe findings below are recorded first-hand.
 |---|---|---|---|
 | AC-01 | Product callback registered, no mismatch | Live Google authorization | **PASS** (R2) |
 | AC-02 | Source == TASK-022 implementation commit | Git evidence | **PASS** (R1) |
-| AC-03 | Windows installer built | Build log (Windows builder) | NOT EXECUTED (R3/R4) |
-| AC-04 | Installer SHA-256 recorded | Artifact hash | NOT EXECUTED (R3/R4) |
-| AC-05 | No client secret in installer | Artifact inspection | NOT EXECUTED (R3/R4) |
-| AC-06 | Packaged runtime runs | Runtime evidence (Windows) | NOT EXECUTED (R3/R4) |
-| AC-07 | Desktop uses VPS broker | Network/runtime evidence | NOT EXECUTED (R3/R4) |
-| AC-08 | Dynamic loopback callback works | Callback evidence (Windows) | NOT EXECUTED (R3/R4) |
-| AC-09 | Google consent succeeds | Interactive evidence | NOT EXECUTED (R3/R4) |
-| AC-10 | Completion redemption exactly once | Broker + desktop evidence | NOT EXECUTED (R3/R4) |
-| AC-11 | Product Identity session formed | Application evidence | NOT EXECUTED (R3/R4) |
-| AC-12 | Logout clears session | Session verification | NOT EXECUTED (R3/R4) |
+| AC-03 | Windows installer built | Build log (Windows builder) | **PASS** (R12/R14) |
+| AC-04 | Installer SHA-256 recorded | Artifact hash | **PASS** (R10) |
+| AC-05 | No client secret in installer | Artifact inspection | **PASS** (R11) |
+| AC-06 | Packaged runtime runs | Runtime evidence (Windows) | **PASS** (R12) |
+| AC-07 | Desktop uses VPS broker | Network/runtime evidence | **PASS** (R12) |
+| AC-08 | Dynamic loopback callback works | Callback evidence (Windows) | **PARTIAL** (R12/R14) |
+| AC-09 | Google consent succeeds | Interactive evidence | **BLOCKED** (R13) |
+| AC-10 | Completion redemption exactly once | Broker + desktop evidence | **PARTIAL** (R14) |
+| AC-11 | Product Identity session formed | Application evidence | **BLOCKED** (R13) |
+| AC-12 | Logout clears session | Session verification | **BLOCKED** (R13) |
 | AC-13 | Workspace/Drive no regression | Compatibility smoke | **PASS** (R5) |
 | AC-14 | Replay/invalid redemption rejected | Security evidence | **PASS** (R6) |
 
@@ -265,3 +265,95 @@ security inspection PASSED. AC-03…AC-12 of THIS task remain to be proven by
 the next phase: download the artifact (authenticated GitHub session), verify
 the SHA-256, install/run (Phase 3), then interactive consent with the
 dedicated test account (Phases 4-5).
+---
+
+## FINAL RESUMPTION (2026-10-30) — Artifact Retrieval + Packaged Runtime VERIFIED; Interactive Blocked
+
+### R10. Phase 1 — Artifact retrieval + verification (PASS)
+
+- Retrieval capability: the agent's existing authorized git credential bridge
+  (no founder PAT requested, value never printed) -> GitHub artifacts API.
+  Artifact `alpha-one-windows-3a02c6e` (id 12965608340, not expired) from run
+  `41031835852` downloaded (160,159,606-byte zip -> 3 files).
+- **SHA-256 MATCH:** computed `c3563367ae6168c3c406a539f65cf7ce1d2899cf453df6b2110e02bd4f106395`
+  == expected == `AlphaOne-Setup.exe.sha256` == `build-metadata.json`.
+- **Provenance verified:** `build-metadata.json.sourceCommit` =
+  `3a02c6e367708b8157bbe015eeefdea430e5a925` (exact); toolchain node
+  v26.5.0 / npm 11.17.0 / win32-x64; builtAt 2026-10-30T09:16:55Z.
+- Filename/size: `AlphaOne-Setup.exe`, 160,159,836 bytes.
+
+### R11. Phase 2 — Packaged artifact inspection (PASS, independent of CI)
+
+- Local raw-binary scan of the installer: 0 matches for client-secret value,
+  secret assignment, local-exchange enablement, API-key and PEM shapes
+  (compressed payload — best-effort; deep tooling unavailable locally).
+- **Deep independent inspection on the Windows runner over the INSTALLED app**
+  (run 41037916533): literal secret forms absent **package-wide**; PEM/API-key
+  shapes clean in project-authored content (one vendor-binary parser constant
+  in `opencode.exe` file-attributed per the TASK-024 policy, values never
+  printed); **no `.env` files**; VPS broker default present in installed
+  backend; `PRODUCT_OAUTH_LOCAL_EXCHANGE` not enabled.
+
+### R12. Phase 3 — Packaged runtime on windows-latest (PASS)
+
+Workflow `.github/workflows/windows-runtime-verify.yml`, run **41037916533**
+(tag `runtime-verify-2`), all steps green — installing the PINNED artifact
+(no rebuild) and probing the real packaged app:
+
+| Check | Evidence (check annotations) |
+|---|---|
+| Installer integrity on runner | `SHA-256 MATCH c3563367...6395 | 160159836 bytes | source 3a02c6e...` |
+| Silent install | `installer exit 0`, app at `C:\AlphaOneTest` |
+| **Dynamic loopback server** | `dynamic loopback backend listening on port 3001` |
+| Packaged backend health | `{"state":"unknown","cliReachable":true,"version":"1.18.21",...}` (CLI reachable; state=unknown = no project open — expected) |
+| **Frontend load** | `HTTP 200 :: <!doctype html>` served from packaged runtime |
+| **Product Identity broker initiation** | `POST /api/google/oauth/login` -> `{"url":"https://accounts.google.com/o/oauth2/v2/auth?client_id=480048442203-...&redirect_uri=https%3A%2F%2Falpha.kanal.asia%2Fapi%2Fgoogle%2Foauth%2Fproduct%2Fcallb...` — **real VPS-broker authorize URL; machine holds NO GOOGLE_CLIENT_SECRET** |
+| Fail-closed invalid completion | `{"error":"Invalid or expired login code...","code":"AUTHENTICATION_INVALID"} HTTP:403` (forged code -> no session) |
+| **Fail-closed broker outage** | poisoned `PRODUCT_OAUTH_BROKER_URL` -> `{"error":"Product login service is unreachable."} HTTP:503` — no session fabricated |
+| No fake session after failure | `{"planId":"free","source":"default","hasRecord":false} HTTP:200` (still anonymous) |
+
+Limitations (not claimed): GUI visuals, real Google consent, browser handoff,
+the Google->VPS->loopback callback return, and session/logout exercise.
+
+### R13. Phase 4 — Interactive Google E2E: BLOCKED (gate stop)
+
+No interactive Windows desktop session and no founder/operator-approved
+dedicated Google test account are available to the agent; consent must be
+performed by a human. **Exact operator actions:** (1) download artifact
+`alpha-one-windows-3a02c6e` from Actions run `41031835852` and verify SHA-256
+`c3563367ae6168c3c406a539f65cf7ce1d2899cf453df6b2110e02bd4f106395`;
+(2) install and launch Alpha One Desktop; (3) click Google sign-in and
+complete consent with the dedicated test account; (4) confirm sign-in shows
+the verified Google `sub` identity; (5) exercise a Product-Identity-gated
+route, then sign-out and confirm the session is gone and Workspace stays
+independent. Nothing is simulated here.
+
+### R14. AC status after final resumption
+
+| ID | Status | Evidence |
+|---|---|---|
+| AC-01 | **PASS** | live Google registration probe (R2) |
+| AC-02 | **PASS** | git evidence (R1) |
+| AC-03 | **PASS** | TASK-024 run 41031835852 build log |
+| AC-04 | **PASS** | SHA-256 verified 3x (R10) |
+| AC-05 | **PASS** | CI + independent installed-app inspection (R11) |
+| AC-06 | **PASS** | install + launch + health on windows-latest (R12) |
+| AC-07 | **PASS** | broker initiation from packaged app without client secret (R12) |
+| AC-08 | **PARTIAL** | loopback server + frontend verified (R12); Google->VPS->loopback callback RETURN chains on AC-09 consent |
+| AC-09 | **BLOCKED** | interactive consent — operator action R13 |
+| AC-10 | **PARTIAL** | single-use/replay/concurrency security-proven (TASK-022 suite) + packaged fail-closed (R12); live full-chain redemption chains on AC-09 |
+| AC-11 | **BLOCKED** | needs real login (R13) |
+| AC-12 | **BLOCKED** | needs real login (R13) |
+| AC-13 | **PASS** | VPS Workspace/Drive re-verified fresh (start 200 w/ Workspace callback, drive live, manifest 200; both services active) |
+| AC-14 | **PASS** | TASK-022 suite + live VPS rejection probes + packaged 403/503 fail-closed (R12) |
+
+## Final Verdict
+
+**`PRODUCT_IDENTITY_PACKAGED_RUNTIME_VERIFIED_INTERACTIVE_BLOCKED`**
+
+The verified installer of TASK-022's implementation commit installs, launches,
+serves its frontend on the dynamic loopback port, initiates Product Identity
+login through the VPS OAuth Broker **without any Google client secret on the
+machine**, and fails closed on invalid completion codes and broker outages.
+Remaining: real Google consent with the dedicated test account (AC-09..AC-12)
+— operator actions in R13.

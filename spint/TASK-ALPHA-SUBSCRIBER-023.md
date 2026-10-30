@@ -1,6 +1,6 @@
 # TASK-ALPHA-SUBSCRIBER-023 — Windows Packaging & Product Identity Interactive E2E
 
-**Status:** COMPLETE — `PRODUCT_IDENTITY_OAUTH_BROKER_PARTIAL` (created 2026-10-30 per `spint/TASK-WORKFLOW.md`)
+**Status:** COMPLETE — `PRODUCT_IDENTITY_OAUTH_BROKER_PARTIAL` (created 2026-10-30; resumption 2026-10-30 blocked: no Windows execution environment reachable from agent session — see Resumption section)
 **Priority:** P0 — Product Identity Release Verification
 **Type:** Packaging + Security Verification + Interactive E2E
 **Predecessor:** TASK-ALPHA-SUBSCRIBER-022 (`PRODUCT_IDENTITY_OAUTH_BROKER_PARTIAL`)
@@ -194,3 +194,58 @@ npx electron-builder build --win`, record installer SHA-256, perform the
 artifact secret inspection (§4.3), install/run, then complete the interactive
 Google consent with the dedicated test account (Phase 4 checklist §6) —
 targeting `PRODUCT_IDENTITY_OAUTH_BROKER_INTERACTIVE_E2E_VERIFIED`.
+
+---
+
+## Resumption Attempt (2026-10-30, second session) — ENVIRONMENT ACCESS LIMITATION
+
+**Mission:** resume Phases 2–5 on the Windows builder `C:\dev\alpha-one`.
+**Outcome:** executed Phase 1 environment inspection per the stop-branch;
+Phases 2–5 **cannot execute from the available agent environment**. No
+substitution (Linux/Wine/VPS packaging) was attempted, per instruction.
+
+### Environment inspection evidence (first-hand)
+
+| Inspection | Result |
+|---|---|
+| Session host | Linux `kanal-prod-01` (kernel 6.8.0-147, Ubuntu) — not Windows |
+| SSH access | `github.com` only (`/root/.ssh/config`); no Windows host in `known_hosts` |
+| CI workflows | `.github/workflows/ci.yml` = `ubuntu-latest` + Node 20 lint/test/build; **no Windows job, no packaging job** (`stale.yml` irrelevant) |
+| GitHub Actions history (public API) | 126 runs, all `Continuous Integration`/`Close inactive issues` — no Windows packaging runs exist |
+| Virtualization | no qemu, no VirtualBox, docker daemon Linux-only — no path to run Windows locally |
+| Network reachability | WireGuard `wg0` (single peer `10.66.66.2/32`) scanned for RDP 3389 + WinRM 5985 across `10.66.66.0/24`: **zero open listeners**; no SMB/WinRM/RDP targets configured in `/etc/hosts` |
+| Builder access method in repo docs | none — `docs/RELEASE_WINDOWS.md` presumes execution *on* the Windows machine |
+| Prior Windows builds (TASK-019 record) | performed by an agent session running **on** `C:\dev\alpha-one` (Windows `vite`/`Alpha One.exe` processes managed there) — the builder is a separate host, reached by running the agent there, not remotely |
+
+**Root cause of the resumption block:** this agent session has no execution
+path to any Windows host — an agent-topology limitation, not a source or
+implementation defect. TASK-ALPHA-AUTH-003's fail-closed gates re-confirmed
+fresh (`prepare:runtime` → `Unsupported builder platform: linux/x64`;
+`engines.node 26.5.0` exact vs VPS Node v22.23.2; no wine).
+
+### AC status after resumption (unchanged by this attempt)
+
+AC-01/02/13/14 remain **PASS** (evidence in R1/R2/R5/R6 above).
+AC-03…AC-12: **NOT EXECUTED** — Windows execution environment unreachable
+from the agent session; interactive consent additionally requires the
+dedicated test account. No simulation, no substituted evidence.
+
+### Required to unblock (owner actions)
+
+1. **Run the coding agent session on the Windows builder host** (as
+   TASK-019's session did): `C:\dev\alpha-one`, Node v26.5.0 exactly,
+   then Phase 2–4 commands of this brief (`npm ci` → `npm run build:windows`
+   → `npx electron-builder build --win` → artifact inspection → install/run).
+2. **Founder/operator:** provide/approve the dedicated Google test account
+   for the Phase 5 interactive consent (credentials never via chat/logs/task
+   files).
+3. Optional structural fix: register a self-hosted Windows runner and add a
+   packaging job to CI so future release builds are agent-executable.
+
+### Verdict after resumption
+
+**`PRODUCT_IDENTITY_OAUTH_BROKER_PARTIAL`** (unchanged) — AC state identical
+to the first execution (01/02/13/14 PASS; 03–12 unexecuted). The resumption
+adds conclusive diagnosis: the remaining phases require an agent session on
+the Windows builder; no reachable Windows execution environment exists from
+this session's topology.

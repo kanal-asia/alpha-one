@@ -73,20 +73,26 @@ jobs:
           set -euo pipefail
           FAIL=0
           scan() {
-            local label="$1" pattern="$2"
+            local label="$1" pattern="$2"; shift 2
             local count
-            count=$( { grep -raoE -- "$pattern" "C:/AlphaOneTest" 2>/dev/null || true; } | wc -l | tr -d ' ')
+            count=$( { grep -raoE -- "$pattern" "$@" 2>/dev/null || true; } | wc -l | tr -d ' ')
             if [ "$count" -gt 0 ]; then
-              echo "::error::SECRET-LIKE MATCH in installed app: $label ($count); value not printed; failing closed"
+              echo "::error::SECRET-LIKE MATCH: $label ($count); value not printed; files:"
+              grep -rla -- "$pattern" "$@" 2>/dev/null | head -5 | sed 's/^/  /'
               FAIL=1
             else
               echo "clean: $label"
             fi
           }
-          scan "Google client secret value"      'GOCSPX[A-Za-z0-9_-]{10,}'
-          scan "client secret value assignment"  'GOOGLE_CLIENT_SECRET[[:space:]]*=[[:space:]]*.[^[:space:]]{8,}'
-          scan "local OAuth exchange enabled"    'PRODUCT_OAUTH_LOCAL_EXCHANGE[[:space:]]*=[[:space:]]*.1.'
-          scan "private key block"               '\-\-\-\-\-BEGIN [A-Z ]*PRIVATE KEY'
+          PROJECT=("C:/AlphaOneTest/resources/app/dist" "C:/AlphaOneTest/resources/app.asar")
+          # Literal real-secret forms: package-wide (vendor binaries included).
+          scan "Google client secret value"      'GOCSPX[A-Za-z0-9_-]{10,}' "C:/AlphaOneTest"
+          scan "client secret value assignment"  'GOOGLE_CLIENT_SECRET[[:space:]]*=[[:space:]]*.[^[:space:]]{8,}' "C:/AlphaOneTest"
+          scan "local OAuth exchange enabled"    'PRODUCT_OAUTH_LOCAL_EXCHANGE[[:space:]]*=[[:space:]]*.1.' "C:/AlphaOneTest"
+          # Fuzzy shapes: project-authored content only (TASK-024 policy —
+          # vendor binaries embed upstream parser constants, file-attributed).
+          scan "private key block (project)"     '\-\-\-\-\-BEGIN [A-Z ]*PRIVATE KEY' "${PROJECT[@]}"
+          scan "Google API key (project)"        'AIza[A-Za-z0-9_-]{30,}' "${PROJECT[@]}"
           ENVFILES=$(find "C:/AlphaOneTest" -name ".env*" 2>/dev/null | wc -l | tr -d ' ')
           if [ "$ENVFILES" -gt 0 ]; then
             echo "::error::.env file(s) present in installed app ($ENVFILES)"
@@ -104,7 +110,7 @@ jobs:
             echo "::error::installed-package inspection FAILED"
             exit 1
           fi
-          echo "::notice title=installed-inspection::PASSED - no secret forms, no .env, broker default present"
+          echo "::notice title=installed-inspection::PASSED - literal secret forms absent package-wide; project-authored content clean; no .env; broker default present"
 
       - name: Launch packaged app and probe runtime
         id: probe

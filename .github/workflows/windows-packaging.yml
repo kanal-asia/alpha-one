@@ -108,7 +108,11 @@ jobs:
         run: |
           set -euo pipefail
           START=$(date +%s)
-          npx electron-builder build --win 2>&1 | tee electron-builder.log
+          # --publish never: git-tag triggers make electron-builder attempt an
+          # implicit GitHub Release upload, which fails without GH_TOKEN. This
+          # project intentionally uses NO tokens (AC-11); publishing is an
+          # explicit, separate, human-approved action (RELEASE_WINDOWS.md).
+          npx electron-builder build --win --publish never 2>&1 | tee electron-builder.log
           echo "electron-builder exit=0 duration=$(( $(date +%s) - START ))s"
 
       - name: Failure diagnostics (public via step summary)

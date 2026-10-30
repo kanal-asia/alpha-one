@@ -204,7 +204,7 @@ const DB_PATH = join(DATA_DIR, 'alpha-one.sql')
 
 let db: InstanceType<typeof DatabaseSync> | null = null
 
-function getDb(): InstanceType<typeof DatabaseSync> {
+export function getDb(): InstanceType<typeof DatabaseSync> {
   if (!db) {
     // Ensure data directory exists
     mkdirSync(DATA_DIR, { recursive: true })

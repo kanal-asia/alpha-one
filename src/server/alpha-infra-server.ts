@@ -30,6 +30,10 @@ import {
 } from './alpha-infra-db'
 
 import { saveConnection, getConnection, getCanonicalProfile, upsertCanonicalProfile, upsertConnectionMetadata, recordDownloadEvent, recordGoogleActivity, resolveCountryName } from '../lib/sqlite-persistence'
+import {
+  createProductOAuthRouter,
+  startProductLoginCleanup,
+} from './product-oauth-broker'
 import { stat } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 
@@ -154,6 +158,16 @@ app.use(express.json())
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ ok: true, service: 'alpha-infra', timestamp: new Date().toISOString() })
 })
+
+// ---------------------------------------------------------------------------
+// TASK-ALPHA-SUBSCRIBER-022: Product Identity OAuth broker (VPS-owned
+// Google exchange). A SEPARATE contract from the Workspace OAuth routes
+// below: dedicated routes/stores/scopes, `openid email profile` only, and
+// identity = verified Google `sub`. The Workspace flow is untouched.
+// Public URL (via Caddy /api strip): /api/google/oauth/product/*
+// ---------------------------------------------------------------------------
+app.use('/google/oauth/product', createProductOAuthRouter())
+startProductLoginCleanup()
 
 // ---------------------------------------------------------------------------
 // Google OAuth — Start

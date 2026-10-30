@@ -15,6 +15,11 @@ import { createWorkspaceService } from '../platform/workspace/service'
 import { createFsRouter } from '../services/fs/fs-router'
 import { createSubscriptionRouter } from '../services/subscription/router'
 import { DATA_ROOT } from '../lib/data-root'
+import { applyBundledGoogleClientIdFallback } from '../lib/google-client-id'
+
+// TASK-ALPHA-SUBSCRIBER-022: the packaged app ships no .env; the ID-token
+// verifier needs the PUBLIC client id as audience. Environment wins when set.
+applyBundledGoogleClientIdFallback()
 
 const workspaceRoot = process.cwd()
 const kernel = bootstrapPlatform({

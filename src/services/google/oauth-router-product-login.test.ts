@@ -49,6 +49,8 @@ process.env['GOOGLE_CLIENT_SECRET'] = 'test-client-secret-not-a-real-one'
 process.env['GOOGLE_OAUTH_REDIRECT_URI'] =
   'http://localhost:3001/api/google/oauth/callback'
 process.env['CLIENT_URL'] = 'http://localhost:3001'
+// TASK-ALPHA-SUBSCRIBER-022: this suite proves the legacy LOCAL exchange.
+process.env['PRODUCT_OAUTH_LOCAL_EXCHANGE'] = '1'
 
 const { createGoogleOAuthRouter } = await import('./oauth-router')
 const { __setRemoteKeysForTests } = await import('../opencode/google-id-token')
@@ -216,6 +218,9 @@ afterEach(() => {
   vi.stubEnv('GOOGLE_CLIENT_SECRET', 'test-client-secret-not-a-real-one')
   vi.stubEnv('GOOGLE_OAUTH_REDIRECT_URI', 'http://localhost:3001/api/google/oauth/callback')
   vi.stubEnv('CLIENT_URL', 'http://localhost:3001')
+  // TASK-ALPHA-SUBSCRIBER-022: this suite proves the LEGACY local exchange;
+  // the default is VPS-broker delegation (covered in the delegation suite).
+  vi.stubEnv('PRODUCT_OAUTH_LOCAL_EXCHANGE', '1')
 })
 
 // ---------------------------------------------------------------------------

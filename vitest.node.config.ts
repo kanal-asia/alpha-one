@@ -26,6 +26,8 @@ export default defineConfig({
       'src/services/opencode/auth-context.test.ts',
       'src/services/opencode/google-id-token.test.ts',
       'src/services/google/oauth-router-product-login.test.ts',
+      'src/services/google/oauth-router-broker-delegation.test.ts',
+      'src/server/product-oauth-broker.test.ts',
       'src/server/packaged-bundle.test.ts',
       'src/lib/subscription-plans.test.ts',
       'src/lib/subscription-status.test.ts',

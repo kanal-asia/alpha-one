@@ -19,6 +19,15 @@ import {
   saveConnection,
   resolveSafeReturnBase,
 } from './oauth-service'
+import { parseLoopbackOrigin } from '../../lib/oauth-return-policy'
+import {
+  brokerComplete,
+  brokerLogin,
+  isLocalProductExchange,
+  rememberRedemptionSecret,
+  takeRedemptionSecret,
+  BrokerRequestError,
+} from './product-oauth-broker-client'
 
 export function createGoogleOAuthRouter(): Router {
   const router = Router()
@@ -27,9 +36,42 @@ export function createGoogleOAuthRouter(): Router {
    * POST /api/google/oauth/login
    * Starts the product-login flow (OpenID Connect, `openid email profile`
    * only — zero Workspace permissions). Returns the Google authorization URL.
+   *
+   * TASK-ALPHA-SUBSCRIBER-022: by default the flow is DELEGATED to the VPS
+   * Product Identity broker — the Google code exchange (and therefore the
+   * client secret) stays server-side. The VPS-issued redemption secret is
+   * kept in runtime memory only and never reaches the SPA. Legacy local
+   * exchange remains available for offline/dev tests via
+   * `PRODUCT_OAUTH_LOCAL_EXCHANGE=1`.
    */
   router.post('/login', async (req: Request, res: Response) => {
     try {
+      if (!isLocalProductExchange()) {
+        const returnTo =
+          (typeof req.body?.returnTo === 'string' ? req.body.returnTo : undefined) ??
+          (typeof req.headers.origin === 'string' ? req.headers.origin : undefined)
+        if (!returnTo || parseLoopbackOrigin(returnTo) === null) {
+          return res.status(400).json({
+            error: 'Invalid return URL.',
+            code: 'LOGIN_RETURN_INVALID',
+          })
+        }
+        try {
+          const { url, transactionId, redemptionSecret } =
+            await brokerLogin(returnTo)
+          rememberRedemptionSecret(transactionId, redemptionSecret)
+          // SPA contract preserved: only the authorize URL is returned.
+          return res.json({ url })
+        } catch (err) {
+          if (err instanceof BrokerRequestError) {
+            return res.status(err.status).json({
+              error: err.message,
+              code: err.code ?? 'AUTHENTICATION_INVALID',
+            })
+          }
+          throw err
+        }
+      }
       if (!isConfigured()) {
         return res.status(503).json({
           error: 'Product login is not configured.',
@@ -51,16 +93,43 @@ export function createGoogleOAuthRouter(): Router {
    * Redeems a one-time product-login completion code for the verified
    * identity + ID token. Single-use: the stored completion is deleted on
    * read, so a captured code cannot be replayed.
+   *
+   * TASK-ALPHA-SUBSCRIBER-022 (broker mode): presents the completion code
+   * together with the in-memory redemption secret to the VPS; consumption
+   * is atomic server-side. The code alone (e.g. from a leaked URL) is
+   * useless without the desktop-held secret.
    */
   router.post('/login/complete', async (req: Request, res: Response) => {
     try {
       const { code } = req.body as { code?: string }
-      const result = await completeProductLogin(code ?? '')
-      if (!result) {
-        return res.status(403).json({
+      const invalid = (): Response =>
+        res.status(403).json({
           error: 'Invalid or expired login code. Please sign in again.',
           code: 'AUTHENTICATION_INVALID',
         })
+      if (!isLocalProductExchange()) {
+        const completionCode = code ?? ''
+        const dot = completionCode.indexOf('.')
+        if (dot <= 0 || dot === completionCode.length - 1) return invalid()
+        const transactionId = completionCode.slice(0, dot)
+        const secret = takeRedemptionSecret(transactionId)
+        if (!secret) return invalid()
+        try {
+          const result = await brokerComplete(completionCode, secret)
+          return res.json(result)
+        } catch (err) {
+          if (err instanceof BrokerRequestError) {
+            return res.status(err.status).json({
+              error: err.message,
+              code: err.code ?? 'AUTHENTICATION_INVALID',
+            })
+          }
+          throw err
+        }
+      }
+      const result = await completeProductLogin(code ?? '')
+      if (!result) {
+        return invalid()
       }
       return res.json(result)
     } catch (err) {

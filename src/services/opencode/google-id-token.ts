@@ -34,6 +34,8 @@ export interface GoogleIdVerification {
   emailVerified?: boolean
   name?: string
   picture?: string
+  /** OIDC `nonce` claim (present when the token carries one). */
+  nonce?: string
   /** Machine-readable failure reason (never includes token material). */
   reason?: 'GOOGLE_NOT_CONFIGURED' | 'AUTHENTICATION_INVALID' | 'AUTHENTICATION_EXPIRED'
 }
@@ -69,7 +71,8 @@ export function isGoogleIdVerificationConfigured(): boolean {
 }
 
 export async function verifyGoogleIdToken(
-  token: string
+  token: string,
+  options?: { expectedNonce?: string }
 ): Promise<GoogleIdVerification> {
   const clientId = configuredClientId()
   if (!clientId) {
@@ -100,6 +103,14 @@ export async function verifyGoogleIdToken(
   if (typeof sub !== 'string' || sub.length === 0) {
     return { ok: false, reason: 'AUTHENTICATION_INVALID' }
   }
+  const nonce = payload['nonce']
+  // TASK-ALPHA-SUBSCRIBER-022: OIDC nonce binding (broker flow). When the
+  // caller expects a nonce, a missing or mismatched claim fails closed.
+  if (typeof options?.expectedNonce === 'string') {
+    if (typeof nonce !== 'string' || nonce !== options.expectedNonce) {
+      return { ok: false, reason: 'AUTHENTICATION_INVALID' }
+    }
+  }
   const email = payload['email']
   return {
     ok: true,
@@ -108,5 +119,6 @@ export async function verifyGoogleIdToken(
     emailVerified: payload['email_verified'] === true,
     name: typeof payload['name'] === 'string' ? (payload['name'] as string) : undefined,
     picture: typeof payload['picture'] === 'string' ? (payload['picture'] as string) : undefined,
+    nonce: typeof nonce === 'string' ? nonce : undefined,
   }
 }

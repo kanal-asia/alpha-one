@@ -1,0 +1,269 @@
+# TASK-ALPHA-SUBSCRIBER-024: agent-executable Windows packaging.
+#
+# GitHub Repository -> windows-latest -> Build -> Security Inspection ->
+# Installer Artifact. No founder machine, no VPS/Linux/Wine substitution, no
+# self-hosted runners, NO secrets of any kind (permissions: contents: read).
+#
+# Build-target selection (the commit whose SOURCE is built):
+#   - workflow_dispatch input `ref` (any commit/tag reachable from the clone);
+#   - push tag `packaging-<commit-sha>` — the suffix selects the build target,
+#     so an agent that can only `git push` can trigger a build of ANY historical
+#     commit (the workflow file itself lives at the tagged commit);
+#   - default: the run's own commit.
+# No pull_request trigger: untrusted PR code never reaches this workflow.
+name: Windows Packaging
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Source commit to build (SHA/tag/branch; empty = this run''s commit)'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'packaging-*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve build source commit
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.ref }}" ]; then
+            CANDIDATE="${{ inputs.ref }}"
+          elif [ "${{ github.ref_type }}" = "tag" ] && [[ "${{ github.ref_name }}" == packaging-* ]]; then
+            CANDIDATE="${GITHUB_REF_NAME#packaging-}"
+          else
+            CANDIDATE="${{ github.sha }}"
+          fi
+          FULL="$(git rev-parse --verify "${CANDIDATE}^{commit}")"
+          echo "sha=$FULL" >> "$GITHUB_OUTPUT"
+          echo "Build source commit resolved: $FULL (candidate: $CANDIDATE)"
+
+      - name: Check out build source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach "${{ steps.resolve.outputs.sha }}"
+          ACTUAL="$(git rev-parse HEAD)"
+          if [ "$ACTUAL" != "${{ steps.resolve.outputs.sha }}" ]; then
+            echo "::error::Checkout mismatch: $ACTUAL != ${{ steps.resolve.outputs.sha }}"
+            exit 1
+          fi
+          echo "Building source commit: $ACTUAL"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26.5.0
+          cache: npm
+
+      - name: Verify Node engine requirement
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE_V="$(node --version)"
+          NPM_V="$(npm --version)"
+          ENGINE="$(node -p "require('./package.json').engines.node")"
+          NPM_ENGINE="$(node -p "require('./package.json').engines.npm")"
+          echo "node: $NODE_V | npm: $NPM_V | engines: node $ENGINE, npm $NPM_ENGINE"
+          if [ "$NODE_V" != "v$ENGINE" ]; then
+            echo "::error::Node $NODE_V does not satisfy engines.node $ENGINE (exact)"
+            exit 1
+          fi
+          echo "engines.node verified: $ENGINE"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows app (build:windows)
+        shell: bash
+        run: |
+          set -euo pipefail
+          START=$(date +%s)
+          npm run build:windows
+          echo "build:windows exit=0 duration=$(( $(date +%s) - START ))s"
+
+      - name: Package installer (electron-builder)
+        shell: bash
+        run: |
+          set -euo pipefail
+          START=$(date +%s)
+          npx electron-builder build --win
+          echo "electron-builder exit=0 duration=$(( $(date +%s) - START ))s"
+
+      - name: Validate installer output
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALLER="release/AlphaOne-Setup.exe"
+          if [ ! -f "$INSTALLER" ]; then
+            echo "::error::Expected installer missing: $INSTALLER"
+            ls -la release/ 2>/dev/null || true
+            exit 1
+          fi
+          SIZE=$(stat -c %s "$INSTALLER")
+          if [ "$SIZE" -lt 10000000 ]; then
+            echo "::error::Installer suspiciously small: $SIZE bytes"
+            exit 1
+          fi
+          SHORT="$(echo '${{ steps.resolve.outputs.sha }}' | cut -c1-7)"
+          echo "installer=$INSTALLER" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "short=$SHORT" >> "$GITHUB_OUTPUT"
+          echo "Installer validated: $INSTALLER ($SIZE bytes)"
+          ls -la release/
+
+      - name: Verify build provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "
+            const p = require('./dist/provenance.json')
+            const want = '${{ steps.resolve.outputs.sha }}'
+            console.log('provenance.sourceCommit:', p.sourceCommit)
+            console.log('provenance.contentClean:', p.contentClean)
+            if (p.sourceCommit !== want) {
+              console.error('::error::Provenance sourceCommit mismatch: ' + p.sourceCommit + ' != ' + want)
+              process.exit(1)
+            }
+            if (p.contentClean !== true) {
+              console.error('::error::Provenance contentClean is not true')
+              process.exit(1)
+            }
+            console.log('provenance verified against build source commit')
+          "
+
+      - name: Artifact security inspection (fail-closed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGETS=(release/win-unpacked release/AlphaOne-Setup.exe)
+          if [ ! -d release/win-unpacked ]; then
+            echo "::error::win-unpacked directory missing; cannot inspect"
+            exit 1
+          fi
+          FAIL=0
+          scan() {
+            local label="$1" pattern="$2"
+            local count
+            count=$(grep -raoE -- "$pattern" "${TARGETS[@]}" 2>/dev/null | wc -l | tr -d ' ')
+            if [ "$count" -gt 0 ]; then
+              echo "::error::SECRET-LIKE MATCH: $label ($count occurrence(s)); value not printed; failing closed"
+              FAIL=1
+            else
+              echo "clean: $label"
+            fi
+          }
+          scan "Google client secret value"        'GOCSPX[A-Za-z0-9_-]{10,}'
+          scan "Google access token"               'ya29\.[A-Za-z0-9_-]{10,}'
+          scan "Google refresh token"              '(^|[^A-Za-z0-9/.])1//[A-Za-z0-9_-]{15,}'
+          scan "Google API key"                    'AIza[A-Za-z0-9_-]{30,}'
+          scan "private key block"                 '\-\-\-\-\-BEGIN [A-Z ]*PRIVATE KEY'
+          scan "client secret value assignment"    'GOOGLE_CLIENT_SECRET[[:space:]]*=[[:space:]]*.[^[:space:]]{8,}'
+          scan "local OAuth exchange enabled"      'PRODUCT_OAUTH_LOCAL_EXCHANGE[[:space:]]*=[[:space:]]*.1.'
+          ENVFILES=$(find release -name ".env*" -not -name "*.example" 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$ENVFILES" -gt 0 ]; then
+            echo "::error::.env file(s) present inside the packaged output ($ENVFILES)"
+            FAIL=1
+          else
+            echo "clean: no .env files in packaged output"
+          fi
+          if ! grep -q 'alpha.kanal.asia' release/win-unpacked/resources/app/dist/server/alpha-server.js; then
+            echo "::error::VPS broker default (alpha.kanal.asia) missing from packaged backend"
+            FAIL=1
+          else
+            echo "positive: VPS Product Identity broker default present"
+          fi
+          if ! grep -q 'apps.googleusercontent.com' release/win-unpacked/resources/app/dist/server/alpha-server.js; then
+            echo "::error::Public GOOGLE_CLIENT_ID missing from packaged backend (verifier audience)"
+            FAIL=1
+          else
+            echo "positive: public client id present (verifier audience)"
+          fi
+          if [ "$FAIL" -ne 0 ]; then
+            echo "::error::Security inspection FAILED; installer will NOT be uploaded"
+            exit 1
+          fi
+          echo "Security inspection passed."
+
+      - name: Checksums and build metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum AlphaOne-Setup.exe > AlphaOne-Setup.exe.sha256
+          cat AlphaOne-Setup.exe.sha256
+          SHA=$(cut -d' ' -f1 AlphaOne-Setup.exe.sha256)
+          SIZE=$(stat -c %s AlphaOne-Setup.exe)
+          node -e "
+            const fs = require('fs')
+            const meta = {
+              sourceCommit: '${{ steps.resolve.outputs.sha }}',
+              sourceCommitShort: '${{ steps.resolve.outputs.sha }}'.slice(0, 7),
+              node: process.version,
+              npm: '$(npm --version)',
+              platform: process.platform + '/' + process.arch,
+              installer: 'AlphaOne-Setup.exe',
+              installerSizeBytes: $SIZE,
+              installerSha256: '$SHA',
+              builtAt: new Date().toISOString(),
+              workflowRun: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+            }
+            fs.writeFileSync('build-metadata.json', JSON.stringify(meta, null, 2))
+            console.log('build metadata written')
+          "
+          {
+            echo "## Windows Packaging"
+            echo "- source commit: \`${{ steps.resolve.outputs.sha }}\`"
+            echo "- installer: AlphaOne-Setup.exe ($SIZE bytes)"
+            echo "- sha256: \`$SHA\`"
+            echo "- node: $(node --version) / npm: $(npm --version)"
+            echo "- security inspection: passed"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Packaged backend smoke test (noninteractive, best-effort)
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          ROOT="release/win-unpacked/resources"
+          SMOKE_DIR="$(mktemp -d)"
+          export ALPHA_DATA_DIR="$SMOKE_DIR"
+          export DIST_DIR="$ROOT/app/dist"
+          export PORT=3399
+          "$ROOT/node.exe" "$ROOT/app/dist/server/alpha-server.js" > smoke.log 2>&1 &
+          PID=$!
+          sleep 8
+          HEALTH=$(curl -s --max-time 5 http://127.0.0.1:3399/api/opencode/health || echo UNREACHABLE)
+          SUBS=$(curl -s --max-time 5 http://127.0.0.1:3399/api/subscription/status || echo UNREACHABLE)
+          kill $PID 2>/dev/null || true
+          echo "packaged backend /api/opencode/health: $HEALTH"
+          echo "packaged backend /api/subscription/status: $SUBS"
+          echo "smoke limitations: noninteractive runner — no GUI, no consent, no loopback handoff tested"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha-one-windows-${{ steps.artifact.outputs.short }}
+          path: |
+            release/AlphaOne-Setup.exe
+            release/AlphaOne-Setup.exe.sha256
+            release/build-metadata.json
+          retention-days: 30
+          if-no-files-found: error

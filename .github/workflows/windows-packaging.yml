@@ -135,7 +135,20 @@ jobs:
             df -h . 2>/dev/null | tail -1
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "::error::electron-builder failed — see job summary for captured diagnostics"
+          # Publish the log tail as error annotations — the only channel this
+          # project can read anonymously (check-runs annotations API). Chunked
+          # to stay within annotation size limits; no secrets are present in
+          # electron-builder output.
+          mapfile -t LINES < <(tail -40 electron-builder.log 2>/dev/null; echo "---"; ls release/ 2>&1 | head -5)
+          CHUNK=""; N=0
+          for ln in "${LINES[@]}"; do
+            CHUNK="${CHUNK}|${ln}"
+            if [ ${#CHUNK} -ge 3000 ]; then
+              N=$((N+1)); echo "::error title=eb-diag-${N}::${CHUNK}"; CHUNK=""
+            fi
+          done
+          if [ -n "$CHUNK" ]; then N=$((N+1)); echo "::error title=eb-diag-${N}::${CHUNK}"; fi
+          echo "::error::electron-builder failed — diagnostics published in annotations and job summary"
 
       - name: Validate installer output
         id: artifact

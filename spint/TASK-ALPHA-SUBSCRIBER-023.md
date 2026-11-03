@@ -357,3 +357,37 @@ login through the VPS OAuth Broker **without any Google client secret on the
 machine**, and fails closed on invalid completion codes and broker outages.
 Remaining: real Google consent with the dedicated test account (AC-09..AC-12)
 — operator actions in R13.
+
+---
+
+## RESUMPTION 2026-11-03 (TASK-ALPHA-SUBSCRIBER-025) — E2E chain driven to the human-only auth gate
+
+Verdict unchanged: **`PRODUCT_IDENTITY_PACKAGED_RUNTIME_VERIFIED_INTERACTIVE_BLOCKED`**.
+All agent-executable verification completed; interactive consent stops at the
+precisely characterized human-only gate below (never simulated).
+
+- VPS broker readiness (read-only): health 200 local+public; config fingerprints
+  unchanged (client fp `92ae8361a881`); derived product callback matches the
+  registered URI; Google registration probe -> "Sign in" (registered); all three
+  broker routes deployed and fail-closed via non-mutating probes (login 400
+  pre-write / callback 302 state-invalid / complete 403 zero-row);
+  `product_login_tx` empty after probes (no state mutated); audit log carries
+  only sanitized event lines (tx prefix / ip / reason).
+- Capabilities discovered: browser automation AVAILABLE (google-chrome +
+  Playwright 1.59.1 on the VPS host; no interactive Windows session; Chrome
+  profile empty — no signed-in Google session; zero test-account credentials
+  anywhere in env/docs/profiles).
+- Artifact: retrieved earlier via the authorized git credential bridge;
+  SHA-256 re-verified today (2026-11-03): `c3563367ae6168c3c406a539f65cf7ce1d2899cf453df6b2110e02bd4f106395`
+  MATCH; provenance `3a02c6e...` exact.
+- **Live E2E leg executed (agent-driven, real):** real VPS-broker login ->
+  real authorize URL (PKCE S256, product callback) -> headless real Chrome ->
+  Google `accounts.google.com/v3/signin/identifier`, page title "Sign in -
+  Google Accounts", app branding "continue to alphaone". The full chain up to
+  the account-authentication boundary is now proven end-to-end.
+- **Exact human-only gate:** Google account authentication (email/password +
+  any MFA/approval) for the dedicated test account. Smallest human
+  authorization: one interactive Google sign-in for the dedicated test
+  account in an agent-attached browser session; after sign-in the agent can
+  complete consent approval, callback return, redemption, session, logout,
+  and isolation checks automatically.

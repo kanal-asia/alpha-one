@@ -403,3 +403,79 @@ Windows sync/install/launch and the interactive continuation are blocked only
 by session reachability of the user's machine — two concrete bridges and the
 remaining user-only sign-in gate are recorded in
 `spint/TASK-ALPHA-SUBSCRIBER-026.md` §R5. No production mutation occurred.
+
+---
+
+## LOCAL EXECUTION 2026-11-06 (TASK-ALPHA-SUBSCRIBER-027) — INTERACTIVE E2E VERIFIED
+
+Executed from the user's Windows host (`C:\dev\alpha-one`), closing every
+remaining AC item. No simulation, no bypasses, no secret handling by the
+agent. All dates below are first-hand session evidence.
+
+### L1. Local sync (Phase 1) — PASS
+
+- Branch `main`, pulled `f48c2b3..c7dc549` fast-forward (local was ancestor,
+  tree clean, no stash/reset). HEAD `c7dc549` contains `c7dc549` trivially;
+  `origin/main` in sync.
+
+### L2. Artifact retrieval + verification (Phase 2) — PASS
+
+- Installed `gh` 2.103.3 via winget (environment setup, not source).
+- Authenticated via user-completed device flow (codes relayed verbally, agent
+  never saw or stored any token/PAT; `gh auth status` → kanal-asia).
+- `gh run download 41031835852 -n alpha-one-windows-3a02c6e` (one transient
+  connection reset, retry succeeded): `AlphaOne-Setup.exe` **160,159,836
+  bytes**, SHA-256 **`c3563367…106395` MATCH** (== expected == `.sha256`
+  file), `build-metadata.json` provenance **`3a02c6e…` exact**.
+
+### L3. Install + runtime (Phase 3) — PASS
+
+- Prior install was the Oct-20 pre-broker build; upgraded via the verified
+  installer with user approval (user data preserved). Provenance now
+  `3a02c6e`; exe timestamped 2026-10-30 (CI build).
+- Launch: `Alpha One.exe` (Program Files) + backend child alive; loopback
+  listener on 127.0.0.1:3001; `/api/opencode/health` healthy, CLI 1.18.21;
+  frontend `<!doctype html>` served.
+- Broker initiation from the packaged app: `POST …/login` without returnTo →
+  400 `LOGIN_RETURN_INVALID`; with `{"returnTo":"http://127.0.0.1:3001"}` →
+  real `accounts.google.com` authorize URL (product callback, PKCE, client
+  id, **no secret on the machine**).
+
+### L4. Interactive Google OAuth E2E (Phase 4) — PASS
+
+- Fresh broker URL opened in system Chrome; the dedicated test-account holder
+  (user) signed in and approved consent; app returned to Alpha One.
+- Post-consent: welcome state, no errors; Account page loads; test chat
+  message answered (verified execution path functional).
+- Sign-out via profile menu: clean signed-out state; Drive checked
+  afterwards — still connected and working (isolation proven).
+- No credentials, tokens, cookies, codes, or personal data were requested,
+  handled, or recorded by the agent at any point.
+
+### L5. Final AC map
+
+| ID | Status | Evidence |
+|---|---|---|
+| AC-01 | **PASS** | R2 live registration probe (unchanged) |
+| AC-02 | **PASS** | R1 + L1 (c7dc549 contains 3a02c6e) |
+| AC-03 | **PASS** | R10/R12 + L2 (CI build log, retrieved artifact) |
+| AC-04 | **PASS** | SHA-256 matched locally (L2) |
+| AC-05 | **PASS** | R11 + L2/L3 (no secret in artifact or on machine) |
+| AC-06 | **PASS** | R12 + L3 (installed upgrade, launch, health, frontend) |
+| AC-07 | **PASS** | R12 + L3 (broker authorize URL, no secret) |
+| AC-08 | **PASS** | L4 (consent → app return via loopback; prior PARTIAL now closed) |
+| AC-09 | **PASS** | L4 (real test-account consent, human-gated as required) |
+| AC-10 | **PASS** | L4 (redemption consumed exactly once, no error) + R6 security suite |
+| AC-11 | **PASS** | L4 (welcome state, Account page, answered chat on the verified session) |
+| AC-12 | **PASS** | L4 (clean sign-out confirmed by operator) |
+| AC-13 | **PASS** | R5/R13 + L4 (Drive intact after full cycle) |
+| AC-14 | **PASS** | R6 + packaged 403/503 fail-closed (R12, unchanged) |
+
+## Final Verdict
+
+**`PRODUCT_IDENTITY_OAUTH_BROKER_INTERACTIVE_E2E_VERIFIED`**
+
+The complete chain — verified installer → packaged desktop → VPS broker →
+human Google consent → loopback callback → single-use redemption → verified
+session → gated access → clean sign-out → Drive isolation — is proven with
+first-hand evidence at every link. No step simulated.

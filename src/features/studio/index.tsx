@@ -88,12 +88,29 @@ export function StudioHome() {
               )}
               {model.kind === 'error' && (
                 <>
-                  <p className='text-sm text-muted-foreground'>
-                    Plan status could not be loaded: {model.message}
-                  </p>
-                  <Button variant='outline' size='sm' onClick={retry}>
-                    Retry
-                  </Button>
+                  {model.code === 'AUTHENTICATION_EXPIRED' ? (
+                    <>
+                      <p className='text-sm text-muted-foreground'>
+                        Your sign-in session has expired. Sign in again to
+                        load your plan.
+                      </p>
+                      <Button variant='outline' size='sm' asChild>
+                        <Link to='/sign-in'>
+                          Sign in
+                          <ArrowRight className='size-4' />
+                        </Link>
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <p className='text-sm text-muted-foreground'>
+                        Plan status could not be loaded: {model.message}
+                      </p>
+                      <Button variant='outline' size='sm' onClick={retry}>
+                        Retry
+                      </Button>
+                    </>
+                  )}
                 </>
               )}
               {model.kind !== 'error' && (
@@ -113,12 +130,12 @@ export function StudioHome() {
                 <BarChart3 className='size-4' />
                 Usage & Quota
               </CardTitle>
-              <CardDescription>No usage tracking backend yet.</CardDescription>
+              <CardDescription>Recorded runs on this device.</CardDescription>
             </CardHeader>
             <CardContent className='space-y-3'>
               <p className='text-sm text-muted-foreground'>
-                Usage metering ships with the subscription backend. No usage
-                figures are shown until then.
+                Completed executions recorded locally. No quotas or billing
+                are attached.
               </p>
               <Button variant='outline' size='sm' asChild>
                 <Link to='/account/usage'>

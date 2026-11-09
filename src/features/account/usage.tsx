@@ -1,4 +1,5 @@
 import { BarChart3 } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
 import { Main } from '@/components/layout/main'
 import { PageHeader } from '@/components/page-header'
 import { Badge } from '@/components/ui/badge'
@@ -59,13 +60,27 @@ export function AccountUsage() {
         {model.kind === 'error' && (
           <Card>
             <CardHeader>
-              <CardTitle>Usage unavailable</CardTitle>
-              <CardDescription>{model.message}</CardDescription>
+              <CardTitle>
+                {model.code === 'AUTHENTICATION_EXPIRED'
+                  ? 'Session expired'
+                  : 'Usage unavailable'}
+              </CardTitle>
+              <CardDescription>
+                {model.code === 'AUTHENTICATION_EXPIRED'
+                  ? 'Your sign-in session has expired. Sign in again to load your usage.'
+                  : model.message}
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button variant='outline' size='sm' onClick={retry}>
-                Retry
-              </Button>
+              {model.code === 'AUTHENTICATION_EXPIRED' ? (
+                <Button variant='outline' size='sm' asChild>
+                  <Link to='/sign-in'>Sign in</Link>
+                </Button>
+              ) : (
+                <Button variant='outline' size='sm' onClick={retry}>
+                  Retry
+                </Button>
+              )}
             </CardContent>
           </Card>
         )}

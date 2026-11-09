@@ -79,3 +79,56 @@ describe('subscriber fetch identity carriage', () => {
     expect(seenHeaders()['Authorization']).toBeUndefined()
   })
 })
+
+/**
+ * TASK-ALPHA-SUBSCRIBER-028: expired sessions must surface distinctly from
+ * invalid credentials so the UI can offer re-login instead of a dead Retry.
+ * The machine `code` (never message text) drives the distinction.
+ */
+describe('subscriber fetch error-code propagation', () => {
+  it('status fetch propagates AUTHENTICATION_EXPIRED', async () => {
+    stubFetchJson(
+      {
+        error: 'The provided credentials are invalid or expired.',
+        code: 'AUTHENTICATION_EXPIRED',
+      },
+      false
+    )
+    const { status, error, code } = await fetchSubscriptionStatus()
+    expect(status).toBeNull()
+    expect(error).toBe('The provided credentials are invalid or expired.')
+    expect(code).toBe('AUTHENTICATION_EXPIRED')
+  })
+
+  it('status fetch propagates AUTHENTICATION_INVALID distinctly', async () => {
+    stubFetchJson(
+      {
+        error: 'The provided credentials are invalid or expired.',
+        code: 'AUTHENTICATION_INVALID',
+      },
+      false
+    )
+    const { code } = await fetchSubscriptionStatus()
+    expect(code).toBe('AUTHENTICATION_INVALID')
+  })
+
+  it('status fetch yields null code when the body carries none', async () => {
+    stubFetchJson({ error: 'boom' }, false)
+    const { code } = await fetchSubscriptionStatus()
+    expect(code).toBeNull()
+  })
+
+  it('usage fetch propagates AUTHENTICATION_EXPIRED', async () => {
+    stubFetchJson(
+      {
+        error: 'The provided credentials are invalid or expired.',
+        code: 'AUTHENTICATION_EXPIRED',
+      },
+      false
+    )
+    const { data, error, code } = await fetchUsage()
+    expect(data).toBeNull()
+    expect(error).toBe('The provided credentials are invalid or expired.')
+    expect(code).toBe('AUTHENTICATION_EXPIRED')
+  })
+})

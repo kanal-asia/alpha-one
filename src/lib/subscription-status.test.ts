@@ -52,9 +52,40 @@ describe('toPlanCardModel', () => {
   it('renders load failures as error, never as plan data', () => {
     expect(
       toPlanCardModel({ loading: false, status: null, error: 'boom' })
-    ).toEqual({ kind: 'error', message: 'boom' })
+    ).toEqual({ kind: 'error', message: 'boom', code: null })
     expect(
       toPlanCardModel({ loading: false, status: null, error: null })
-    ).toEqual({ kind: 'error', message: 'Subscription status is unavailable.' })
+    ).toEqual({
+      kind: 'error',
+      message: 'Subscription status is unavailable.',
+      code: null,
+    })
+  })
+
+  it('carries the machine code so expired sessions are distinguishable', () => {
+    expect(
+      toPlanCardModel({
+        loading: false,
+        status: null,
+        error: 'The provided credentials are invalid or expired.',
+        code: 'AUTHENTICATION_EXPIRED',
+      })
+    ).toEqual({
+      kind: 'error',
+      message: 'The provided credentials are invalid or expired.',
+      code: 'AUTHENTICATION_EXPIRED',
+    })
+    expect(
+      toPlanCardModel({
+        loading: false,
+        status: null,
+        error: 'The provided credentials are invalid or expired.',
+        code: 'AUTHENTICATION_INVALID',
+      })
+    ).toEqual({
+      kind: 'error',
+      message: 'The provided credentials are invalid or expired.',
+      code: 'AUTHENTICATION_INVALID',
+    })
   })
 })

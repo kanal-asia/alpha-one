@@ -100,12 +100,29 @@ export function AccountOverview() {
               )}
               {model.kind === 'error' && (
                 <>
-                  <p className='text-sm text-muted-foreground'>
-                    Plan status could not be loaded: {model.message}
-                  </p>
-                  <Button variant='outline' size='sm' onClick={retry}>
-                    Retry
-                  </Button>
+                  {model.code === 'AUTHENTICATION_EXPIRED' ? (
+                    <>
+                      <p className='text-sm text-muted-foreground'>
+                        Your sign-in session has expired. Sign in again to
+                        load your plan.
+                      </p>
+                      <Button variant='outline' size='sm' asChild>
+                        <Link to='/sign-in'>
+                          Sign in
+                          <ArrowRight className='size-4' />
+                        </Link>
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <p className='text-sm text-muted-foreground'>
+                        Plan status could not be loaded: {model.message}
+                      </p>
+                      <Button variant='outline' size='sm' onClick={retry}>
+                        Retry
+                      </Button>
+                    </>
+                  )}
                 </>
               )}
               <div className='flex flex-wrap gap-2'>

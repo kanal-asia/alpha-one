@@ -11,7 +11,7 @@ import { getProductAuthHeaders } from '@/features/ai/opencode/services/http-tran
 export type UsageModel =
   | { kind: 'loading' }
   | { kind: 'ready'; total: number; runs: UsageResponse['runs'] }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; code: string | null }
 
 /**
  * Fetch recorded usage. Exported for contract tests; the hook below is the
@@ -20,6 +20,7 @@ export type UsageModel =
 export async function fetchUsage(): Promise<{
   data: UsageResponse | null
   error: string | null
+  code: string | null
 }> {
   try {
     // TASK-ALPHA-SUBSCRIBER-014: same verified session as subscription
@@ -30,22 +31,26 @@ export async function fetchUsage(): Promise<{
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as {
         error?: unknown
+        code?: unknown
       } | null
       const message =
         body && typeof body.error === 'string'
           ? body.error
           : `Usage could not be loaded (HTTP ${res.status}).`
-      return { data: null, error: message }
+      // TASK-ALPHA-SUBSCRIBER-028: machine code for expired-session handling.
+      const code = body && typeof body.code === 'string' ? body.code : null
+      return { data: null, error: message, code }
     }
     const raw = (await res.json()) as Partial<UsageResponse> | null
     if (!raw || !Array.isArray(raw.runs) || typeof raw.total !== 'number') {
-      return { data: null, error: 'Usage response was invalid.' }
+      return { data: null, error: 'Usage response was invalid.', code: null }
     }
-    return { data: { runs: raw.runs, total: raw.total }, error: null }
+    return { data: { runs: raw.runs, total: raw.total }, error: null, code: null }
   } catch (err) {
     return {
       data: null,
       error: err instanceof Error ? err.message : 'Usage could not be loaded.',
+      code: null,
     }
   }
 }
@@ -64,12 +69,13 @@ export function useSubscriptionUsage(): {
 
   useEffect(() => {
     let cancelled = false
-    void fetchUsage().then(({ data, error }) => {
+    void fetchUsage().then(({ data, error, code }) => {
       if (cancelled) return
       if (error || !data) {
         setModel({
           kind: 'error',
           message: error ?? 'Usage could not be loaded.',
+          code: code ?? null,
         })
         return
       }

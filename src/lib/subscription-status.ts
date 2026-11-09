@@ -14,7 +14,7 @@ export type PlanCardModel =
   | { kind: 'loading' }
   | { kind: 'default'; planId: string }
   | { kind: 'record'; planId: string; status: string }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; code: string | null }
 
 /**
  * Map a loaded status (or load failure) to the card model. Pure function —
@@ -24,13 +24,19 @@ export function toPlanCardModel(input: {
   loading: boolean
   status?: SubscriptionStatus | null
   error?: string | null
+  code?: string | null
 }): PlanCardModel {
   if (input.loading) return { kind: 'loading' }
   if (typeof input.error === 'string' && input.error.length > 0) {
-    return { kind: 'error', message: input.error }
+    return { kind: 'error', message: input.error, code: input.code ?? null }
   }
   const status = input.status ?? null
-  if (!status) return { kind: 'error', message: 'Subscription status is unavailable.' }
+  if (!status)
+    return {
+      kind: 'error',
+      message: 'Subscription status is unavailable.',
+      code: input.code ?? null,
+    }
   if (status.source === 'record' && status.hasRecord) {
     return { kind: 'record', planId: status.planId, status: status.status ?? 'active' }
   }
@@ -41,6 +47,7 @@ export function toPlanCardModel(input: {
 export async function fetchSubscriptionStatus(): Promise<{
   status: SubscriptionStatus | null
   error: string | null
+  code: string | null
 }> {
   try {
     // TASK-ALPHA-SUBSCRIBER-014: carry the verified product session so the
@@ -52,16 +59,26 @@ export async function fetchSubscriptionStatus(): Promise<{
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as {
         error?: unknown
+        code?: unknown
       } | null
       const message =
         body && typeof body.error === 'string'
           ? body.error
           : `Subscription status check failed (HTTP ${res.status}).`
-      return { status: null, error: message }
+      // TASK-ALPHA-SUBSCRIBER-028: propagate the machine-readable code so
+      // the UI can tell an expired session (re-login fixes it) from an
+      // invalid credential. Message text is never parsed for this.
+      const code =
+        body && typeof body.code === 'string' ? body.code : null
+      return { status: null, error: message, code }
     }
     const raw = (await res.json()) as Partial<SubscriptionStatus> | null
     if (!raw || typeof raw.planId !== 'string') {
-      return { status: null, error: 'Subscription status response was invalid.' }
+      return {
+        status: null,
+        error: 'Subscription status response was invalid.',
+        code: null,
+      }
     }
     return {
       status: {
@@ -71,11 +88,14 @@ export async function fetchSubscriptionStatus(): Promise<{
         hasRecord: raw.hasRecord === true,
       },
       error: null,
+      code: null,
     }
   } catch (err) {
     return {
       status: null,
-      error: err instanceof Error ? err.message : 'Subscription status could not be loaded.',
+      error:
+        err instanceof Error ? err.message : 'Subscription status could not be loaded.',
+      code: null,
     }
   }
 }

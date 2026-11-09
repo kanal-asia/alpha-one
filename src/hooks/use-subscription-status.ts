@@ -26,9 +26,9 @@ export function useSubscriptionStatus(): {
 
   useEffect(() => {
     let cancelled = false
-    void fetchSubscriptionStatus().then(({ status, error }) => {
+    void fetchSubscriptionStatus().then(({ status, error, code }) => {
       if (cancelled) return
-      setModel(toPlanCardModel({ loading: false, status, error }))
+      setModel(toPlanCardModel({ loading: false, status, error, code }))
     })
     return () => {
       cancelled = true

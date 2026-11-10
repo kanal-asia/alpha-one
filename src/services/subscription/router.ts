@@ -33,6 +33,7 @@ import {
 } from '../../lib/sqlite-persistence'
 import { SUBSCRIPTION_PLANS } from '../../lib/subscription-plans'
 import { isLifecycleState, transitionSubscription } from './transitions'
+import { resolveEntitlements } from './entitlements'
 
 export type SubscriptionStatusSource = 'default' | 'record'
 
@@ -348,6 +349,65 @@ export function createSubscriptionRouter(): Router {
       return res.status(500).json({
         error: err instanceof Error ? err.message : 'Failed to load usage.',
         code: 'SUBSCRIPTION_USAGE_FAILED',
+      })
+    }
+  })
+
+  /**
+   * GET /api/subscription/entitlements — canonical entitlement resolution
+   * (read-only, TASK-ALPHA-MONETIZATION-002).
+   *
+   * Owner comes exclusively from the verified product identity; anonymous
+   * callers resolve against the Free catalog. Forged credentials fail closed
+   * through the shared boundary. The resolver never throws, so this endpoint
+   * answers 200 for every authenticated-or-anonymous caller; infrastructure
+   * failure surfaces as 500 with a machine code, never as granted
+   * entitlements.
+   */
+  router.get('/entitlements', async (req: Request, res: Response) => {
+    try {
+      const { context, error } = await resolveAuthContextAsync(
+        req.headers as Record<string, unknown>
+      )
+
+      if (error) {
+        return res
+          .status(error.status)
+          .json({ error: error.message, code: error.code })
+      }
+      const ownerSub =
+        context.verified && context.productUserId
+          ? context.productUserId
+          : null
+
+      try {
+        const resolution = await resolveEntitlements(ownerSub)
+        return res.json({
+          planId: resolution.subscription.planId,
+          status: resolution.subscription.status ?? null,
+          source: resolution.subscription.source,
+          hasRecord: resolution.subscription.hasRecord,
+          access: resolution.access,
+          warning: resolution.warning,
+          repair: resolution.repair,
+          entitlements: resolution.entitlements,
+        })
+      } catch (err) {
+        return res.status(500).json({
+          error:
+            err instanceof Error
+              ? err.message
+              : 'Failed to resolve entitlements.',
+          code: 'SUBSCRIPTION_ENTITLEMENTS_FAILED',
+        })
+      }
+    } catch (err) {
+      return res.status(500).json({
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Failed to resolve entitlements.',
+        code: 'SUBSCRIPTION_ENTITLEMENTS_FAILED',
       })
     }
   })

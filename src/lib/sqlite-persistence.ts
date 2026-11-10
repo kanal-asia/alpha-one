@@ -109,6 +109,12 @@ export interface SubscriptionRecord {
   cancelAtPeriodEnd: boolean
   /** ISO-8601 timestamp of the cancellation action. Null unless canceled. */
   canceledAt: string | null
+  /**
+   * External payment/order reference for future payment association
+   * (TASK-ALPHA-MONETIZATION-002). Opaque string, never interpreted here.
+   * Null until a payment integration writes it. No payment code exists yet.
+   */
+  externalRef?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -292,7 +298,8 @@ export function getDb(): InstanceType<typeof DatabaseSync> {
         cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
         canceled_at TEXT,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        external_ref TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_subscriptions_plan_id ON subscriptions(plan_id);
       CREATE TABLE IF NOT EXISTS account_status (
@@ -932,6 +939,7 @@ function migrateSubscriptions(database: InstanceType<typeof DatabaseSync>): void
     ['current_period_end', 'TEXT'],
     ['cancel_at_period_end', 'INTEGER NOT NULL DEFAULT 0'],
     ['canceled_at', 'TEXT'],
+    ['external_ref', 'TEXT'],
   ]
   for (const [name, type] of wanted) {
     if (!columnNames.has(name)) {
@@ -962,6 +970,7 @@ export async function getSubscriptionByOwner(
         current_period_end: string | null
         cancel_at_period_end: number | null
         canceled_at: string | null
+        external_ref: string | null
         created_at: string
         updated_at: string
       }
@@ -976,6 +985,7 @@ export async function getSubscriptionByOwner(
     currentPeriodEnd: row.current_period_end ?? null,
     cancelAtPeriodEnd: (row.cancel_at_period_end ?? 0) !== 0,
     canceledAt: row.canceled_at ?? null,
+    externalRef: row.external_ref ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -989,8 +999,8 @@ export async function saveSubscription(
     .prepare(
       `INSERT OR REPLACE INTO subscriptions
          (owner_sub, plan_id, status, current_period_end, cancel_at_period_end,
-          canceled_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          canceled_at, external_ref, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       record.ownerSub,
@@ -999,6 +1009,7 @@ export async function saveSubscription(
       record.currentPeriodEnd,
       record.cancelAtPeriodEnd ? 1 : 0,
       record.canceledAt,
+      record.externalRef ?? null,
       record.createdAt,
       record.updatedAt
     )

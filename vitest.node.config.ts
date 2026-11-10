@@ -40,6 +40,8 @@ export default defineConfig({
       'src/services/subscription/usage.test.ts',
       'src/services/subscription/usage-endpoint.test.ts',
       'src/services/subscription/usage-unavailable.test.ts',
+      'src/services/subscription/entitlements.test.ts',
+      'src/services/subscription/entitlements-endpoint.test.ts',
       'src/features/ai/opencode/services/http-transport-session.test.ts',
       'src/lib/subscriber-fetch-identity.test.ts',
       'src/services/subscription/migration.test.ts',

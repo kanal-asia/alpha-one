@@ -78,6 +78,7 @@ describe('subscription migration: legacy SUB-003 database', () => {
       'current_period_end',
       'cancel_at_period_end',
       'canceled_at',
+      'external_ref',
     ])
   })
 

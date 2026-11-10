@@ -50,6 +50,7 @@ describe('subscription migration: fresh database', () => {
       'canceled_at',
       'created_at',
       'updated_at',
+      'external_ref',
     ])
   })
 
@@ -62,6 +63,7 @@ describe('subscription migration: fresh database', () => {
       currentPeriodEnd: '2026-12-01T00:00:00.000Z',
       cancelAtPeriodEnd: true,
       canceledAt: now,
+      externalRef: 'order-future-123',
       createdAt: now,
       updatedAt: now,
     })
@@ -74,9 +76,10 @@ describe('subscription migration: fresh database', () => {
       currentPeriodEnd: '2026-12-01T00:00:00.000Z',
       cancelAtPeriodEnd: true,
       canceledAt: now,
+      externalRef: 'order-future-123',
     })
     // Reopen is idempotent: columns unchanged, unrelated tables intact.
-    expect(columnNames()).toHaveLength(8)
+    expect(columnNames()).toHaveLength(9)
     closeDb()
     const db = new DatabaseSync(DB_PATH)
     try {
